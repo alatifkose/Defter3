@@ -7,10 +7,13 @@ authors = [
     { name = "Abdüllatif Köse", email = "alatif.dev@gmail.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "mcp>=2.2.0",
+]
 
 [project.scripts]
 defteriki = "defteriki.baslangic:main"
+defteriki-mcp = "defteriki.mcp_kapisi:main"
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]

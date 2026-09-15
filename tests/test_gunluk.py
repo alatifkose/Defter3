@@ -152,3 +152,33 @@ def test_kapatma_handler_i_kaldirir(log_dizini: Path) -> None:
 
     assert not gunluk.kurulu()
     assert _dosya_isleyicileri() == []
+
+
+# --- kütüphane günlüğü yönlendirme -----------------------------------------
+
+
+def test_kutuphane_gunlugu_ayni_dosyaya_yazilir_ve_yayilmaz(log_dizini: Path) -> None:
+    dosya = gunluk.gunlugu_kur(log_dizini)
+
+    gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
+    logging.getLogger("deneme_kutuphane.alt").warning("kütüphane uyarısı")
+
+    (satir,) = _satirlar(dosya)
+    assert f"| WARNING | {gunluk.OLAY_YOKSA} | kütüphane uyarısı" in satir
+    assert logging.getLogger("deneme_kutuphane").propagate is False
+
+
+def test_kapatma_kutuphane_yonlendirmesini_cozer(log_dizini: Path) -> None:
+    gunluk.gunlugu_kur(log_dizini)
+    gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
+
+    gunluk.gunlugu_kapat()
+
+    kutuphane = logging.getLogger("deneme_kutuphane")
+    assert kutuphane.handlers == []
+    assert kutuphane.propagate is True
+
+
+def test_yonlendirme_gunluk_kurulu_degilse_hata() -> None:
+    with pytest.raises(gunluk.GunlukKurulumHatasi, match="kurulu değil"):
+        gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")

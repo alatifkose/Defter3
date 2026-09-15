@@ -13,6 +13,10 @@ Gizlilik: belge içeriği, finansal kayıt içeriği, IBAN, kimlik bilgileri,
 sırlar ve ortam değişkenleri günlüğe yazılmaz. Ham hata mesajları ve
 traceback bu bilgileri taşıyabileceğinden ``hata_kaydet()`` yalnızca hatanın
 türünü kaydeder; mesaj ve yığın izi dosyaya dökülmez.
+
+Dış kütüphanelerin (örneğin MCP SDK'sının) tanı çıktısı stderr'e değil aynı
+dosyaya gitsin diye ``kutuphane_gunlugunu_yonlendir()`` vardır; kapatmada bu
+bağlantılar da geri alınır.
 """
 
 from __future__ import annotations
@@ -30,6 +34,9 @@ YEDEK_SAYISI = 5
 """Döndürülmüş eski dosyalardan en fazla kaç tanesinin tutulacağı."""
 SATIR_BICIMI = "%(asctime)s | %(levelname)s | %(olay)s | %(message)s"
 OLAY_YOKSA = "-"
+
+_YONLENDIRILEN_KUTUPHANELER: set[str] = set()
+"""Dosya günlüğüne bağlanmış dış kütüphane logger adları; kapatmada çözülür."""
 
 
 class GunlukKurulumHatasi(OSError):
@@ -78,7 +85,19 @@ def gunlugu_kur(log_dizini: Path) -> Path:
 
 
 def gunlugu_kapat() -> None:
-    """Bu modülün kurduğu dosya handler'ını kapatır ve kaldırır."""
+    """Bu modülün kurduğu dosya handler'ını kapatır ve kaldırır.
+
+    Yönlendirilmiş kütüphane günlükleri de çözülür: handler kaldırılır,
+    yayılım (propagate) eski hâline döner.
+    """
+    for ad in _YONLENDIRILEN_KUTUPHANELER:
+        kutuphane = logging.getLogger(ad)
+        for isleyici in list(kutuphane.handlers):
+            if isleyici.get_name() == DOSYA_ISLEYICI_ADI:
+                kutuphane.removeHandler(isleyici)
+        kutuphane.propagate = True
+    _YONLENDIRILEN_KUTUPHANELER.clear()
+
     gunluk = logging.getLogger(GUNLUK_ADI)
     for isleyici in list(gunluk.handlers):
         if isleyici.get_name() == DOSYA_ISLEYICI_ADI:
@@ -88,8 +107,36 @@ def gunlugu_kapat() -> None:
 
 def kurulu() -> bool:
     """Dosya günlüğü şu an kurulu mu?"""
+    return _dosya_isleyicisi() is not None
+
+
+def kutuphane_gunlugunu_yonlendir(ad: str) -> None:
+    """Bir dış kütüphanenin günlüğünü DEFTERIKI dosya günlüğüne bağlar.
+
+    ``ad`` adlı logger (ve altındakiler) aynı dosyaya aynı satır biçimiyle
+    yazar; kök logger'a yayılmaz, dolayısıyla stderr'e düşmez. Olay türü
+    olmadığından olay sütunu ``-`` olur. Dosya günlüğü kurulu değilse
+    ``GunlukKurulumHatasi`` yükseltir.
+    """
+    isleyici = _dosya_isleyicisi()
+    if isleyici is None:
+        raise GunlukKurulumHatasi(
+            "Dosya günlüğü kurulu değil; önce gunlugu_kur() çağrılmalı."
+        )
+    kutuphane = logging.getLogger(ad)
+    if isleyici not in kutuphane.handlers:
+        kutuphane.addHandler(isleyici)
+    kutuphane.setLevel(logging.INFO)
+    kutuphane.propagate = False
+    _YONLENDIRILEN_KUTUPHANELER.add(ad)
+
+
+def _dosya_isleyicisi() -> logging.Handler | None:
     gunluk = logging.getLogger(GUNLUK_ADI)
-    return any(i.get_name() == DOSYA_ISLEYICI_ADI for i in gunluk.handlers)
+    for isleyici in gunluk.handlers:
+        if isleyici.get_name() == DOSYA_ISLEYICI_ADI:
+            return isleyici
+    return None
 
 
 def olay_kaydet(olay: str, mesaj: str, seviye: int = logging.INFO) -> None:

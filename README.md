@@ -5,8 +5,8 @@ DEFTERIKI'ye yazılır; uygulama kayıtları tutar, denetler ve gösterir.
 
 ## Durum
 
-Aşama 2 (proje temeli) tamamlandı; sıradaki iş Aşama 3, gerçek Cowork MCP
-denemesi. Aşama 2'de bitenler:
+Aşama 2 (proje temeli) tamamlandı. Aşama 3 (gerçek Cowork MCP denemesi)
+sürüyor; Teslim 3.1 bitti, 3.2 sırada (bkz. "Cowork entegrasyonu"). Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
 * Merkezi ayar yönetimi (`src/defteriki/ayarlar.py`)
@@ -16,8 +16,10 @@ denemesi. Aşama 2'de bitenler:
 * Tek komutluk kalite kontrolü (Ruff, Pyright strict, pytest)
 * `.gitignore` ve `.gitattributes`; kritik dışlama kuralları testle doğrulanır
   (`tests/test_gitignore.py`)
+* MCP kapısı iskeleti: `uv run defteriki-mcp`, tek araç `sistem_durumu`
+  (`src/defteriki/mcp_kapisi.py`)
 
-Henüz yok: veritabanı, veri modeli, MCP sunucusu, GUI.
+Henüz yok: veritabanı, veri modeli, GUI, ürün verisi yazan MCP aracı.
 
 ## Kurulum
 
@@ -53,6 +55,48 @@ Günlük kurulamadıysa başarılı başlangıç mesajı verilmez. Yollar
 uygulamanın hangi dizinden başlatıldığına bağlı değildir; modüller import
 edildiğinde dizin ya da dosya oluşturulmaz.
 
+## MCP kapısı
+
+Cowork'un DEFTERIKI'ye ulaştığı tek kapı. stdio taşımasıyla çalışır:
+
+```bash
+uv run defteriki-mcp
+```
+
+Komut `uv run defteriki` ile aynı hazırlığı yapar (ayarlar, dizinler, günlük),
+ardından MCP sunucusunu stdin/stdout üzerinde çalıştırır. İstemci bağlantıyı
+kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çıkış kodu
+`1` olur; stdout'a hiçbir şey yazılmaz.
+
+Bu sürümde tek araç var: `sistem_durumu`. Uygulama sürümü, ortam adı, şema
+sürümü (`yok`) ve yetenek listesini döndürür; yol, anahtar ya da ortam
+değişkeni içermez. Ürün verisi yazan araç henüz yoktur.
+
+Kurallar:
+
+* stdout yalnız protokolündür. SDK'nın stdio taşıması sunucu çalışırken
+  dosya tanımlayıcısı 1'i stderr'e çevirir; DEFTERIKI ayrıca hiç `print`
+  kullanmaz. Test, stdout'un yalnız JSON-RPC satırları taşıdığını doğrular.
+* Bütün tanı çıktısı teknik günlüğe gider. SDK'nın `mcp` günlüğü de aynı
+  dosyaya bağlanır (olay sütunu `-`), stderr'e düşmez.
+* Modül import edildiğinde sunucu kurulmaz, dosya oluşturulmaz.
+
+Test (`tests/test_mcp_kapisi.py`) sunucuyu ayrı süreçte başlatır; ham
+JSON-RPC ile `initialize`, `tools/list` ve `tools/call` yapar, her isteğin
+yanıtını bekler, sonra stdin'i kapatır.
+
+## Cowork entegrasyonu
+
+Aşama 3'ün dört teslimi ve sonuçları. Geçici deneme araçları aşama sonunda
+kaldırılır; yalnız `sistem_durumu` kalır.
+
+| Teslim | Konu | Sonuç |
+|---|---|---|
+| 3.1 | MCP SDK ve sunucu iskeleti | Bitti. `mcp` 2.2.0 `uv.lock` ile kilitli. SDK 2.x'te `FastMCP` adı `MCPServer` oldu (`mcp.server.mcpserver`); 1.x örnekleri doğrudan çalışmaz. Araç dönüş tipi `slots=True` dataclass olamaz, SDK şemayı düşürüyor. Yerel istemciyle protokol sürümü `2025-06-18` müzakere edildi. |
+| 3.2 | Gerçek Cowork bağlantısı | Bekliyor. Cowork'un MCP ayarına `uv run defteriki-mcp` (çalışma dizini: bu depo) eklenecek; müzakere edilen protokol sürümü, istemci yetenekleri ve zaman aşımı buraya yazılacak. |
+| 3.3 | Dosya erişim denemesi | Bekliyor. |
+| 3.4 | Çok adımlı protokol denemesi | Bekliyor. |
+
 ## Teknik hata günlüğü
 
 Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteriki.log`
@@ -60,7 +104,9 @@ Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteriki.log`
 `logging` modülü kullanılır; ek bağımlılık yoktur.
 
 Her satır `zaman | seviye | olay | mesaj` biçimindedir; olay türleri
-şimdilik `baslangic` ve `baslangic_hatasi`.
+şimdilik `baslangic`, `baslangic_hatasi`, `mcp_baslangic`, `mcp_kapanis`,
+`mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane kayıtlarında olay `-`
+olur.
 
 Saklama sınırı: dosya 1.000.000 baytı aşınca döndürülür, en fazla 5 eski
 dosya (`defteriki.log.1` ... `.5`) tutulur; toplam en çok ~6 MB. Kurulum
@@ -135,8 +181,9 @@ Kurallar:
 ```
 src/defteriki/    uygulama paketi
   ayarlar.py      merkezi ayarlar (ortam, yollar)
-  baslangic.py    uv run defteriki giriş noktası
+  baslangic.py    uv run defteriki giriş noktası; ortak hazırlık (ortami_hazirla)
   gunluk.py       teknik hata günlüğü
+  mcp_kapisi.py   uv run defteriki-mcp; MCP sunucusu ve araçları
 tests/            pytest testleri
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
@@ -156,7 +203,7 @@ Bu projede kullanılacak teknoloji. Mutlak değil; ihtiyaç duyulması halinde d
 * SQLAlchemy 2.x — ORM / veritabanı erişimi
 * Alembic — migration
 * Pydantic 2.x — MCP giriş/çıkış ve veri doğrulama
-* MCP Python SDK / FastMCP — Cowork ↔ DEFTERIKI kapısı
+* MCP Python SDK 2.x (`mcp`, `MCPServer`) — Cowork ↔ DEFTERIKI kapısı
 * PySide6 — masaüstü GUI için
 * pytest — test
 * Hypothesis — property-based test

@@ -46,7 +46,9 @@ DISLANMAMALI = (
     "src/defteriki/ayarlar.py",
     "src/defteriki/baslangic.py",
     "src/defteriki/gunluk.py",
+    "src/defteriki/mcp_kapisi.py",
     "scripts/kontrol.py",
+    ".pre-commit-config.yaml",
     "tests/test_gitignore.py",
 )
 

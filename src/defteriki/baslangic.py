@@ -11,6 +11,9 @@ Herhangi bir adım başarısızsa anlaşılır bir hata stderr'e yazılır ve ç
 kodu 1 olur. Ayarlar ya da günlük kurulmadan oluşan hatalar da stderr'e
 gider; günlük kurulamadıysa başarılı başlangıç mesajı verilmez.
 
+İlk üç adım ``ortami_hazirla()`` içindedir; MCP kapısı da aynı işlevle
+başlar, böylece iki giriş noktası aynı ayarları ve aynı günlüğü kullanır.
+
 Modül import edildiğinde dizin ya da dosya oluşturulmaz.
 """
 
@@ -35,6 +38,13 @@ CIKIS_BASARILI = 0
 CIKIS_HATALI = 1
 
 
+class BaslangicHatasi(Exception):
+    """Ayarlar, dizinler ya da günlük hazırlanamadı.
+
+    Mesajı kullanıcıya gösterilmeye uygundur; hangi adımın düştüğünü söyler.
+    """
+
+
 def main() -> int:
     """Uygulamayı başlatır; çıkış kodunu döndürür."""
     try:
@@ -46,23 +56,35 @@ def main() -> int:
         return CIKIS_HATALI
 
 
-def _baslat() -> int:
+def ortami_hazirla() -> tuple[Ayarlar, Path]:
+    """Ayarları yükler, dizinleri açar, günlüğü kurar.
+
+    Başarıda ayarları ve log dosyasının yolunu döndürür. Bir adım düşerse
+    ``BaslangicHatasi`` yükseltir; günlük kurulmamış kalır.
+    """
     try:
         ayarlar = ayarlari_yukle()
     except AyarHatasi as hata:
-        _hata_yaz(f"Ayar hatası: {hata}")
-        return CIKIS_HATALI
+        raise BaslangicHatasi(f"Ayar hatası: {hata}") from hata
 
     try:
         dizinleri_hazirla(ayarlar)
     except DizinHazirlamaHatasi as hata:
-        _hata_yaz(f"Dizin hazırlama hatası: {hata}")
-        return CIKIS_HATALI
+        raise BaslangicHatasi(f"Dizin hazırlama hatası: {hata}") from hata
 
     try:
         log_dosyasi = gunluk.gunlugu_kur(ayarlar.log_dizini)
     except gunluk.GunlukKurulumHatasi as hata:
-        _hata_yaz(f"Günlük kurulum hatası: {hata}")
+        raise BaslangicHatasi(f"Günlük kurulum hatası: {hata}") from hata
+
+    return ayarlar, log_dosyasi
+
+
+def _baslat() -> int:
+    try:
+        ayarlar, log_dosyasi = ortami_hazirla()
+    except BaslangicHatasi as hata:
+        _hata_yaz(str(hata))
         return CIKIS_HATALI
 
     gunluk.olay_kaydet(
