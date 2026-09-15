@@ -26,7 +26,13 @@ uv sync
 ```
 
 Python 3.13 ve uv gerekir. `uv sync` sanal ortamı ve geliştirme
-bağımlılıklarını (pytest, hypothesis, ruff, pyright) kurar.
+bağımlılıklarını (pytest, hypothesis, ruff, pyright, pre-commit) kurar.
+
+Klon sonrası bir kez, commit öncesi kontrol kancasını yükle:
+
+```bash
+uv run pre-commit install
+```
 
 ## Başlatma
 
@@ -85,6 +91,10 @@ Yalnızca testler:
 uv run pytest
 ```
 
+Aynı kontrol her `git commit` öncesinde pre-commit kancasıyla otomatik
+çalışır (`.pre-commit-config.yaml`, tek kanca: `scripts/kontrol.py`);
+bir adım düşerse commit yapılmaz. Kanca kaynak dosyalarını değiştirmez.
+
 ## Ayarlar
 
 Bütün yollar `defteriki.ayarlar` modülünden gelir; uygulamanın nereden
@@ -129,6 +139,7 @@ src/defteriki/    uygulama paketi
   gunluk.py       teknik hata günlüğü
 tests/            pytest testleri
 scripts/          geliştirme betikleri (kontrol.py)
+.pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
 kavramlar_sozlugu.md   ortak kavram tanımları; ekleme ve değişiklik yalnız Abdüllatif'in onayıyla
 ```
 

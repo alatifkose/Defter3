@@ -1,0 +1,14 @@
+# Commit öncesi kalite kontrolü. Kurulum (bir kez, klon sonrası):
+#   uv run pre-commit install
+# Tek kanca, README'deki tek komutluk kontrolü çalıştırır; kaynak dosyalarını
+# değiştirmez. Araç sürümleri ayrı bir yerden değil, projenin sanal
+# ortamından (uv.lock) gelir.
+repos:
+  - repo: local
+    hooks:
+      - id: kontrol
+        name: DEFTERIKI kalite kontrolü (ruff, pyright, pytest)
+        entry: uv run python scripts/kontrol.py
+        language: system
+        pass_filenames: false
+        always_run: true
