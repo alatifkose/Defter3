@@ -6,7 +6,8 @@ DEFTERIKI'ye yazılır; uygulama kayıtları tutar, denetler ve gösterir.
 ## Durum
 
 Aşama 2 (proje temeli) tamamlandı. Aşama 3 (gerçek Cowork MCP denemesi)
-sürüyor; Teslim 3.1 bitti, 3.2 sırada (bkz. "Cowork entegrasyonu"). Bitenler:
+sürüyor; Teslim 3.1 ve 3.2 bitti, 3.3 aracı yazıldı ve Cowork denemesi
+bekliyor (bkz. "Cowork entegrasyonu"). Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
 * Merkezi ayar yönetimi (`src/defteriki/ayarlar.py`)
@@ -16,8 +17,8 @@ sürüyor; Teslim 3.1 bitti, 3.2 sırada (bkz. "Cowork entegrasyonu"). Bitenler:
 * Tek komutluk kalite kontrolü (Ruff, Pyright strict, pytest)
 * `.gitignore` ve `.gitattributes`; kritik dışlama kuralları testle doğrulanır
   (`tests/test_gitignore.py`)
-* MCP kapısı iskeleti: `uv run defteriki-mcp`, tek araç `sistem_durumu`
-  (`src/defteriki/mcp_kapisi.py`)
+* MCP kapısı iskeleti: `uv run defteriki-mcp`, kalıcı araç `sistem_durumu`
+  ve geçici deneme aracı `dosya_dene` (`src/defteriki/mcp_kapisi.py`)
 
 Henüz yok: veritabanı, veri modeli, GUI, ürün verisi yazan MCP aracı.
 
@@ -68,9 +69,21 @@ ardından MCP sunucusunu stdin/stdout üzerinde çalıştırır. İstemci bağla
 kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çıkış kodu
 `1` olur; stdout'a hiçbir şey yazılmaz.
 
-Bu sürümde tek araç var: `sistem_durumu`. Uygulama sürümü, ortam adı, şema
-sürümü (`yok`) ve yetenek listesini döndürür; yol, anahtar ya da ortam
-değişkeni içermez. Ürün verisi yazan araç henüz yoktur.
+Bu sürümde iki araç var. Ürün verisi yazan araç henüz yoktur.
+
+* `sistem_durumu` (kalıcı): uygulama sürümü, ortam adı, şema sürümü (`yok`)
+  ve yetenek listesini döndürür; yol, anahtar ya da ortam değişkeni içermez.
+* `dosya_dene(yol)` (geçici, Teslim 3.3): verilen mutlak yoldaki dosyayı
+  izinli gelen dizininde (`DEFTERIKI_GELEN_DIZINI`, varsayılan
+  `<veri kökü>/<ortam>/gelen`) arar, 1 MiB parçalarla akışla okur, SHA-256
+  özeti ve bayt boyutunu döndürür; içerik döndürmez, boyut sınırı yoktur.
+  Denetim sırası: mutlak yol → `..` parçası yok → gerçek yol izinli dizinin
+  gerçek yolunun altında → simgesel bağlantı ya da takma yol değil → sıradan
+  dosya. Red, MCP hatası değil düz yanıttır: `sonuc="reddedildi"` ve
+  kategorik `gerekce`. Yanıt yol içermez. Her çağrı günlüğe
+  `mcp_dosya_deneme` olayı yazar: gelen dizinine göre göreli ad, sonuç,
+  boyut; tam yol yazılmaz. İzinli dizin dışına çıkma denemesi `WARNING`
+  seviyesinde ve yolsuz düşer. Aşama 3 sonunda araç kaldırılır, ayar kalır.
 
 Kurallar:
 
@@ -97,7 +110,7 @@ kaldırılır; yalnız `sistem_durumu` kalır.
 |---|---|---|
 | 3.1 | MCP SDK ve sunucu iskeleti | Bitti. `mcp` 2.2.0 `uv.lock` ile kilitli. SDK 2.x'te `FastMCP` adı `MCPServer` oldu (`mcp.server.mcpserver`); 1.x örnekleri doğrudan çalışmaz. Araç dönüş tipi `slots=True` dataclass olamaz, SDK şemayı düşürüyor. Yerel istemciyle protokol sürümü `2025-06-18` müzakere edildi. |
 | 3.2 | Gerçek Cowork bağlantısı | Bitti (2026-09-15). Ayar: Claude masaüstü `claude_desktop_config.json` → `mcpServers`, komut `uv.exe run --directory C:/dev/DefterIki defteriki-mcp`, ortam değişkeni yok, veri `%LOCALAPPDATA%/DEFTERIKI/gelistirme`. Ölçüm (`mcp_el_sikisma`): istemci `local-agent-mode-defteriki 1.0.0`; müzakere edilen protokol sürümü **2025-11-25** (sunucunun en yükseği 2026-07-28, istemci daha eskisini seçti); istemci yetenekleri `roots.listChanged=true` ve `io.modelcontextprotocol/ui` uzantısı (`text/html;profile=mcp-app`); sampling ve elicitation bildirilmedi. Uygulama açılışta sunucuyu üç kez başlatıyor: biri 10 ms içinde kapanan yoklama, ikisi kalıcı (Cowork ve Claude Code). Zaman aşımı gözlenmedi: başlatmadan araç yanıtına kadar sorun yok, uygulama kapanınca sunucular EOF ile temiz çıktı. Uygulamanın kendi MCP günlüğü boş; ölçüm sunucu günlüğünden alındı. |
-| 3.3 | Dosya erişim denemesi | Bekliyor. |
+| 3.3 | Dosya erişim denemesi | Sürüyor. Araç `dosya_dene` yazıldı ve testlendi (izinli dosya, boş dosya, alt dizin, dizin dışı, `..`, göreli yol, olmayan dosya, dizin, okuma hatası, stdio üzerinden okuma ve red). Simgesel bağlantı testleri Windows'ta bağlantı oluşturma yetkisi yoksa atlanır. Cowork denemesi bekliyor: Cowork ayarına `"env": {"DEFTERIKI_GELEN_DIZINI": "<gelen dizini>"}` eklenir, sentetik PDF ile iki senaryo denenir (dosya elle dizine kopyalanır ve yol Cowork'a söylenir; PDF Cowork'a yüklenir ve dizine bırakması istenir). Sonuç "çalıştı" ya da "çalışmadı, parça yükleme gerekli" olarak buraya yazılacak. |
 | 3.4 | Çok adımlı protokol denemesi | Bekliyor. |
 
 ## Teknik hata günlüğü
@@ -108,7 +121,7 @@ Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteriki.log`
 
 Her satır `zaman | seviye | olay | mesaj` biçimindedir; olay türleri
 şimdilik `baslangic`, `baslangic_hatasi`, `mcp_baslangic`, `mcp_el_sikisma`,
-`mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
+`mcp_dosya_deneme`, `mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
 kayıtlarında olay `-` olur.
 
 Saklama sınırı: dosya 1.000.000 baytı aşınca döndürülür, en fazla 5 eski
