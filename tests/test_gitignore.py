@@ -33,6 +33,8 @@ DISLANMALI = (
     "anahtar.key",
     ".venv/Lib/site-packages/x.py",
     "src/defteriki/__pycache__/ayarlar.cpython-313.pyc",
+    "DEFTERIKI-Gelistirme-Plani.md",
+    "DEFTERIKI-Yurutme-Plani-2026-09-13.md",
 )
 
 DISLANMAMALI = (

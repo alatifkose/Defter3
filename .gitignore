@@ -44,5 +44,5 @@ logs/
 *.key
 secrets.*
 
-# Yerel çalışma belgeleri
-DEFTERIKI-Gelistirme-Plani.md
+# Yerel çalışma belgeleri (planlar depoya girmez)
+DEFTERIKI-*-Plani*.md
