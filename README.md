@@ -163,13 +163,14 @@ Ortam değişkenleri (öncelik yukarıdan aşağıya):
 | `DEFTERIKI_VERITABANI_YOLU` | Veritabanı dosyası; türetilmiş yolun yerine geçer |
 | `DEFTERIKI_BELGE_DIZINI` | Belge arşivi dizini; türetilmiş yolun yerine geçer |
 | `DEFTERIKI_LOG_DIZINI` | Log dizini; türetilmiş yolun yerine geçer |
+| `DEFTERIKI_GELEN_DIZINI` | Gelen dizini: Cowork'un dosya bıraktığı, MCP araçlarının okumaya izinli olduğu tek dizin; türetilmiş yolun yerine geçer |
 | `DEFTERIKI_VERI_KOKU` | Ortamların ortak üst dizini; ortam adı altına eklenir |
 | `DEFTERIKI_ORTAM` | `gelistirme` (varsayılan), `test`, `gercek` |
 
 Varsayılan veri kökü Windows'ta `%LOCALAPPDATA%\DEFTERIKI\<ortam>`, Linux'ta
 `$XDG_DATA_HOME/DEFTERIKI/<ortam>` (yoksa `~/.local/share/...`), macOS'ta
 `~/Library/Application Support/DEFTERIKI/<ortam>`. Bu kökten
-`defteriki.sqlite3`, `belgeler/` ve `logs/` türetilir.
+`defteriki.sqlite3`, `belgeler/`, `logs/` ve `gelen/` türetilir.
 
 Kurallar:
 

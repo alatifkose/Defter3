@@ -1,7 +1,7 @@
 """DEFTERIKI merkezi ayar yönetimi.
 
-Çalışma ortamı, veri kökü, veritabanı dosyası, belge arşivi ve log dizini
-yalnızca buradan belirlenir. Yollar uygulamanın nereden başlatıldığına
+Çalışma ortamı, veri kökü, veritabanı dosyası, belge arşivi, log dizini ve
+gelen dizini yalnızca buradan belirlenir. Yollar uygulamanın nereden başlatıldığına
 bağlı değildir; çalışma dizinine göre çözümleme yapılmaz.
 
 Modül import edildiğinde hiçbir ortam değişkeni okunmaz ve diske yazılmaz.
@@ -11,12 +11,13 @@ Ayarlar ``ayarlari_yukle()`` ile açıkça yüklenir; gerekli dizinler ayrıca
 Öncelik sırası (yüksekten düşüğe):
 
 1. ``DEFTERIKI_VERITABANI_YOLU``, ``DEFTERIKI_BELGE_DIZINI``,
-   ``DEFTERIKI_LOG_DIZINI``: verilmişse ilgili türetilmiş yolun yerine
-   geçer. Bu tekil yollar ortam ayrımını geçersiz kılabilir; yani
-   ``gelistirme`` ortamında çalışırken bu değişkenlerle ``gercek``
-   ortamının dosyalarına işaret edilebilir. Tek istisna ``test``
-   ortamıdır: orada tekil yolların test veri kökünün dışına çıkması
-   reddedilir.
+   ``DEFTERIKI_LOG_DIZINI``, ``DEFTERIKI_GELEN_DIZINI``: verilmişse ilgili
+   türetilmiş yolun yerine geçer. Gelen dizini, Cowork'un belge dosyalarını
+   bıraktığı ve MCP araçlarının okumaya izinli olduğu tek dizindir. Bu
+   tekil yollar ortam ayrımını geçersiz kılabilir; yani ``gelistirme``
+   ortamında çalışırken bu değişkenlerle ``gercek`` ortamının dosyalarına
+   işaret edilebilir. Tek istisna ``test`` ortamıdır: orada tekil yolların
+   test veri kökünün dışına çıkması reddedilir.
 2. ``DEFTERIKI_VERI_KOKU``: ortamların ortak üst dizini. Seçilen ortamın
    adı bunun altına eklenir (``<kök>/<ortam>``), türetilmiş yollar bu
    ortam kökünden üretilir.
@@ -42,12 +43,14 @@ UYGULAMA_DIZIN_ADI = "DEFTERIKI"
 VERITABANI_DOSYA_ADI = "defteriki.sqlite3"
 BELGE_DIZIN_ADI = "belgeler"
 LOG_DIZIN_ADI = "logs"
+GELEN_DIZIN_ADI = "gelen"
 
 ORTAM_DEGISKENI = "DEFTERIKI_ORTAM"
 VERI_KOKU_DEGISKENI = "DEFTERIKI_VERI_KOKU"
 VERITABANI_YOLU_DEGISKENI = "DEFTERIKI_VERITABANI_YOLU"
 BELGE_DIZINI_DEGISKENI = "DEFTERIKI_BELGE_DIZINI"
 LOG_DIZINI_DEGISKENI = "DEFTERIKI_LOG_DIZINI"
+GELEN_DIZINI_DEGISKENI = "DEFTERIKI_GELEN_DIZINI"
 
 
 class Ortam(StrEnum):
@@ -72,10 +75,17 @@ class Ayarlar:
     veritabani_yolu: Path
     belge_dizini: Path
     log_dizini: Path
+    gelen_dizini: Path
+    """Cowork'un dosya bıraktığı, MCP araçlarının okumaya izinli olduğu dizin."""
 
     def gerekli_dizinler(self) -> tuple[Path, ...]:
-        """Uygulamanın yazabilmesi için var olması gereken dizinler."""
-        return (self.veritabani_yolu.parent, self.belge_dizini, self.log_dizini)
+        """Uygulamanın çalışabilmesi için var olması gereken dizinler."""
+        return (
+            self.veritabani_yolu.parent,
+            self.belge_dizini,
+            self.log_dizini,
+            self.gelen_dizini,
+        )
 
 
 def ayarlari_yukle() -> Ayarlar:
@@ -88,12 +98,14 @@ def ayarlari_yukle() -> Ayarlar:
     )
     belge_dizini = _yol_oku(BELGE_DIZINI_DEGISKENI) or veri_koku / BELGE_DIZIN_ADI
     log_dizini = _yol_oku(LOG_DIZINI_DEGISKENI) or veri_koku / LOG_DIZIN_ADI
+    gelen_dizini = _yol_oku(GELEN_DIZINI_DEGISKENI) or veri_koku / GELEN_DIZIN_ADI
 
     if ortam is Ortam.TEST:
         for degisken, yol in (
             (VERITABANI_YOLU_DEGISKENI, veritabani_yolu),
             (BELGE_DIZINI_DEGISKENI, belge_dizini),
             (LOG_DIZINI_DEGISKENI, log_dizini),
+            (GELEN_DIZINI_DEGISKENI, gelen_dizini),
         ):
             if not yol.is_relative_to(veri_koku):
                 raise AyarHatasi(
@@ -107,6 +119,7 @@ def ayarlari_yukle() -> Ayarlar:
         veritabani_yolu=veritabani_yolu,
         belge_dizini=belge_dizini,
         log_dizini=log_dizini,
+        gelen_dizini=gelen_dizini,
     )
 
 

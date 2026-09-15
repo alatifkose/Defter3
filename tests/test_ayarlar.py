@@ -17,6 +17,7 @@ DEFTERIKI_DEGISKENLERI = (
     ay.VERITABANI_YOLU_DEGISKENI,
     ay.BELGE_DIZINI_DEGISKENI,
     ay.LOG_DIZINI_DEGISKENI,
+    ay.GELEN_DIZINI_DEGISKENI,
 )
 YOL_DEGISKENLERI = DEFTERIKI_DEGISKENLERI[1:]
 TEKIL_YOL_DEGISKENLERI = DEFTERIKI_DEGISKENLERI[2:]
@@ -46,12 +47,19 @@ def test_ortam_verilmezse_gelistirme_kullanilir(ortak_kok: Path) -> None:
     assert ayar.veritabani_yolu == ortak_kok / "gelistirme" / "defteriki.sqlite3"
     assert ayar.belge_dizini == ortak_kok / "gelistirme" / "belgeler"
     assert ayar.log_dizini == ortak_kok / "gelistirme" / "logs"
+    assert ayar.gelen_dizini == ortak_kok / "gelistirme" / "gelen"
 
 
 def test_yollar_pathlib_path_olarak_tutulur(ortak_kok: Path) -> None:
     ayar = ay.ayarlari_yukle()
 
-    yollar = (ayar.veri_koku, ayar.veritabani_yolu, ayar.belge_dizini, ayar.log_dizini)
+    yollar = (
+        ayar.veri_koku,
+        ayar.veritabani_yolu,
+        ayar.belge_dizini,
+        ayar.log_dizini,
+        ayar.gelen_dizini,
+    )
 
     assert all(isinstance(yol, Path) for yol in yollar)
 
@@ -69,6 +77,7 @@ def test_gelistirme_ve_gercek_yollari_ayrilir(
     assert gelistirme.veritabani_yolu != gercek.veritabani_yolu
     assert gelistirme.belge_dizini != gercek.belge_dizini
     assert gelistirme.log_dizini != gercek.log_dizini
+    assert gelistirme.gelen_dizini != gercek.gelen_dizini
 
 
 # --- platform varsayılanları -----------------------------------------------
@@ -148,6 +157,7 @@ def test_tekil_yol_degiskenleri_turetilmis_yollari_gecer(
     monkeypatch.setenv(ay.VERITABANI_YOLU_DEGISKENI, str(tmp_path / "vt" / "a.sqlite3"))
     monkeypatch.setenv(ay.BELGE_DIZINI_DEGISKENI, str(tmp_path / "arsiv"))
     monkeypatch.setenv(ay.LOG_DIZINI_DEGISKENI, str(tmp_path / "gunluk"))
+    monkeypatch.setenv(ay.GELEN_DIZINI_DEGISKENI, str(tmp_path / "kutu"))
 
     ayar = ay.ayarlari_yukle()
 
@@ -155,6 +165,7 @@ def test_tekil_yol_degiskenleri_turetilmis_yollari_gecer(
     assert ayar.veritabani_yolu == tmp_path / "vt" / "a.sqlite3"
     assert ayar.belge_dizini == tmp_path / "arsiv"
     assert ayar.log_dizini == tmp_path / "gunluk"
+    assert ayar.gelen_dizini == tmp_path / "kutu"
 
 
 def test_tekil_yol_ortam_ayrimini_gecersiz_kilabilir(
@@ -243,6 +254,7 @@ def test_dizin_hazirlama_gerekli_dizinleri_olusturur(ortak_kok: Path) -> None:
     assert ayar.veritabani_yolu.parent.is_dir()
     assert ayar.belge_dizini.is_dir()
     assert ayar.log_dizini.is_dir()
+    assert ayar.gelen_dizini.is_dir()
     assert not ayar.veritabani_yolu.exists()
     assert list(ayar.log_dizini.iterdir()) == []
 
