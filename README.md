@@ -80,6 +80,9 @@ Kurallar:
 * Bütün tanı çıktısı teknik günlüğe gider. SDK'nın `mcp` günlüğü de aynı
   dosyaya bağlanır (olay sütunu `-`), stderr'e düşmez.
 * Modül import edildiğinde sunucu kurulmaz, dosya oluşturulmaz.
+* Her araç çağrısında günlüğe `mcp_el_sikisma` satırı düşer: istemci adı ve
+  sürümü, müzakere edilen protokol sürümü, istemci yetenekleri. Aşama 3'ün
+  ölçümü bu satırdan okunur.
 
 Test (`tests/test_mcp_kapisi.py`) sunucuyu ayrı süreçte başlatır; ham
 JSON-RPC ile `initialize`, `tools/list` ve `tools/call` yapar, her isteğin
@@ -93,7 +96,7 @@ kaldırılır; yalnız `sistem_durumu` kalır.
 | Teslim | Konu | Sonuç |
 |---|---|---|
 | 3.1 | MCP SDK ve sunucu iskeleti | Bitti. `mcp` 2.2.0 `uv.lock` ile kilitli. SDK 2.x'te `FastMCP` adı `MCPServer` oldu (`mcp.server.mcpserver`); 1.x örnekleri doğrudan çalışmaz. Araç dönüş tipi `slots=True` dataclass olamaz, SDK şemayı düşürüyor. Yerel istemciyle protokol sürümü `2025-06-18` müzakere edildi. |
-| 3.2 | Gerçek Cowork bağlantısı | Bekliyor. Cowork'un MCP ayarına `uv run defteriki-mcp` (çalışma dizini: bu depo) eklenecek; müzakere edilen protokol sürümü, istemci yetenekleri ve zaman aşımı buraya yazılacak. |
+| 3.2 | Gerçek Cowork bağlantısı | Bağlantı kuruldu (2026-09-15). Claude masaüstü ayarında (`%APPDATA%\Claude\claude_desktop_config.json`, `mcpServers`) komut `uv.exe run --directory C:\dev\DefterIki defteriki-mcp`, ortam değişkeni yok, veri `%LOCALAPPDATA%\DEFTERIKI\gelistirme`. Cowork ve Claude Code oturumları sunucuyu görüp `sistem_durumu` çağırdı; uygulama açılışta sunucuyu birkaç kez başlatıp kısa yoklamaları hemen kapatıyor, sunucu bunu temiz karşılıyor. Uygulamanın kendi MCP günlüğü boş; protokol sürümü ve istemci yetenekleri sunucunun `mcp_el_sikisma` satırından okunacak (ölçüm bekliyor). |
 | 3.3 | Dosya erişim denemesi | Bekliyor. |
 | 3.4 | Çok adımlı protokol denemesi | Bekliyor. |
 
@@ -104,9 +107,9 @@ Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteriki.log`
 `logging` modülü kullanılır; ek bağımlılık yoktur.
 
 Her satır `zaman | seviye | olay | mesaj` biçimindedir; olay türleri
-şimdilik `baslangic`, `baslangic_hatasi`, `mcp_baslangic`, `mcp_kapanis`,
-`mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane kayıtlarında olay `-`
-olur.
+şimdilik `baslangic`, `baslangic_hatasi`, `mcp_baslangic`, `mcp_el_sikisma`,
+`mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
+kayıtlarında olay `-` olur.
 
 Saklama sınırı: dosya 1.000.000 baytı aşınca döndürülür, en fazla 5 eski
 dosya (`defteriki.log.1` ... `.5`) tutulur; toplam en çok ~6 MB. Kurulum

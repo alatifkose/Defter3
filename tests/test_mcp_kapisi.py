@@ -225,6 +225,7 @@ def test_stdio_uzerinden_baslatma_arac_listesi_ve_cagri(
 
     araclar = yanitlar[2]["result"]["tools"]
     assert [arac["name"] for arac in araclar] == [mcp_kapisi.ARAC_SISTEM_DURUMU]
+    assert araclar[0]["inputSchema"]["properties"] == {}
 
     cagri = yanitlar[3]["result"]
     assert not cagri.get("isError", False)
@@ -248,6 +249,10 @@ def test_stdio_sunucusu_gunluge_yazar_stdout_a_yazmaz(
         encoding="utf-8"
     )
     assert f"| INFO | {mcp_kapisi.OLAY_MCP_BASLANGIC} | ortam=test" in icerik
+    assert (
+        f"| INFO | {mcp_kapisi.OLAY_MCP_EL_SIKISMA} | istemci=defteriki-test 0 "
+        f"protokol={ISTEMCI_PROTOKOL_SURUMU} yetenekler={{}}"
+    ) in icerik
     assert f"| INFO | {mcp_kapisi.OLAY_MCP_KAPANIS} |" in icerik
     for satir in sonuc.stdout_satirlari:
         assert satir.startswith("{"), satir

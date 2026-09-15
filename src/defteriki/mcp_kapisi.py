@@ -13,16 +13,20 @@ Kurallar:
   çevirir, yine de bütün tanı çıktısı teknik günlüğe gider: SDK'nın ``mcp``
   günlüğü de aynı dosyaya bağlanır.
 * Araç yanıtlarında yol, anahtar ya da ortam değişkeni dökümü yoktur.
+* Her araç çağrısında el sıkışma özeti (istemci adı ve sürümü, protokol
+  sürümü, istemci yetenekleri) günlüğe yazılır; Aşama 3'ün ölçümü budur.
 * Modül import edildiğinde sunucu kurulmaz, dosya oluşturulmaz.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
+from typing import Any
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 
 from defteriki import gunluk
 from defteriki.ayarlar import Ayarlar
@@ -44,6 +48,8 @@ SURUM_BILINMIYOR = "bilinmiyor"
 OLAY_MCP_BASLANGIC = "mcp_baslangic"
 OLAY_MCP_KAPANIS = "mcp_kapanis"
 OLAY_MCP_HATASI = "mcp_hatasi"
+OLAY_MCP_EL_SIKISMA = "mcp_el_sikisma"
+ISTEMCI_BILINMIYOR = "bilinmiyor"
 
 SUNUCU_TALIMATI = (
     "DEFTERIKI kişisel finans kayıt sisteminin MCP kapısı. Bu sürümde yalnız "
@@ -90,6 +96,35 @@ def sistem_durumu(ayarlar: Ayarlar) -> SistemDurumu:
     )
 
 
+def el_sikisma_ozeti(baglam: Context[Any, Any]) -> str:
+    """Bağlantının el sıkışma bilgisini tek satırda özetler.
+
+    İstemcinin ``initialize`` ile bildirdiği ad ve sürüm, müzakere edilen
+    protokol sürümü ve istemci yetenekleri. Yol, anahtar ya da kişisel veri
+    içermez; günlüğe yazılmak içindir.
+    """
+    oturum = baglam.session
+    parametreler = oturum.client_params
+    if parametreler is None:
+        istemci = ISTEMCI_BILINMIYOR
+    else:
+        istemci = f"{parametreler.client_info.name} {parametreler.client_info.version}"
+    yetenekler = oturum.client_capabilities
+    yetenek_metni = (
+        json.dumps(
+            yetenekler.model_dump(mode="json", by_alias=True, exclude_none=True),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if yetenekler is not None
+        else "yok"
+    )
+    return (
+        f"istemci={istemci} protokol={oturum.protocol_version} "
+        f"yetenekler={yetenek_metni}"
+    )
+
+
 def sunucu_kur(ayarlar: Ayarlar) -> MCPServer[None]:
     """MCP sunucusunu ve araçlarını kurar; henüz çalıştırmaz."""
     sunucu: MCPServer[None] = MCPServer(
@@ -99,7 +134,8 @@ def sunucu_kur(ayarlar: Ayarlar) -> MCPServer[None]:
     )
 
     @sunucu.tool(name=ARAC_SISTEM_DURUMU, description=ARAC_SISTEM_DURUMU_ACIKLAMASI)
-    def sistem_durumu_araci() -> SistemDurumu:
+    def sistem_durumu_araci(baglam: Context[Any, Any]) -> SistemDurumu:
+        gunluk.olay_kaydet(OLAY_MCP_EL_SIKISMA, el_sikisma_ozeti(baglam))
         return sistem_durumu(ayarlar)
 
     return sunucu
