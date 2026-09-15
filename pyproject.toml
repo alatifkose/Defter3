@@ -1,7 +1,7 @@
 [project]
 name = "defteriki"
 version = "0.1.0"
-description = "Add your description here"
+description = "Kişisel finans kayıt sistemi; belgeler Cowork tarafından okunur, MCP kapısından yazılır"
 readme = "README.md"
 authors = [
     { name = "Abdüllatif Köse", email = "alatif.dev@gmail.com" }

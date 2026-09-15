@@ -5,7 +5,8 @@ DEFTERIKI'ye yazılır; uygulama kayıtları tutar, denetler ve gösterir.
 
 ## Durum
 
-Aşama 2 (proje temeli) sürüyor. Bitenler:
+Aşama 2 (proje temeli) tamamlandı; sıradaki iş Aşama 3, gerçek Cowork MCP
+denemesi. Aşama 2'de bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
 * Merkezi ayar yönetimi (`src/defteriki/ayarlar.py`)
