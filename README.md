@@ -5,9 +5,9 @@ DEFTERIKI'ye yazılır; uygulama kayıtları tutar, denetler ve gösterir.
 
 ## Durum
 
-Aşama 2 (proje temeli) tamamlandı. Aşama 3 (gerçek Cowork MCP denemesi)
-sürüyor; dört teslim de bitti, kapı temizliği (geçici araçların
-kaldırılması) sırada (bkz. "Cowork entegrasyonu"). Bitenler:
+Aşama 2 (proje temeli) ve Aşama 3 (gerçek Cowork MCP denemesi) tamamlandı;
+Aşama 3'ün dört teslimi ve ölçümleri "Cowork entegrasyonu" bölümünde, geçici
+deneme araçları kaldırıldı. Aşama 4 sırada. Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
 * Merkezi ayar yönetimi (`src/defteriki/ayarlar.py`)
@@ -17,9 +17,9 @@ kaldırılması) sırada (bkz. "Cowork entegrasyonu"). Bitenler:
 * Tek komutluk kalite kontrolü (Ruff, Pyright strict, pytest)
 * `.gitignore` ve `.gitattributes`; kritik dışlama kuralları testle doğrulanır
   (`tests/test_gitignore.py`)
-* MCP kapısı iskeleti: `uv run defteriki-mcp`, kalıcı araç `sistem_durumu`
-  ve geçici deneme araçları `dosya_dene`, `deneme_baslat`, `deneme_durumu`
-  (`src/defteriki/mcp_kapisi.py`)
+* MCP kapısı iskeleti: `uv run defteriki-mcp`, tek araç `sistem_durumu`
+  (`src/defteriki/mcp_kapisi.py`); Cowork ile bağlantı, dosya erişimi ve
+  çok adımlı protokol gerçek istemciyle ölçüldü
 
 Henüz yok: veritabanı, veri modeli, GUI, ürün verisi yazan MCP aracı.
 
@@ -70,37 +70,13 @@ ardından MCP sunucusunu stdin/stdout üzerinde çalıştırır. İstemci bağla
 kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çıkış kodu
 `1` olur; stdout'a hiçbir şey yazılmaz.
 
-Bu sürümde dört araç var. Ürün verisi yazan araç henüz yoktur.
-
-* `sistem_durumu` (kalıcı): uygulama sürümü, ortam adı, şema sürümü (`yok`)
-  ve yetenek listesini döndürür; yol, anahtar ya da ortam değişkeni içermez.
-* `dosya_dene(yol)` (geçici, Teslim 3.3): verilen mutlak yoldaki dosyayı
-  izinli gelen dizininde (`DEFTERIKI_GELEN_DIZINI`, varsayılan
-  `<veri kökü>/<ortam>/gelen`) arar, 1 MiB parçalarla akışla okur, SHA-256
-  özeti ve bayt boyutunu döndürür; içerik döndürmez, boyut sınırı yoktur.
-  Denetim sırası: mutlak yol → `..` parçası yok → gerçek yol izinli dizinin
-  gerçek yolunun altında → simgesel bağlantı ya da takma yol değil → sıradan
-  dosya. Red, MCP hatası değil düz yanıttır: `sonuc="reddedildi"` ve
-  kategorik `gerekce`. Yanıt yol içermez. Her çağrı günlüğe
-  `mcp_dosya_deneme` olayı yazar: gelen dizinine göre göreli ad, sonuç,
-  boyut; tam yol yazılmaz. İzinli dizin dışına çıkma denemesi `WARNING`
-  seviyesinde ve yolsuz düşer. Aşama 3 sonunda araç kaldırılır, ayar kalır.
-* `deneme_baslat(islem_anahtari)` ve `deneme_durumu(talep_id)` (geçici,
-  Teslim 3.4): çok adımlı protokolün provası. Cowork elicitation
-  bildirmediği için kullanıcı kararı bekleyen bir iş çağrıyı açık tutamaz;
-  araç `durum=BEKLIYOR` ve bir `talep_id` döner, Cowork daha sonra aynı
-  kimlikle `deneme_durumu` sorar. Provada kullanıcı onayının yerine sabit
-  süre vardır: başlangıçtan 20 saniye sonra `TAMAMLANDI`. Aynı
-  `islem_anahtari` ile tekrar başlatma yeni iş açmaz, aynı `talep_id`'yi
-  verir (Aşama 5'teki idempotent yazmanın ilk provası). Bilinmeyen kimlik
-  `BILINMIYOR`, boş anahtar `REDDEDILDI`; hiçbiri MCP hatası değildir,
-  yanıttaki `sonraki_adim` istemciye ne yapacağını söyler. Talep kayıtları
-  süreç belleğindedir; günlükteki `mcp_deneme` olayı araç, durum, talep
-  kimliği, geçen süre ve süreç kimliğini (`surec`) yazar, işlem anahtarını
-  yazmaz. Süreç kimliği bilerek kaydedilir: Claude masaüstü sunucuyu iki
-  kalıcı süreç olarak çalıştırıyorsa `deneme_baslat` ile `deneme_durumu`
-  farklı süreçlere düşebilir ve `BILINMIYOR` görülür; bu Aşama 5'te talep
-  durumunun belleğe değil veritabanına yazılması gerektiğinin kanıtı olur.
+Bu sürümde tek araç var: `sistem_durumu`. Uygulama sürümü, ortam adı, şema
+sürümü (`yok`) ve yetenek listesini döndürür; yol, anahtar ya da ortam
+değişkeni içermez. Ürün verisi yazan araç henüz yoktur. Aşama 3'te kullanılan
+geçici deneme araçları (`dosya_dene`, `deneme_baslat`, `deneme_durumu`)
+kapı temizliğinde kaldırıldı; ne ölçtükleri "Cowork entegrasyonu"
+bölümünde. Gelen dizini ayarı (`DEFTERIKI_GELEN_DIZINI`) kaldı: Aşama 4'te
+belge alımı Cowork'un bu dizine bıraktığı dosyanın yoluyla yapılır.
 
 Kurallar:
 
@@ -120,8 +96,14 @@ yanıtını bekler, sonra stdin'i kapatır.
 
 ## Cowork entegrasyonu
 
-Aşama 3'ün dört teslimi ve sonuçları. Geçici deneme araçları aşama sonunda
-kaldırılır; yalnız `sistem_durumu` kalır.
+Aşama 3'ün dört teslimi ve ölçümleri (aşama 2026-09-16'da kapandı). Geçici
+deneme araçları `dosya_dene`, `deneme_baslat`, `deneme_durumu` ve testleri
+kapı temizliğinde kaldırıldı; yalnız `sistem_durumu` kaldı. Aşağıdaki satırlar
+o araçların ne ölçtüğünün kalıcı kaydıdır. Kalıcı çıkarımlar: SDK `mcp` 2.2.0
+kilitli; protokol 2025-11-25, istemcide elicitation ve sampling yok; belge
+alımı dosya yolu yöntemiyle (gelen dizini), parça yükleme gerekmez; kullanıcı
+kararı bekleyen işler için "BEKLIYOR + talep kimliği, istemci tekrar sorar"
+yöntemi Cowork'la çalışır, talep durumu veritabanında tutulur.
 
 | Teslim | Konu | Sonuç |
 |---|---|---|
@@ -138,7 +120,7 @@ Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteriki.log`
 
 Her satır `zaman | seviye | olay | mesaj` biçimindedir; olay türleri
 şimdilik `baslangic`, `baslangic_hatasi`, `mcp_baslangic`, `mcp_el_sikisma`,
-`mcp_dosya_deneme`, `mcp_deneme`, `mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
+`mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
 kayıtlarında olay `-` olur.
 
 Saklama sınırı: dosya 1.000.000 baytı aşınca döndürülür, en fazla 5 eski
