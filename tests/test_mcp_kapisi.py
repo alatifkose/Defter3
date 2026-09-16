@@ -15,7 +15,7 @@ import os
 import subprocess
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -97,14 +97,24 @@ def test_sistem_durumu_yol_ve_ortam_degiskeni_icermez(test_koku: Path) -> None:
     assert "DEFTERIKI_" not in metin
 
 
-def test_sunucu_iki_araci_sunar(test_koku: Path) -> None:
+def test_sunucu_dort_araci_sunar(test_koku: Path) -> None:
     sunucu = mcp_kapisi.sunucu_kur(ay.ayarlari_yukle())
 
     araclar = anyio.run(sunucu.list_tools)
 
     assert [arac.name for arac in araclar] == mcp_kapisi.ARACLAR
     assert sunucu.name == mcp_kapisi.SUNUCU_ADI
-    durum, dene = araclar
+    durum, dene, baslat, deneme_durumu = araclar
+    assert baslat.input_schema["required"] == ["islem_anahtari"]
+    assert deneme_durumu.input_schema["required"] == ["talep_id"]
+    for arac in (baslat, deneme_durumu):
+        assert arac.output_schema is not None
+        assert set(arac.output_schema["required"]) == {
+            "durum",
+            "talep_id",
+            "gecen_saniye",
+            "sonraki_adim",
+        }
     assert durum.output_schema is not None
     assert set(durum.output_schema["required"]) == {
         "uygulama_surumu",
@@ -289,6 +299,128 @@ def test_dosya_dene_okumayi_gunluge_goreli_adla_yazar(
     assert kayit.getMessage() == "sonuc=okundu dosya=2026/ekstre.pdf boyut=3"
 
 
+# --- deneme_baslat / deneme_durumu (süreç içi) ------------------------------
+
+
+class SahteSaat:
+    def __init__(self) -> None:
+        self.simdi = 100.0
+
+    def __call__(self) -> float:
+        return self.simdi
+
+
+@pytest.fixture
+def saat() -> SahteSaat:
+    return SahteSaat()
+
+
+@pytest.fixture
+def takip(saat: SahteSaat) -> mcp_kapisi.DenemeTakibi:
+    return mcp_kapisi.DenemeTakibi(tamamlanma_saniye=20.0, saat=saat)
+
+
+def test_deneme_baslat_bekliyor_ve_talep_kimligi_verir(
+    takip: mcp_kapisi.DenemeTakibi,
+) -> None:
+    yanit = takip.baslat("ekstre-2026-02")
+
+    assert yanit.durum == mcp_kapisi.DURUM_BEKLIYOR
+    assert len(yanit.talep_id) == 2 * mcp_kapisi.TALEP_KIMLIGI_BAYT
+    int(yanit.talep_id, 16)
+    assert yanit.gecen_saniye == 0.0
+    assert yanit.sonraki_adim == mcp_kapisi.SONRAKI_ADIM_BEKLE
+
+
+def test_deneme_baslat_ayni_anahtar_ayni_talep(
+    takip: mcp_kapisi.DenemeTakibi, saat: SahteSaat
+) -> None:
+    ilk = takip.baslat("ayni")
+    saat.simdi += 5
+    tekrar = takip.baslat("ayni")
+    baska = takip.baslat("baska")
+
+    assert tekrar.talep_id == ilk.talep_id
+    assert tekrar.durum == mcp_kapisi.DURUM_BEKLIYOR
+    assert tekrar.gecen_saniye == 5.0
+    assert baska.talep_id != ilk.talep_id
+
+
+@pytest.mark.parametrize("anahtar", ["", "   "])
+def test_deneme_baslat_bos_anahtari_reddeder(
+    takip: mcp_kapisi.DenemeTakibi, anahtar: str
+) -> None:
+    yanit = takip.baslat(anahtar)
+
+    assert yanit == mcp_kapisi.DenemeYaniti(
+        durum=mcp_kapisi.DURUM_REDDEDILDI,
+        talep_id="",
+        gecen_saniye=0.0,
+        sonraki_adim=mcp_kapisi.SONRAKI_ADIM_ANAHTAR_BOS,
+    )
+
+
+def test_deneme_durumu_sure_dolmadan_bekliyor_dolunca_tamamlandi(
+    takip: mcp_kapisi.DenemeTakibi, saat: SahteSaat
+) -> None:
+    talep_id = takip.baslat("is").talep_id
+
+    saat.simdi += 19.9
+    bekleyen = takip.durum(talep_id)
+    saat.simdi += 0.1
+    biten = takip.durum(talep_id)
+    saat.simdi += 1000
+    hala_biten = takip.durum(talep_id)
+
+    assert bekleyen.durum == mcp_kapisi.DURUM_BEKLIYOR
+    assert bekleyen.gecen_saniye == pytest.approx(19.9)
+    assert bekleyen.sonraki_adim == mcp_kapisi.SONRAKI_ADIM_BEKLE
+    assert biten.durum == mcp_kapisi.DURUM_TAMAMLANDI
+    assert biten.talep_id == talep_id
+    assert biten.sonraki_adim == mcp_kapisi.SONRAKI_ADIM_BITTI
+    assert hala_biten.durum == mcp_kapisi.DURUM_TAMAMLANDI
+
+
+def test_deneme_durumu_bilinmeyen_kimlik(takip: mcp_kapisi.DenemeTakibi) -> None:
+    takip.baslat("is")
+
+    yanit = takip.durum("yok-boyle-talep")
+
+    assert yanit == mcp_kapisi.DenemeYaniti(
+        durum=mcp_kapisi.DURUM_BILINMIYOR,
+        talep_id="",
+        gecen_saniye=0.0,
+        sonraki_adim=mcp_kapisi.SONRAKI_ADIM_BILINMIYOR,
+    )
+
+
+def test_deneme_yaniti_ve_gunlugu_anahtari_icermez(
+    takip: mcp_kapisi.DenemeTakibi, saat: SahteSaat, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger=gunluk.GUNLUK_ADI)
+    anahtar = "TR00-gizli-hesap-anahtari"
+
+    yanit = takip.baslat(anahtar)
+    saat.simdi += 25
+    takip.durum(yanit.talep_id)
+
+    assert anahtar not in json.dumps(dataclasses.asdict(yanit), ensure_ascii=False)
+    mesajlar = [kayit.getMessage() for kayit in caplog.records]
+    assert len(mesajlar) == 2
+    assert all(anahtar not in mesaj for mesaj in mesajlar)
+    assert all(
+        kayit.__dict__["olay"] == mcp_kapisi.OLAY_MCP_DENEME for kayit in caplog.records
+    )
+    assert mesajlar[0] == (
+        f"arac=deneme_baslat durum=BEKLIYOR talep={yanit.talep_id} gecen=0.0 "
+        f"surec={os.getpid()} not=yeni"
+    )
+    assert mesajlar[1] == (
+        f"arac=deneme_durumu durum=TAMAMLANDI talep={yanit.talep_id} gecen=25.0 "
+        f"surec={os.getpid()}"
+    )
+
+
 # --- ayrı süreçte stdio ----------------------------------------------------
 
 SUNUCU_KOMUTU = "import sys; from defteriki.mcp_kapisi import main; sys.exit(main())"
@@ -320,10 +452,18 @@ class Konusma:
         return yanitlar
 
 
+Mesaj = dict[str, Any] | Callable[[dict[int, dict[str, Any]]], dict[str, Any]]
+"""Hazır JSON-RPC mesajı ya da o ana kadarki yanıtlardan mesaj üreten işlev."""
+
+
 def _sunucuyla_konus(
-    cwd: Path, cevre: dict[str, str], mesajlar: tuple[dict[str, Any], ...]
+    cwd: Path, cevre: dict[str, str], mesajlar: tuple[Mesaj, ...]
 ) -> Konusma:
-    """Mesajları sırayla gönderir; istek olanların yanıtını bekler, sonra kapatır."""
+    """Mesajları sırayla gönderir; istek olanların yanıtını bekler, sonra kapatır.
+
+    İşlev olan mesajlar, önceki isteklerin yanıtlarıyla (kimliğe göre)
+    çağrılır; böylece bir yanıttaki değer sonraki isteğe taşınabilir.
+    """
     surec = subprocess.Popen(
         [sys.executable, "-c", SUNUCU_KOMUTU],
         stdin=subprocess.PIPE,
@@ -339,7 +479,10 @@ def _sunucuyla_konus(
     bekci.start()
     satirlar: list[str] = []
     try:
-        for mesaj in mesajlar:
+        for kalip in mesajlar:
+            mesaj = (
+                kalip(Konusma(satirlar, "", 0).yanitlar) if callable(kalip) else kalip
+            )
             surec.stdin.write(json.dumps(mesaj) + "\n")
             surec.stdin.flush()
             if "id" not in mesaj:
@@ -490,6 +633,54 @@ def test_stdio_uzerinden_dosya_dene_okur_ve_reddeder(
         f"gerekce={mcp_kapisi.GEREKCE_DIZIN_DISI}"
     ) in icerik_gunluk
     assert str(tmp_path) not in icerik_gunluk
+
+
+def _arac_cagrisi(kimlik: int, arac: str, argumanlar: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": kimlik,
+        "method": "tools/call",
+        "params": {"name": arac, "arguments": argumanlar},
+    }
+
+
+def test_stdio_uzerinden_deneme_dongusu(tmp_path: Path, test_koku: Path) -> None:
+    def durumu_sor(yanitlar: dict[int, dict[str, Any]]) -> dict[str, Any]:
+        """6 numaralı yanıttaki talep kimliğiyle durum sorgusu üretir."""
+        talep_id = str(yanitlar[6]["result"]["structuredContent"]["talep_id"])
+        return _arac_cagrisi(7, mcp_kapisi.ARAC_DENEME_DURUMU, {"talep_id": talep_id})
+
+    istekler: tuple[Mesaj, ...] = ILK_ISTEKLER[:2] + (
+        _arac_cagrisi(6, mcp_kapisi.ARAC_DENEME_BASLAT, {"islem_anahtari": "prova"}),
+        durumu_sor,
+        _arac_cagrisi(8, mcp_kapisi.ARAC_DENEME_DURUMU, {"talep_id": "yok"}),
+        _arac_cagrisi(9, mcp_kapisi.ARAC_DENEME_BASLAT, {"islem_anahtari": "prova"}),
+    )
+
+    sonuc = _sunucuyla_konus(tmp_path, dict(os.environ), istekler)
+
+    assert sonuc.cikis_kodu == 0, sonuc.stderr
+    yanitlar = sonuc.yanitlar
+    baslat = yanitlar[6]["result"]["structuredContent"]
+    assert baslat["durum"] == mcp_kapisi.DURUM_BEKLIYOR
+    assert len(baslat["talep_id"]) == 2 * mcp_kapisi.TALEP_KIMLIGI_BAYT
+    durum = yanitlar[7]["result"]["structuredContent"]
+    assert durum["durum"] == mcp_kapisi.DURUM_BEKLIYOR  # 20 s dolmadı
+    assert durum["talep_id"] == baslat["talep_id"]
+    assert 0.0 <= durum["gecen_saniye"] < mcp_kapisi.DENEME_TAMAMLANMA_SANIYE
+    bilinmeyen = yanitlar[8]["result"]
+    assert not bilinmeyen.get("isError", False)
+    assert bilinmeyen["structuredContent"]["durum"] == mcp_kapisi.DURUM_BILINMIYOR
+    tekrar = yanitlar[9]["result"]["structuredContent"]
+    assert tekrar["talep_id"] == baslat["talep_id"]
+
+    icerik = (test_koku / ay.LOG_DIZIN_ADI / gunluk.GUNLUK_DOSYA_ADI).read_text(
+        encoding="utf-8"
+    )
+    assert icerik.count(f"| INFO | {mcp_kapisi.OLAY_MCP_DENEME} |") == 4
+    assert "prova" not in icerik
+    assert f"talep={baslat['talep_id']}" in icerik
+    assert "not=yeni" in icerik and "not=tekrar" in icerik
 
 
 def test_ayar_hatasinda_stdout_bos_stderr_aciklayici(tmp_path: Path) -> None:

@@ -6,8 +6,8 @@ DEFTERIKI'ye yazılır; uygulama kayıtları tutar, denetler ve gösterir.
 ## Durum
 
 Aşama 2 (proje temeli) tamamlandı. Aşama 3 (gerçek Cowork MCP denemesi)
-sürüyor; Teslim 3.1, 3.2 ve 3.3 bitti, 3.4 sırada (bkz. "Cowork
-entegrasyonu"). Bitenler:
+sürüyor; Teslim 3.1, 3.2 ve 3.3 bitti, 3.4 araçları yazıldı ve Cowork
+denemesi bekliyor (bkz. "Cowork entegrasyonu"). Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
 * Merkezi ayar yönetimi (`src/defteriki/ayarlar.py`)
@@ -18,7 +18,8 @@ entegrasyonu"). Bitenler:
 * `.gitignore` ve `.gitattributes`; kritik dışlama kuralları testle doğrulanır
   (`tests/test_gitignore.py`)
 * MCP kapısı iskeleti: `uv run defteriki-mcp`, kalıcı araç `sistem_durumu`
-  ve geçici deneme aracı `dosya_dene` (`src/defteriki/mcp_kapisi.py`)
+  ve geçici deneme araçları `dosya_dene`, `deneme_baslat`, `deneme_durumu`
+  (`src/defteriki/mcp_kapisi.py`)
 
 Henüz yok: veritabanı, veri modeli, GUI, ürün verisi yazan MCP aracı.
 
@@ -69,7 +70,7 @@ ardından MCP sunucusunu stdin/stdout üzerinde çalıştırır. İstemci bağla
 kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çıkış kodu
 `1` olur; stdout'a hiçbir şey yazılmaz.
 
-Bu sürümde iki araç var. Ürün verisi yazan araç henüz yoktur.
+Bu sürümde dört araç var. Ürün verisi yazan araç henüz yoktur.
 
 * `sistem_durumu` (kalıcı): uygulama sürümü, ortam adı, şema sürümü (`yok`)
   ve yetenek listesini döndürür; yol, anahtar ya da ortam değişkeni içermez.
@@ -84,6 +85,22 @@ Bu sürümde iki araç var. Ürün verisi yazan araç henüz yoktur.
   `mcp_dosya_deneme` olayı yazar: gelen dizinine göre göreli ad, sonuç,
   boyut; tam yol yazılmaz. İzinli dizin dışına çıkma denemesi `WARNING`
   seviyesinde ve yolsuz düşer. Aşama 3 sonunda araç kaldırılır, ayar kalır.
+* `deneme_baslat(islem_anahtari)` ve `deneme_durumu(talep_id)` (geçici,
+  Teslim 3.4): çok adımlı protokolün provası. Cowork elicitation
+  bildirmediği için kullanıcı kararı bekleyen bir iş çağrıyı açık tutamaz;
+  araç `durum=BEKLIYOR` ve bir `talep_id` döner, Cowork daha sonra aynı
+  kimlikle `deneme_durumu` sorar. Provada kullanıcı onayının yerine sabit
+  süre vardır: başlangıçtan 20 saniye sonra `TAMAMLANDI`. Aynı
+  `islem_anahtari` ile tekrar başlatma yeni iş açmaz, aynı `talep_id`'yi
+  verir (Aşama 5'teki idempotent yazmanın ilk provası). Bilinmeyen kimlik
+  `BILINMIYOR`, boş anahtar `REDDEDILDI`; hiçbiri MCP hatası değildir,
+  yanıttaki `sonraki_adim` istemciye ne yapacağını söyler. Talep kayıtları
+  süreç belleğindedir; günlükteki `mcp_deneme` olayı araç, durum, talep
+  kimliği, geçen süre ve süreç kimliğini (`surec`) yazar, işlem anahtarını
+  yazmaz. Süreç kimliği bilerek kaydedilir: Claude masaüstü sunucuyu iki
+  kalıcı süreç olarak çalıştırıyorsa `deneme_baslat` ile `deneme_durumu`
+  farklı süreçlere düşebilir ve `BILINMIYOR` görülür; bu Aşama 5'te talep
+  durumunun belleğe değil veritabanına yazılması gerektiğinin kanıtı olur.
 
 Kurallar:
 
@@ -111,7 +128,7 @@ kaldırılır; yalnız `sistem_durumu` kalır.
 | 3.1 | MCP SDK ve sunucu iskeleti | Bitti. `mcp` 2.2.0 `uv.lock` ile kilitli. SDK 2.x'te `FastMCP` adı `MCPServer` oldu (`mcp.server.mcpserver`); 1.x örnekleri doğrudan çalışmaz. Araç dönüş tipi `slots=True` dataclass olamaz, SDK şemayı düşürüyor. Yerel istemciyle protokol sürümü `2025-06-18` müzakere edildi. |
 | 3.2 | Gerçek Cowork bağlantısı | Bitti (2026-09-15). Ayar: Claude masaüstü `claude_desktop_config.json` → `mcpServers`, komut `uv.exe run --directory C:/dev/DefterIki defteriki-mcp`, ortam değişkeni yok, veri `%LOCALAPPDATA%/DEFTERIKI/gelistirme`. Ölçüm (`mcp_el_sikisma`): istemci `local-agent-mode-defteriki 1.0.0`; müzakere edilen protokol sürümü **2025-11-25** (sunucunun en yükseği 2026-07-28, istemci daha eskisini seçti); istemci yetenekleri `roots.listChanged=true` ve `io.modelcontextprotocol/ui` uzantısı (`text/html;profile=mcp-app`); sampling ve elicitation bildirilmedi. Uygulama açılışta sunucuyu üç kez başlatıyor: biri 10 ms içinde kapanan yoklama, ikisi kalıcı (Cowork ve Claude Code). Zaman aşımı gözlenmedi: başlatmadan araç yanıtına kadar sorun yok, uygulama kapanınca sunucular EOF ile temiz çıktı. Uygulamanın kendi MCP günlüğü boş; ölçüm sunucu günlüğünden alındı. |
 | 3.3 | Dosya erişim denemesi | **Bitti (2026-09-15): dosya yolu yöntemi çalıştı, parça yükleme gerekmez.** Araç `dosya_dene` yazıldı ve testlendi (izinli dosya, boş dosya, alt dizin, dizin dışı, `..`, göreli yol, olmayan dosya, dizin, okuma hatası, stdio üzerinden okuma ve red; simgesel bağlantı testleri Windows'ta bağlantı yetkisi yoksa atlanır). Cowork ayarı: `mcpServers.defteriki.env` → `DEFTERIKI_GELEN_DIZINI=C:/dev/DefterIki-gelen`; uygulama yeniden başlayınca dizin kendiliğinden oluştu. Deneme ~402 KB'lik gerçek bir hesap özeti PDF'iyle iki senaryoda yapıldı: (a) dosya elle gelen dizinine kopyalandı, Cowork'a yol söylendi → `sonuc=okundu`; (b) PDF Cowork'a yüklendi, gelen dizinine bırakması istendi → Cowork dosyayı dizine yazdı ve `dosya_dene` ile okuttu → `sonuc=okundu`. İki dosyanın SHA-256 özeti birebir aynı; Cowork dosyayı bozmadan aktarıyor. Günlükte iki `mcp_dosya_deneme` satırı, red ya da hata yok. Aşama 4 belge alımı bu yöntemle kurulacak: Cowork dosyayı gelen dizinine bırakır, yolu MCP aracına verir. |
-| 3.4 | Çok adımlı protokol denemesi | Bekliyor. |
+| 3.4 | Çok adımlı protokol denemesi | Sürüyor. Araç çifti `deneme_baslat` / `deneme_durumu` yazıldı ve testlendi (süreç içi sahte saatle bekle→tamamla geçişi, aynı anahtar aynı kimlik, boş anahtar reddi, bilinmeyen kimlik, yanıt ve günlükte anahtar yok; stdio üzerinden başlat→durum→bilinmeyen→tekrar başlat döngüsü). Cowork denemesi bekliyor: Cowork'a tek cümle verilir, "işi başlat, bekliyor dönerse aynı anahtarla durumu sor, tamamlanınca bildir." Günlükten okunacak: kaç kez sordu, aralıklar, kimliğe sadakat, vazgeçti mi, çağrılar aynı süreçten mi geldi. |
 
 ## Teknik hata günlüğü
 
@@ -121,7 +138,7 @@ Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteriki.log`
 
 Her satır `zaman | seviye | olay | mesaj` biçimindedir; olay türleri
 şimdilik `baslangic`, `baslangic_hatasi`, `mcp_baslangic`, `mcp_el_sikisma`,
-`mcp_dosya_deneme`, `mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
+`mcp_dosya_deneme`, `mcp_deneme`, `mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
 kayıtlarında olay `-` olur.
 
 Saklama sınırı: dosya 1.000.000 baytı aşınca döndürülür, en fazla 5 eski
