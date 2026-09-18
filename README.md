@@ -191,8 +191,12 @@ raporladığı sentetik ağaçta ayrıca sınanır; çekirdek boşken yeşil kal
 başına kanıt sayılmaz. Semantik sızıntı (finansal varsayımın adsız biçimde
 çekirdeğe girmesi) sonraki aşamalarda ayrı denetlenir.
 
-Bu aşamada iki paket de boştur (`__init__.py` yalnız docstring taşır);
-mevcut modüller taşınmamış, yeni model ya da soyutlama yazılmamıştır.
+Aşama 4.0'da iki paket de boş açıldı. Aşama 4.1 sonrası `cekirdek/`
+`veritabani.py` (SQLite bağlantı politikası, `TabloTabani`, işlem sınırı) ve
+`gocler.py` (Alembic şema sürümü ve göç) modüllerini içerir; ikisi de
+finansı bilmez, uygulama tablosu tanımlamaz. `finans/` hâlâ boştur
+(`__init__.py` yalnız docstring taşır). Eski hattan modül taşınmamış, iş
+modeli ya da genel soyutlama yazılmamıştır.
 
 ## Kurulum
 
