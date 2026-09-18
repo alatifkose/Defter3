@@ -13,7 +13,8 @@ sınırı kuruldu ve testle korunuyor ("Mimari sınır" bölümü). Bu hat
 Aşama 3 kapısından yeniden başlar; önceki Aşama 4-6 geliştirme hattı
 [alatifkose/DefterIki](https://github.com/alatifkose/DefterIki) deposunun
 `main` dalında yedek olarak durur, oraya yazılmaz. Aşama 4.1 (genel
-veritabanı altyapısı, 2026-09-18) bitti; Aşama 4.2 (tanım sistemi) sırada.
+veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de bitti;
+Aşama 4.3 (nesne motoru) sırada.
 Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
@@ -39,13 +40,20 @@ Bitenler:
   `defteriki.cekirdek.veritabani` (bağlantı politikası, işlem sınırı) ve
   `defteriki.cekirdek.gocler` (şema sürümü); ilk göç `0001` uygulama tablosu
   içermez ("Veritabanı" bölümü)
+* Tanım sistemi (Aşama 4.2): tanım paketi, sürüm, nesne türü, özellik,
+  ilişki, kayıt türü ve kayıt alanı tanımlarını veri olarak tutan yedi tablo
+  (göç `0002`), `defteriki.cekirdek.tanim_tablolari` ve
+  `defteriki.cekirdek.tanim_islemleri`; çekirdek hangi türlerin var olduğunu
+  bilmez, testler nötr sahte paketlerle çalışır ("Tanım sistemi" bölümü)
 
-Henüz yok: uygulama tablosu ve veri modeli, GUI, ürün verisi yazan MCP aracı.
+Henüz yok: nesne ve kayıt verisi (tanımların örnekleri; Aşama 4.3 ve 4.7),
+finans tanım paketi (`finans/` boş), GUI, ürün verisi yazan MCP aracı.
 
 ## Veritabanı
 
-Aşama 4.1 (2026-09-18; Yeniden İnşa Teknik Planı madde 26). Yalnız güvenilir
-persistence temeli: finansal ya da iş tablosu yoktur, `finans/` boştur.
+Aşama 4.1 (2026-09-18; Yeniden İnşa Teknik Planı madde 26). Güvenilir
+persistence temeli; uygulama tabloları yalnız Aşama 4.2'nin tanım tablolarıdır
+("Tanım sistemi" bölümü). Finansal tablo yoktur, `finans/` boştur.
 
 **Bağlantı (`src/defteriki/cekirdek/veritabani.py`).** SQLite dosyasının yolu
 tek kaynaktan gelir: `Ayarlar.veritabani_yolu`. Çekirdek bu yolu çağırandan
@@ -80,7 +88,10 @@ yöneticisidir. `kapat()` havuzu boşaltır (Windows'ta dosya kilidi için).
 **Göçler ve şema sürümü (`src/defteriki/cekirdek/gocler.py`, `alembic/`).**
 Şema sürümünü Alembic'in kendi `alembic_version` tablosu tutar; ayrı sürüm
 tablosu yoktur. Göçler `alembic/versions/` altında; `0001_genel_altyapi`
-zincirin başıdır ve tablo oluşturmaz. `alembic.ini` veritabanı adresi taşımaz;
+zincirin başıdır ve tablo oluşturmaz, `0002_tanim_sistemi` yedi tanım
+tablosunu ekler (zincirin başı bugün `0002`). `alembic/env.py` tanım tablo
+modülünü import eder ki `TabloTabani.metadata` dolu olsun (autogenerate ve
+şema karşılaştırması için). `alembic.ini` veritabanı adresi taşımaz;
 `alembic/env.py` yolu merkezi ayarlardan (ortam değişkenleri) alır, komut
 satırında yalnız veritabanı dosyasının dizinini açar. Göç çalıştırma açık bir
 işlemdir; `uv run defteriki` ve `uv run defteriki-mcp` göç çalıştırmaz,
@@ -111,7 +122,8 @@ hedefler; eski dosya bu zincirde olmayan `0002` sürümünü taşıdığından A
 "Can't locate revision" hatasıyla durur ve hiçbir şey değiştirmez, ama komut
 öncesi `DEFTERIKI_VERI_KOKU=C:\dev\Defter3-veri` açıkça verilmelidir. Defter3
 verisi için ilk göç 2026-09-18'de bu şekilde uygulandı:
-`C:\dev\Defter3-veri\gelistirme\defteriki.sqlite3`, sürüm `0001`.
+`C:\dev\Defter3-veri\gelistirme\defteriki.sqlite3`, sürüm `0001`. Göç `0002`
+bu dosyaya henüz uygulanmadı; aynı komutla uygulanır.
 
 **Testler** (`tests/test_cekirdek_veritabani.py`, `tests/test_gocler.py`):
 gerçek SQLite dosyalarıyla, `test` ortamı ve `tmp_path` altında kök;
@@ -125,11 +137,114 @@ kabul edilir; başarılı işlem commit olur, hata alan işlem tamamen rollback
 olur ve hata yükselir, oturum kapanır; işlem içindeki DDL de geri alınır
 (`CREATE TABLE` + hata → tablo yok); test veritabanı ve WAL dosyası yalnız
 test kökünde oluşur; sıfır
-veritabanından `upgrade head` `0001`e çıkar ve yalnız `alembic_version`
-tablosu vardır; iki sıfır veritabanı aynı şemayı üretir; tekrar `upgrade`
-şemayı değiştirmez; başlangıç akışı göç çalıştırmaz; `alembic.ini` adres
+veritabanından `upgrade head` `0002`ye çıkar ve tablolar `alembic_version` +
+yedi tanım tablosudur; iki sıfır veritabanı aynı şemayı üretir; tekrar
+`upgrade` şemayı değiştirmez; `head → 0001 → head` döngüsünde tanım tabloları
+ve indeksleri gider, geri gelir ve `sqlite_master` birebir aynıdır,
+`integrity_check` temizdir; elle yazılan `0002` göçünün ürettiği şema ORM
+metadata'sıyla Alembic karşılaştırmasında farksızdır; her tanım tablosunun
+birincil anahtar, dış anahtar (`RESTRICT`), benzersizlik, kontrol ve indeks
+adları `KISIT_ADLANDIRMA` kalıbındadır ve beklenen listeyle birebirdir;
+başlangıç akışı göç çalıştırmaz; `alembic.ini` adres
 taşımaz; komut satırı `alembic upgrade head` başka bir çalışma dizininden
 merkezi yolu kullanır, stdout'a yazmaz, süreç içi göçle aynı şemayı verir.
+
+## Tanım sistemi
+
+Aşama 4.2 (2026-09-18; Yeniden İnşa Teknik Planı madde 6 ve 27). Çekirdek
+hangi nesne türlerinin, özelliklerin, ilişkilerin ve kayıt türlerinin var
+olduğunu bilmez; bunları **tanım verisi** olarak tutar. Bir domain (ileride
+`defteriki.finans`) kendi kavramlarını bu tablolara satır olarak yazar.
+Çekirdek `TEST_KISI` ile `BANKA` arasında fark görmez; aynı şema ve işlevler
+kütüphane, envanter ya da sağlık tanımları için de aynen çalışır. Bu aşamada
+gerçek finans tanımı yüklenmez, `finans/` boştur; testler nötr sahte
+paketlerle (`DEMO`: `TEST_KISI`, `TEST_CIHAZ`, `TEST_OLAY`; `ENVANTER`: `DEPO`,
+`RAF`, `URUN`) çalışır.
+
+**Tablolar (`src/defteriki/cekirdek/tanim_tablolari.py`, göç `0002`).** Her
+satır bir üsttekine dış anahtarla (`ON DELETE RESTRICT`) bağlıdır; bütün
+kısıtlar isimlidir (`pk_`, `fk_`, `uq_`, `ck_`, `ix_` kalıbı).
+
+| Tablo | Ne tutar | Benzersizlik |
+|---|---|---|
+| `tanim_paketi` | bir domain'in tanımlarını gruplayan paket | `kod` |
+| `tanim_surumu` | paketin sürümü; `surum_no > 0` (kontrol kısıtı) | `(tanim_paketi_id, surum_no)` |
+| `nesne_turu` | sürümdeki nesne türü | `(tanim_surumu_id, kod)`; ayrıca `(id, tanim_surumu_id)` bileşik dış anahtar hedefi |
+| `ozellik_tanimi` | nesne türünün özelliği | `(nesne_turu_id, kod)` |
+| `iliski_tanimi` | iki nesne türü arasında yönlü ilişki (kaynak → hedef) | `(tanim_surumu_id, kod)`; kaynak ve hedef için `ix_` indeksleri |
+| `kayit_turu` | sürümdeki kayıt (olay) türü | `(tanim_surumu_id, kod)` |
+| `kayit_alani_tanimi` | kayıt türünün alanı | `(kayit_turu_id, kod)` |
+
+Tanımlar pakete değil **sürüme** bağlıdır: paketin yeni sürümü eskisinin
+satırlarını değiştirmez, kendi satırlarını taşır; aynı kod iki sürümde iki
+ayrı satırdır. Böylece ileride bir nesne ya da kayıt hangi tanım sürümü
+altında üretildiğini sürüm kimliğiyle taşır ve mevcut verinin anlamı bir
+tanım değişince sessizce değişmez. İlişkinin kaynak ve hedef türü ilişkinin
+kendi sürümünde olmak zorundadır; bu, `iliski_tanimi` üzerindeki iki bileşik
+dış anahtarla (`(kaynak_nesne_turu_id, tanim_surumu_id)` ve `(hedef_...,
+tanim_surumu_id)` → `nesne_turu(id, tanim_surumu_id)`) veritabanında da
+zorlanır. Her tanımda `kod` makine kimliğidir, `gosterim_adi` insan için
+başlıktır; ikisi karıştırılmaz. `aciklama` isteğe bağlıdır. Paket ve sürüm
+`olusturma_zamani` taşır (UTC, saat dilimsiz). ORM sınıflarında `relationship`
+yoktur; işlem kapandıktan sonra elde kalan nesne yalnız kendi sütunlarını
+taşır.
+
+**Kod biçimi** (`tanim_islemleri.KOD_BICIMI`): ASCII harfle başlar, harf,
+rakam ve alt çizgi ile sürer; büyük-küçük harf ayrımı vardır, kod verildiği
+gibi saklanır ve karşılaştırılır (`Demo` ile `DEMO` iki ayrı koddur). Gösterim
+adı boş olamaz. Sürüm numarası çağıranın verdiği pozitif tam sayıdır; sistem
+türetmez, sıralama zorunluluğu yoktur.
+
+**İşlevler (`src/defteriki/cekirdek/tanim_islemleri.py`).** Tanım tablolarına
+tek giriş noktası; her işlev açık bir `Session` alır ve
+`Veritabani.islem()` içinde çağrılır, kendi başına commit etmez. Yazma:
+`paket_tanimla`, `surum_tanimla`, `nesne_turu_tanimla`, `ozellik_tanimla`,
+`iliski_tanimla`, `kayit_turu_tanimla`, `kayit_alani_tanimla` (satırı ekler,
+`flush` eder, kimlik atanmış ORM nesnesini döndürür). Okuma: `paket_bul`,
+`paketleri_listele`, `surumleri_listele`, `nesne_turlerini_listele`,
+`ozellik_tanimlarini_listele`, `iliski_tanimlarini_listele`,
+`kayit_turlerini_listele`, `kayit_alani_tanimlarini_listele`. Üst kaydı
+olmayan listeleme boş liste değil hata verir; boş liste ile "üst kayıt yok"
+karışmaz. Silme ve güncelleme işlevi bu aşamada yoktur.
+
+**Hata modeli.** Hepsi `TanimHatasi` altında, domain bağımsız:
+`GecersizTanim` (kod biçimi, boş gösterim adı, pozitif olmayan sürüm no;
+`ValueError`), `TanimBulunamadi` (verilen paket/sürüm/tür kimliği yok;
+`LookupError`), `MukerrerTanim` (aynı kapsamda aynı kod ya da sürüm no),
+`TanimSurumuUyusmuyor` (ilişkinin kaynak/hedef türü başka sürümde). Bu
+denetimler uygulama sözleşmesidir; veritabanı kısıtları son savunmadır ve
+aynı durumları ham `IntegrityError` ile de reddeder (testte iki düzey ayrı
+ayrı sınanır). Herhangi bir hata `islem()` bağlamında yükselir ve aynı
+işlemdeki bütün yazmalar geri alınır.
+
+**Testler** (`tests/test_tanim_sistemi.py`, gerçek SQLite, göç zinciriyle
+kurulmuş şema): paket tanımlanır ve okunur; aynı kodla ikinci paket hem
+uygulama hem veritabanı düzeyinde reddedilir; büyük-küçük harf ayrımı;
+geçersiz kod biçimleri (boş, boşluklu, rakamla ya da alt çizgiyle başlayan,
+Türkçe harfli, noktalama) ve boş gösterim adı reddedilir; sürüm tanımlanır ve
+numaraya göre listelenir, aynı pakette aynı numara reddedilir, farklı
+paketlerde serbesttir, `0`/`-1` reddedilir, kontrol/benzersizlik/dış anahtar
+kısıtları ham SQL ile de çalışır; nesne türü tanımlanır, aynı sürümde aynı
+kod reddedilir, aynı kod başka sürümde ayrı satırdır, olmayan sürüme
+eklenemez, dış anahtar veritabanında çalışır; özellik türe bağlanır ve
+tanımlanma sırasıyla listelenir, aynı türde aynı kod reddedilir, farklı türde
+serbesttir; ilişki kaynak ve hedefe yönlü bağlanır, ters yön ayrı tanımdır,
+türün kendisiyle ilişkisi kurulabilir, aynı kod reddedilir, başka sürümdeki
+tür kaynak ya da hedef olarak reddedilir ve aynı çapraz sürüm bileşik dış
+anahtarla veritabanında da reddedilirken aynı sürümdeki çift geçer; kayıt
+türü ve alanı için aynı kurallar; hatalar ortak tabandan türer; işlem
+içindeki hata (sentetik, mükerrerlik, veritabanı kısıtı) aynı işlemdeki
+önceki yazmaları da geri alır ve veritabanı kullanılabilir kalır; işlem
+kapandıktan sonra dönen nesneler okunabilir; iki farklı sahte domain (`DEMO`,
+`ENVANTER`) aynı tablolarda aynı işlevlerle yan yana tanımlanır.
+
+**Bilinçli sınırlar (Aşama 4.2'de yok, sonraki aşamaların kararı):** özellik
+ve kayıt alanı için veri tipi / zorunluluk bilgisi (plan bu aşama için tip
+sistemi tanımlamaz; 4.3 "özellik doğrulama" için gerekince yeni göçle
+eklenir); ilişki için çokluk (cardinality), zorunluluk ve hiyerarşi kısıtları
+(plan madde 8, Aşama 4.3); sürümün kilitlenmesi / değişmezliği (nesneler
+sürüme bağlanınca gerekecek); nesne ve kayıt örnekleri; tanım silme ve
+güncelleme; finans tanım paketi (Aşama 4.10).
 
 ## Mimari sınır: çekirdek ve finans
 
@@ -184,19 +299,40 @@ Kapsam dışı, bilinçli sınır: çalışma anında kurulan metinler
 (`import_module(ad)` değişkenle), `sys.modules` erişimi, `getattr`,
 `exec`/`eval`, üçüncü taraf paketlerin içinden geçen yollar. Test bütün
 Python dinamiklerini çözdüğünü iddia etmez; bunlar kod incelemesinin
-konusudur. Test kelime aramaz; `TRY`, `TL` gibi sözcükler denetim konusu
-değildir, korunan şey bağımlılık yönüdür. Denetleyicinin her yasak biçimi
+konusudur. Bağımlılık denetimi kelime aramaz; korunan şey bağımlılık
+yönüdür (kelime denetimi aşağıda ayrı bir mekanizmadır). Denetleyicinin her yasak biçimi
 yakaladığı, izinli biçimlere dokunmadığı ve dolaylı zinciri doğru
 raporladığı sentetik ağaçta ayrıca sınanır; çekirdek boşken yeşil kalması tek
-başına kanıt sayılmaz. Semantik sızıntı (finansal varsayımın adsız biçimde
-çekirdeğe girmesi) sonraki aşamalarda ayrı denetlenir.
+başına kanıt sayılmaz.
+
+**Finansal ad denetimi (Aşama 4.2, 2026-09-18).** Bağımlılık yönü tek başına
+yetmez: çekirdek finansı import etmeden de `BANKA = "BANKA"` ya da `class
+HesapHareketi` yazarak finansal anlam taşıyabilir. Aynı test dosyasındaki
+ikinci denetim `src/defteriki/cekirdek/**/*.py` ve `alembic/versions/*.py`
+dosyalarını AST ile okur; tanımlayıcıları (değişken, sınıf, fonksiyon,
+parametre, nitelik, anahtar argüman, import adı) ve metin sabitlerini
+(f-string parçaları dahil) parçalara ayırır (`HesapHareketi` → HESAP,
+HAREKETI; `para_birimi` → PARA, BIRIMI; Türkçe harfler ASCII'ye indirgenir)
+ve yasak adı **tam parça** olarak arar: `BANKA`, `HESAP`, `KART`, `KREDI`,
+`KMH`, `PARA_BIRIMI` (ardışık iki parça), `VARLIK`, `BORC`, `GIDER`,
+`BAKIYE`. `hesapla`, `kartela`, `borclu`, `kredibilite` yakalanmaz;
+`hesap_kodu`, `kmh_limiti`, `dict(hesap_no=1)`, `f"hesap {x}"` yakalanır.
+Docstring'ler, nitelik açıklamaları (tek başına duran metin ifadeleri) ve
+yorumlar denetim dışıdır: sınır anlatılabilir, ad ya da veri değeri olarak
+taşınamaz. Denetleyici sentetik dosyalarda her yasak biçimi yakaladığı ve
+izinli biçimlere dokunmadığı ile ayrıca sınanır. Bilinçli sınır: liste
+sabittir ve tam parça arar; `bankalar` gibi çekimli biçimler ve listede
+olmayan kavramlar yakalanmaz, bunlar kod incelemesinin konusudur. Gerçek
+semantik sızıntı (adsız finansal varsayım: sabit ölçek, sabit formül)
+sonraki aşamalarda ayrıca denetlenir.
 
 Aşama 4.0'da iki paket de boş açıldı. Aşama 4.1 sonrası `cekirdek/`
 `veritabani.py` (SQLite bağlantı politikası, `TabloTabani`, işlem sınırı) ve
-`gocler.py` (Alembic şema sürümü ve göç) modüllerini içerir; ikisi de
-finansı bilmez, uygulama tablosu tanımlamaz. `finans/` hâlâ boştur
-(`__init__.py` yalnız docstring taşır). Eski hattan modül taşınmamış, iş
-modeli ya da genel soyutlama yazılmamıştır.
+`gocler.py` (Alembic şema sürümü ve göç) modüllerini içerir. Aşama 4.2
+`tanim_tablolari.py` ve `tanim_islemleri.py` modüllerini ekledi: tanım
+tabloları ve yazma/okuma işlevleri, hiçbir domain'in türünü bilmeden
+("Tanım sistemi" bölümü). `finans/` hâlâ boştur (`__init__.py` yalnız
+docstring taşır). Eski hattan modül taşınmamış, iş modeli yazılmamıştır.
 
 ## Kurulum
 
@@ -248,7 +384,7 @@ kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çık�
 Bu sürümde tek araç var: `sistem_durumu`. Uygulama sürümü, ortam adı, şema
 sürümü ve yetenek listesini döndürür; yol, anahtar ya da ortam değişkeni
 içermez. Şema sürümü gerçektir (Aşama 4.1): veritabanı dosyası varsa
-Alembic'in `alembic_version` tablosundaki sürüm (`0001`; ileride zincirin
+Alembic'in `alembic_version` tablosundaki sürüm (bugün `0002`; zincirin
 başı neyse o), dosya yoksa ya da göç uygulanmamışsa `yok`. Dosya yokken
 bağlantı açılmaz, boş SQLite dosyası oluşmaz; araç göç çalıştırmaz. Testler
 dosya yok, dosya var ama göçsüz ve göç uygulanmış senaryolarını süreç içinde
@@ -440,10 +576,12 @@ src/defteriki/    uygulama paketi
   cekirdek/       genel çekirdek; finansı tanımaz
     veritabani.py   SQLite bağlantı politikası, TabloTabani, işlem sınırı
     gocler.py       Alembic şema sürümü ve süreç içi göç
+    tanim_tablolari.py  tanım paketi/sürüm/nesne türü/özellik/ilişki/kayıt türü/kayıt alanı tabloları
+    tanim_islemleri.py  tanım yazma ve okuma işlevleri, tanım hata modeli
   finans/         finansal domain; çekirdeği kullanabilir (henüz boş)
 alembic.ini       Alembic yapılandırması (veritabanı adresi yok)
-alembic/          env.py (yol merkezi ayarlardan), versions/ (göç zinciri)
-tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı)
+alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları)
+tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi)
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
 kavramlar_sozlugu.md   ortak kavram tanımları; ekleme ve değişiklik yalnız Abdüllatif'in onayıyla

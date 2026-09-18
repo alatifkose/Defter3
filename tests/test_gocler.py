@@ -1,8 +1,10 @@
-"""Göç zinciri ve şema sürümü testleri (Aşama 4.1).
+"""Göç zinciri ve şema sürümü testleri (Aşama 4.1, 4.2).
 
 Gerçek SQLite dosyaları, ``test`` ortamı, ``tmp_path`` altında kök. Süreç içi
 ``semayi_yukselt`` ve komut satırı (``alembic upgrade head``) aynı ``env.py``
 üzerinden aynı sonucu verir; komut satırı yolu merkezi ayarlardan alır.
+Aşama 4.2 ile zincir ``0002`` (tanım tabloları); ``upgrade → downgrade →
+upgrade`` döngüsü ve göç şemasının ORM metadata'sıyla birebirliği sınanır.
 """
 
 import os
@@ -12,11 +14,14 @@ from pathlib import Path
 
 import pytest
 from alembic import command
-from sqlalchemy import text
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
+from sqlalchemy import inspect, text
 
 from defteriki import ayarlar as ay
 from defteriki import baslangic, gunluk
 from defteriki.cekirdek import gocler
+from defteriki.cekirdek import tanim_tablolari as tt
 from defteriki.cekirdek import veritabani as vt
 
 DEFTERIKI_DEGISKENLERI = (
@@ -28,6 +33,9 @@ DEFTERIKI_DEGISKENLERI = (
     ay.GELEN_DIZINI_DEGISKENI,
 )
 BEKLEME_SANIYE = 120
+BASLANGIC_SURUMU = "0001"
+GUNCEL_SURUM = "0002"
+GUNCEL_TABLOLAR = sorted((gocler.SURUM_TABLOSU, *tt.TANIM_TABLOLARI))
 
 
 @pytest.fixture(autouse=True)
@@ -82,10 +90,10 @@ def test_sifir_veritabanindan_upgrade_head(
 
         surum = gocler.semayi_yukselt(v)
 
-        assert surum == "0001" == gocler.beklenen_sema_surumu()
-        assert gocler.sema_surumu(v) == "0001"
+        assert surum == GUNCEL_SURUM == gocler.beklenen_sema_surumu()
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
         tablolar = [ad for tur, ad, _ in _sema(v) if tur == "table"]
-        assert tablolar == [gocler.SURUM_TABLOSU]  # uygulama tablosu yok
+        assert tablolar == GUNCEL_TABLOLAR  # sürüm tablosu + tanım tabloları
     finally:
         v.kapat()
 
@@ -97,7 +105,7 @@ def test_iki_sifir_veritabani_ayni_semayi_uretir(
     ikinci = _yukselt(tmp_path / "b", monkeypatch)
 
     assert birinci == ikinci
-    assert birinci[0] == "0001"
+    assert birinci[0] == GUNCEL_SURUM
 
 
 def test_tekrar_upgrade_semayi_degistirmez(
@@ -108,8 +116,132 @@ def test_tekrar_upgrade_semayi_degistirmez(
     try:
         gocler.semayi_yukselt(v)
         once = _sema(v)
-        assert gocler.semayi_yukselt(v) == "0001"
+        assert gocler.semayi_yukselt(v) == GUNCEL_SURUM
         assert _sema(v) == once
+    finally:
+        v.kapat()
+
+
+# --- Aşama 4.2: downgrade döngüsü ve şema/ORM birebirliği -----------------------------
+
+
+def test_upgrade_downgrade_upgrade_dongusu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``head`` → ``0001`` → ``head``: tanım tabloları gider, gelir; şema aynı kalır."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+    try:
+        assert gocler.semayi_yukselt(v) == GUNCEL_SURUM
+        tam_sema = _sema(v)
+
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            command.downgrade(alembic, BASLANGIC_SURUMU)
+
+        assert gocler.sema_surumu(v) == BASLANGIC_SURUMU
+        assert [ad for tur, ad, _ in _sema(v) if tur == "table"] == [
+            gocler.SURUM_TABLOSU
+        ]
+        assert [ad for tur, ad, _ in _sema(v) if tur == "index"] == []
+
+        assert gocler.semayi_yukselt(v) == GUNCEL_SURUM
+        assert _sema(v) == tam_sema
+        with v.islem() as oturum:
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+    finally:
+        v.kapat()
+
+
+def test_goc_semasi_orm_metadata_ile_birebir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Elle yazılan ``0002`` göçü ile ``tanim_tablolari`` aynı şemayı üretir:
+    Alembic karşılaştırması (tablo, sütun, tip, null, dış anahtar, benzersizlik,
+    indeks) fark bulmaz."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    try:
+        gocler.semayi_yukselt(v)
+        with v.motor.connect() as baglanti:
+            baglam = MigrationContext.configure(
+                baglanti, opts={"compare_type": True, "render_as_batch": True}
+            )
+            farklar = compare_metadata(baglam, vt.TabloTabani.metadata)
+        assert farklar == []
+        assert set(tt.TANIM_TABLOLARI) <= set(vt.TabloTabani.metadata.tables)
+    finally:
+        v.kapat()
+
+
+def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    try:
+        gocler.semayi_yukselt(v)
+        with v.motor.connect() as baglanti:
+            denetci = inspect(baglanti)
+            for tablo in tt.TANIM_TABLOLARI:
+                assert denetci.get_pk_constraint(tablo)["name"] == f"pk_{tablo}"
+                assert denetci.get_pk_constraint(tablo)["constrained_columns"] == ["id"]
+                for fk in denetci.get_foreign_keys(tablo):
+                    assert str(fk["name"]).startswith(f"fk_{tablo}_"), fk
+                    assert fk.get("options", {}).get("ondelete") == "RESTRICT", fk
+                for uq in denetci.get_unique_constraints(tablo):
+                    assert str(uq["name"]).startswith(f"uq_{tablo}_"), uq
+                for ck in denetci.get_check_constraints(tablo):
+                    assert str(ck["name"]).startswith(f"ck_{tablo}_"), ck
+                for ix in denetci.get_indexes(tablo):
+                    assert str(ix["name"]).startswith(f"ix_{tablo}_"), ix
+            dis_anahtarlar = {
+                tablo: sorted(str(fk["name"]) for fk in denetci.get_foreign_keys(tablo))
+                for tablo in tt.TANIM_TABLOLARI
+            }
+            assert dis_anahtarlar == {
+                "tanim_paketi": [],
+                "tanim_surumu": ["fk_tanim_surumu_tanim_paketi_id_tanim_paketi"],
+                "nesne_turu": ["fk_nesne_turu_tanim_surumu_id_tanim_surumu"],
+                "ozellik_tanimi": ["fk_ozellik_tanimi_nesne_turu_id_nesne_turu"],
+                "iliski_tanimi": [
+                    "fk_iliski_tanimi_hedef_nesne_turu_id_tanim_surumu_id_nesne_turu",
+                    "fk_iliski_tanimi_kaynak_nesne_turu_id_tanim_surumu_id_nesne_turu",
+                    "fk_iliski_tanimi_tanim_surumu_id_tanim_surumu",
+                ],
+                "kayit_turu": ["fk_kayit_turu_tanim_surumu_id_tanim_surumu"],
+                "kayit_alani_tanimi": [
+                    "fk_kayit_alani_tanimi_kayit_turu_id_kayit_turu"
+                ],
+            }
+            benzersizler = {
+                tablo: sorted(
+                    str(uq["name"]) for uq in denetci.get_unique_constraints(tablo)
+                )
+                for tablo in tt.TANIM_TABLOLARI
+            }
+            assert benzersizler == {
+                "tanim_paketi": ["uq_tanim_paketi_kod"],
+                "tanim_surumu": ["uq_tanim_surumu_tanim_paketi_id_surum_no"],
+                "nesne_turu": [
+                    "uq_nesne_turu_id_tanim_surumu_id",
+                    "uq_nesne_turu_tanim_surumu_id_kod",
+                ],
+                "ozellik_tanimi": ["uq_ozellik_tanimi_nesne_turu_id_kod"],
+                "iliski_tanimi": ["uq_iliski_tanimi_tanim_surumu_id_kod"],
+                "kayit_turu": ["uq_kayit_turu_tanim_surumu_id_kod"],
+                "kayit_alani_tanimi": ["uq_kayit_alani_tanimi_kayit_turu_id_kod"],
+            }
+            assert sorted(
+                str(ix["name"]) for ix in denetci.get_indexes("iliski_tanimi")
+            ) == [
+                "ix_iliski_tanimi_hedef_nesne_turu_id",
+                "ix_iliski_tanimi_kaynak_nesne_turu_id",
+            ]
+            assert [
+                str(ck["name"]) for ck in denetci.get_check_constraints("tanim_surumu")
+            ] == ["ck_tanim_surumu_surum_no_pozitif"]
     finally:
         v.kapat()
 
@@ -188,7 +320,7 @@ def test_dusen_goc_adimi_ddl_dahil_tamamen_geri_alinir(
         assert gocler.sema_surumu(v) is None  # sürüm ilerlemedi
         assert tablolar == []  # alembic_version bile yazılmadı
 
-        assert gocler.semayi_yukselt(v) == "0001"  # veritabanı kullanılabilir
+        assert gocler.semayi_yukselt(v) == GUNCEL_SURUM  # veritabanı kullanılabilir
         with v.islem() as oturum:
             assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
     finally:
@@ -259,7 +391,7 @@ def test_komut_satiri_upgrade_head_merkezi_yolu_kullanir(
     assert ayar.veritabani_yolu.is_file()
     v = vt.Veritabani(ayar.veritabani_yolu)
     try:
-        assert gocler.sema_surumu(v) == "0001"
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
         assert _sema(v) == _yukselt(tmp_path / "surec_ici", monkeypatch)[1]
     finally:
         v.kapat()

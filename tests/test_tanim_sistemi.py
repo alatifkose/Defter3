@@ -1,0 +1,722 @@
+"""Tanım sistemi testleri (Aşama 4.2).
+
+Gerçek SQLite dosyası, ``test`` ortamı, ``tmp_path`` altında kök; şema gerçek
+göç zinciriyle (``semayi_yukselt``) kurulur. Tanımlar finans dışı sahte
+paketlerdir (``DEMO``: ``TEST_KISI``, ``TEST_CIHAZ``, ``TEST_OLAY``;
+``ENVANTER``: ``DEPO``, ``RAF``, ``URUN``); çekirdek bunların anlamını bilmez.
+
+İki düzey sınanır: uygulama sözleşmesi (``tanim_islemleri`` hataları) ve
+veritabanı kısıtları (ham SQL ile aynı ihlal ``IntegrityError`` verir).
+"""
+
+from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+
+from defteriki import ayarlar as ay
+from defteriki.cekirdek import gocler
+from defteriki.cekirdek import tanim_islemleri as ti
+from defteriki.cekirdek import tanim_tablolari as tt
+from defteriki.cekirdek import veritabani as vt
+
+DEFTERIKI_DEGISKENLERI = (
+    ay.ORTAM_DEGISKENI,
+    ay.VERI_KOKU_DEGISKENI,
+    ay.VERITABANI_YOLU_DEGISKENI,
+    ay.BELGE_DIZINI_DEGISKENI,
+    ay.LOG_DIZINI_DEGISKENI,
+    ay.GELEN_DIZINI_DEGISKENI,
+)
+
+
+@pytest.fixture(autouse=True)
+def temiz_cevre(monkeypatch: pytest.MonkeyPatch) -> None:
+    for degisken in DEFTERIKI_DEGISKENLERI:
+        monkeypatch.delenv(degisken, raising=False)
+
+
+@pytest.fixture
+def veritabani(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[vt.Veritabani]:
+    """Göç zinciri ``head``'e uygulanmış gerçek SQLite dosyası."""
+    monkeypatch.setenv(ay.ORTAM_DEGISKENI, "test")
+    monkeypatch.setenv(ay.VERI_KOKU_DEGISKENI, str(tmp_path / "kok"))
+    ayar = ay.ayarlari_yukle()
+    ay.dizinleri_hazirla(ayar)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    gocler.semayi_yukselt(v)
+    yield v
+    v.kapat()
+
+
+@dataclass(frozen=True, slots=True)
+class Demo:
+    """``DEMO`` paketinin kimlikleri."""
+
+    paket_id: int
+    surum_id: int
+    kisi_id: int
+    cihaz_id: int
+    olay_id: int
+
+
+@pytest.fixture
+def demo(veritabani: vt.Veritabani) -> Demo:
+    with veritabani.islem() as oturum:
+        paket = ti.paket_tanimla(oturum, "DEMO", "Demo tanım paketi")
+        surum = ti.surum_tanimla(oturum, paket.id, 1, "ilk sürüm")
+        kisi = ti.nesne_turu_tanimla(oturum, surum.id, "TEST_KISI", "Kişi")
+        cihaz = ti.nesne_turu_tanimla(oturum, surum.id, "TEST_CIHAZ", "Cihaz")
+        olay = ti.kayit_turu_tanimla(oturum, surum.id, "TEST_OLAY", "Olay")
+        return Demo(paket.id, surum.id, kisi.id, cihaz.id, olay.id)
+
+
+def _sayi(v: vt.Veritabani, tablo: str) -> int:
+    with v.islem() as oturum:
+        return int(oturum.execute(text(f"SELECT count(*) FROM {tablo}")).scalar_one())
+
+
+# --- tanım paketi ---------------------------------------------------------------------
+
+
+def test_paket_tanimlanir_ve_okunur(veritabani: vt.Veritabani) -> None:
+    with veritabani.islem() as oturum:
+        paket = ti.paket_tanimla(oturum, "DEMO", "Demo tanım paketi", "açıklama")
+        assert paket.id is not None
+
+    with veritabani.islem() as oturum:
+        bulunan = ti.paket_bul(oturum, "DEMO")
+        assert bulunan is not None
+        assert (bulunan.id, bulunan.kod, bulunan.gosterim_adi, bulunan.aciklama) == (
+            paket.id,
+            "DEMO",
+            "Demo tanım paketi",
+            "açıklama",
+        )
+        assert bulunan.olusturma_zamani.tzinfo is None  # UTC, saat dilimsiz
+        assert [p.kod for p in ti.paketleri_listele(oturum)] == ["DEMO"]
+        assert ti.paket_bul(oturum, "YOK") is None
+
+
+def test_ayni_kodla_ikinci_paket_reddedilir(veritabani: vt.Veritabani) -> None:
+    with veritabani.islem() as oturum:
+        ti.paket_tanimla(oturum, "DEMO", "Demo")
+
+    with pytest.raises(ti.MukerrerTanim, match="'DEMO' zaten var"):
+        with veritabani.islem() as oturum:
+            ti.paket_tanimla(oturum, "DEMO", "Başka gösterim adı")
+
+    assert _sayi(veritabani, tt.TANIM_PAKETI) == 1
+
+
+def test_paket_kodu_benzersizligi_veritabaninda_da_calisir(
+    veritabani: vt.Veritabani,
+) -> None:
+    with veritabani.islem() as oturum:
+        ti.paket_tanimla(oturum, "DEMO", "Demo")
+
+    with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(
+                text(
+                    "INSERT INTO tanim_paketi (kod, gosterim_adi, olusturma_zamani) "
+                    "VALUES ('DEMO', 'kopya', '2026-09-18 00:00:00')"
+                )
+            )
+
+    assert _sayi(veritabani, tt.TANIM_PAKETI) == 1
+
+
+def test_kod_buyuk_kucuk_harf_ayrimi_yapar(veritabani: vt.Veritabani) -> None:
+    """Belgelenen davranış: kod verildiği gibi saklanır ve karşılaştırılır."""
+    with veritabani.islem() as oturum:
+        ti.paket_tanimla(oturum, "DEMO", "Büyük")
+        ti.paket_tanimla(oturum, "Demo", "Karışık")
+
+    with veritabani.islem() as oturum:
+        assert [p.kod for p in ti.paketleri_listele(oturum)] == ["DEMO", "Demo"]
+
+
+@pytest.mark.parametrize(
+    "kod",
+    ["", " ", "1DEMO", "DE MO", "DE-MO", "DEMO.1", "ÖRNEK", "demo!", "_DEMO"],
+)
+def test_gecersiz_kod_bicimi_reddedilir(veritabani: vt.Veritabani, kod: str) -> None:
+    with pytest.raises(ti.GecersizTanim, match="geçersiz"):
+        with veritabani.islem() as oturum:
+            ti.paket_tanimla(oturum, kod, "Demo")
+
+    assert _sayi(veritabani, tt.TANIM_PAKETI) == 0
+
+
+@pytest.mark.parametrize("kod", ["DEMO", "demo", "Demo_2", "d", "TEST_KISI_01"])
+def test_gecerli_kod_bicimleri_kabul_edilir(
+    veritabani: vt.Veritabani, kod: str
+) -> None:
+    with veritabani.islem() as oturum:
+        assert ti.paket_tanimla(oturum, kod, "Demo").kod == kod
+
+
+def test_bos_gosterim_adi_reddedilir(veritabani: vt.Veritabani) -> None:
+    with pytest.raises(ti.GecersizTanim, match="gösterim adı boş"):
+        with veritabani.islem() as oturum:
+            ti.paket_tanimla(oturum, "DEMO", "   ")
+
+
+# --- tanım sürümü ---------------------------------------------------------------------
+
+
+def test_surum_tanimlanir_ve_sirali_listelenir(veritabani: vt.Veritabani) -> None:
+    with veritabani.islem() as oturum:
+        paket = ti.paket_tanimla(oturum, "DEMO", "Demo")
+        ikinci = ti.surum_tanimla(oturum, paket.id, 2, "ikinci")
+        birinci = ti.surum_tanimla(oturum, paket.id, 1)
+
+    with veritabani.islem() as oturum:
+        surumler = ti.surumleri_listele(oturum, paket.id)
+        assert [(s.id, s.surum_no, s.aciklama) for s in surumler] == [
+            (birinci.id, 1, None),
+            (ikinci.id, 2, "ikinci"),
+        ]
+        assert all(s.tanim_paketi_id == paket.id for s in surumler)
+
+
+def test_ayni_pakette_ayni_surum_no_reddedilir(veritabani: vt.Veritabani) -> None:
+    with veritabani.islem() as oturum:
+        paket = ti.paket_tanimla(oturum, "DEMO", "Demo")
+        ti.surum_tanimla(oturum, paket.id, 1)
+
+    with pytest.raises(ti.MukerrerTanim, match="sürüm 1 zaten var"):
+        with veritabani.islem() as oturum:
+            ti.surum_tanimla(oturum, paket.id, 1)
+
+    assert _sayi(veritabani, tt.TANIM_SURUMU) == 1
+
+
+def test_farkli_paketler_ayni_surum_noyu_kullanabilir(
+    veritabani: vt.Veritabani,
+) -> None:
+    with veritabani.islem() as oturum:
+        a = ti.paket_tanimla(oturum, "DEMO", "Demo")
+        b = ti.paket_tanimla(oturum, "ENVANTER", "Envanter")
+        ti.surum_tanimla(oturum, a.id, 1)
+        ti.surum_tanimla(oturum, b.id, 1)
+
+    assert _sayi(veritabani, tt.TANIM_SURUMU) == 2
+
+
+@pytest.mark.parametrize("surum_no", [0, -1])
+def test_pozitif_olmayan_surum_no_reddedilir(
+    veritabani: vt.Veritabani, surum_no: int
+) -> None:
+    with veritabani.islem() as oturum:
+        paket = ti.paket_tanimla(oturum, "DEMO", "Demo")
+
+    with pytest.raises(ti.GecersizTanim, match="pozitif"):
+        with veritabani.islem() as oturum:
+            ti.surum_tanimla(oturum, paket.id, surum_no)
+
+
+def test_surum_kisitlari_veritabaninda_da_calisir(veritabani: vt.Veritabani) -> None:
+    with veritabani.islem() as oturum:
+        paket = ti.paket_tanimla(oturum, "DEMO", "Demo")
+        ti.surum_tanimla(oturum, paket.id, 1)
+
+    ekle = (
+        "INSERT INTO tanim_surumu (tanim_paketi_id, surum_no, olusturma_zamani) "
+        "VALUES (:paket, :no, '2026-09-18 00:00:00')"
+    )
+    with pytest.raises(IntegrityError, match="CHECK constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(text(ekle), {"paket": paket.id, "no": 0})
+    with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(text(ekle), {"paket": paket.id, "no": 1})
+    with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(text(ekle), {"paket": paket.id + 100, "no": 2})
+
+    assert _sayi(veritabani, tt.TANIM_SURUMU) == 1
+
+
+def test_olmayan_pakete_surum_eklenemez(veritabani: vt.Veritabani) -> None:
+    with pytest.raises(ti.TanimBulunamadi, match="tanım paketi bulunamadı"):
+        with veritabani.islem() as oturum:
+            ti.surum_tanimla(oturum, 999, 1)
+
+
+# --- nesne türü -----------------------------------------------------------------------
+
+
+def test_nesne_turu_tanimlanir_ve_listelenir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with veritabani.islem() as oturum:
+        turler = ti.nesne_turlerini_listele(oturum, demo.surum_id)
+        assert [(t.kod, t.gosterim_adi) for t in turler] == [
+            ("TEST_CIHAZ", "Cihaz"),
+            ("TEST_KISI", "Kişi"),
+        ]
+        assert all(t.tanim_surumu_id == demo.surum_id for t in turler)
+
+
+def test_ayni_surumde_ayni_nesne_turu_kodu_reddedilir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with pytest.raises(ti.MukerrerTanim, match="'TEST_KISI' bu sürümde zaten var"):
+        with veritabani.islem() as oturum:
+            ti.nesne_turu_tanimla(oturum, demo.surum_id, "TEST_KISI", "Başka")
+
+    assert _sayi(veritabani, tt.NESNE_TURU) == 2
+
+
+def test_ayni_kod_farkli_surumde_serbest(veritabani: vt.Veritabani, demo: Demo) -> None:
+    """Sürüm 2, sürüm 1'in türünü değiştirmez; kendi TEST_KISI satırını taşır."""
+    with veritabani.islem() as oturum:
+        surum2 = ti.surum_tanimla(oturum, demo.paket_id, 2)
+        yeni = ti.nesne_turu_tanimla(oturum, surum2.id, "TEST_KISI", "Kişi (v2)")
+
+    with veritabani.islem() as oturum:
+        eski = [t for t in ti.nesne_turlerini_listele(oturum, demo.surum_id)]
+        assert [t.kod for t in eski] == ["TEST_CIHAZ", "TEST_KISI"]
+        assert [t.id for t in ti.nesne_turlerini_listele(oturum, surum2.id)] == [
+            yeni.id
+        ]
+        assert yeni.id != demo.kisi_id
+
+
+def test_olmayan_surume_nesne_turu_eklenemez(veritabani: vt.Veritabani) -> None:
+    with pytest.raises(ti.TanimBulunamadi, match="tanım sürümü bulunamadı"):
+        with veritabani.islem() as oturum:
+            ti.nesne_turu_tanimla(oturum, 999, "TEST_KISI", "Kişi")
+
+    assert _sayi(veritabani, tt.NESNE_TURU) == 0
+
+
+def test_nesne_turu_dis_anahtari_veritabaninda_calisir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(
+                text(
+                    "INSERT INTO nesne_turu (tanim_surumu_id, kod, gosterim_adi) "
+                    "VALUES (:surum, 'TEST_ARAC', 'Araç')"
+                ),
+                {"surum": demo.surum_id + 100},
+            )
+
+    assert _sayi(veritabani, tt.NESNE_TURU) == 2
+
+
+# --- özellik tanımı -------------------------------------------------------------------
+
+
+def test_ozellik_nesne_turune_baglanir(veritabani: vt.Veritabani, demo: Demo) -> None:
+    with veritabani.islem() as oturum:
+        seri = ti.ozellik_tanimla(oturum, demo.cihaz_id, "seri_no", "Seri numarası")
+        model = ti.ozellik_tanimla(oturum, demo.cihaz_id, "model", "Model", "üretici")
+
+    with veritabani.islem() as oturum:
+        ozellikler = ti.ozellik_tanimlarini_listele(oturum, demo.cihaz_id)
+        assert [(o.id, o.kod, o.gosterim_adi, o.aciklama) for o in ozellikler] == [
+            (seri.id, "seri_no", "Seri numarası", None),
+            (model.id, "model", "Model", "üretici"),
+        ]
+        assert all(o.nesne_turu_id == demo.cihaz_id for o in ozellikler)
+        assert ti.ozellik_tanimlarini_listele(oturum, demo.kisi_id) == []
+
+
+def test_ayni_turde_ayni_ozellik_kodu_reddedilir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with veritabani.islem() as oturum:
+        ti.ozellik_tanimla(oturum, demo.cihaz_id, "seri_no", "Seri")
+
+    with pytest.raises(ti.MukerrerTanim, match="'seri_no' nesne türü 'TEST_CIHAZ'"):
+        with veritabani.islem() as oturum:
+            ti.ozellik_tanimla(oturum, demo.cihaz_id, "seri_no", "Yine seri")
+
+    assert _sayi(veritabani, tt.OZELLIK_TANIMI) == 1
+
+
+def test_ayni_ozellik_kodu_farkli_turde_serbest(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with veritabani.islem() as oturum:
+        ti.ozellik_tanimla(oturum, demo.cihaz_id, "ad", "Ad")
+        ti.ozellik_tanimla(oturum, demo.kisi_id, "ad", "Ad")
+
+    assert _sayi(veritabani, tt.OZELLIK_TANIMI) == 2
+
+
+def test_olmayan_nesne_turune_ozellik_eklenemez(veritabani: vt.Veritabani) -> None:
+    with pytest.raises(ti.TanimBulunamadi, match="nesne türü bulunamadı"):
+        with veritabani.islem() as oturum:
+            ti.ozellik_tanimla(oturum, 999, "seri_no", "Seri")
+
+
+def test_ozellik_dis_anahtari_veritabaninda_calisir(veritabani: vt.Veritabani) -> None:
+    with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(
+                text(
+                    "INSERT INTO ozellik_tanimi (nesne_turu_id, kod, gosterim_adi) "
+                    "VALUES (999, 'seri_no', 'Seri')"
+                )
+            )
+
+
+# --- ilişki tanımı --------------------------------------------------------------------
+
+
+def test_iliski_kaynak_ve_hedef_ture_yonlu_baglanir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with veritabani.islem() as oturum:
+        iliski = ti.iliski_tanimla(
+            oturum, demo.surum_id, "KULLANIR", "Kullanır", demo.kisi_id, demo.cihaz_id
+        )
+
+    with veritabani.islem() as oturum:
+        [bulunan] = ti.iliski_tanimlarini_listele(oturum, demo.surum_id)
+        assert bulunan.id == iliski.id
+        assert bulunan.kod == "KULLANIR"
+        assert bulunan.tanim_surumu_id == demo.surum_id
+        assert (bulunan.kaynak_nesne_turu_id, bulunan.hedef_nesne_turu_id) == (
+            demo.kisi_id,
+            demo.cihaz_id,
+        )  # yön korunur: kişi → cihaz, tersi değil
+
+
+def test_ters_yonlu_iliski_ayri_tanimdir(veritabani: vt.Veritabani, demo: Demo) -> None:
+    with veritabani.islem() as oturum:
+        ti.iliski_tanimla(
+            oturum, demo.surum_id, "KULLANIR", "Kullanır", demo.kisi_id, demo.cihaz_id
+        )
+        ti.iliski_tanimla(
+            oturum,
+            demo.surum_id,
+            "KULLANICISI",
+            "Kullanıcısı",
+            demo.cihaz_id,
+            demo.kisi_id,
+        )
+
+    assert _sayi(veritabani, tt.ILISKI_TANIMI) == 2
+
+
+def test_turun_kendisiyle_iliskisi_tanimlanabilir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with veritabani.islem() as oturum:
+        iliski = ti.iliski_tanimla(
+            oturum, demo.surum_id, "TANIR", "Tanır", demo.kisi_id, demo.kisi_id
+        )
+    assert iliski.kaynak_nesne_turu_id == iliski.hedef_nesne_turu_id == demo.kisi_id
+
+
+def test_ayni_surumde_ayni_iliski_kodu_reddedilir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with veritabani.islem() as oturum:
+        ti.iliski_tanimla(
+            oturum, demo.surum_id, "KULLANIR", "Kullanır", demo.kisi_id, demo.cihaz_id
+        )
+
+    with pytest.raises(ti.MukerrerTanim, match="'KULLANIR' bu sürümde zaten var"):
+        with veritabani.islem() as oturum:
+            ti.iliski_tanimla(
+                oturum, demo.surum_id, "KULLANIR", "Başka", demo.cihaz_id, demo.kisi_id
+            )
+
+    assert _sayi(veritabani, tt.ILISKI_TANIMI) == 1
+
+
+@pytest.mark.parametrize("rol", ["kaynak", "hedef"])
+def test_baska_surumdeki_tur_iliskiye_baglanamaz(
+    veritabani: vt.Veritabani, demo: Demo, rol: str
+) -> None:
+    """Yanlış paket/sürüm ilişkisi: tür başka sürümde, ilişki bu sürümde."""
+    with veritabani.islem() as oturum:
+        surum2 = ti.surum_tanimla(oturum, demo.paket_id, 2)
+        yabanci = ti.nesne_turu_tanimla(oturum, surum2.id, "TEST_ARAC", "Araç")
+
+    kaynak, hedef = (
+        (yabanci.id, demo.cihaz_id) if rol == "kaynak" else (demo.kisi_id, yabanci.id)
+    )
+    with pytest.raises(ti.TanimSurumuUyusmuyor, match=f"{rol} türü 'TEST_ARAC'"):
+        with veritabani.islem() as oturum:
+            ti.iliski_tanimla(
+                oturum, demo.surum_id, "KULLANIR", "Kullanır", kaynak, hedef
+            )
+
+    assert _sayi(veritabani, tt.ILISKI_TANIMI) == 0
+
+
+def test_capraz_surum_iliskisi_veritabaninda_da_reddedilir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    """Bileşik dış anahtar: (tür, sürüm) çifti nesne_turu'nda birlikte olmalı."""
+    with veritabani.islem() as oturum:
+        surum2 = ti.surum_tanimla(oturum, demo.paket_id, 2)
+        yabanci = ti.nesne_turu_tanimla(oturum, surum2.id, "TEST_ARAC", "Araç")
+
+    ekle = text(
+        "INSERT INTO iliski_tanimi (tanim_surumu_id, kod, gosterim_adi, "
+        "kaynak_nesne_turu_id, hedef_nesne_turu_id) "
+        "VALUES (:surum, 'KULLANIR', 'Kullanır', :kaynak, :hedef)"
+    )
+    with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(
+                ekle,
+                {"surum": demo.surum_id, "kaynak": yabanci.id, "hedef": demo.cihaz_id},
+            )
+    with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(
+                ekle,
+                {"surum": demo.surum_id, "kaynak": demo.kisi_id, "hedef": yabanci.id},
+            )
+    with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(ekle, {"surum": demo.surum_id, "kaynak": 999, "hedef": 998})
+
+    # Aynı sürümdeki çift geçer: kısıt gerçek ihlali ayırt ediyor.
+    with veritabani.islem() as oturum:
+        oturum.execute(
+            ekle,
+            {"surum": demo.surum_id, "kaynak": demo.kisi_id, "hedef": demo.cihaz_id},
+        )
+    assert _sayi(veritabani, tt.ILISKI_TANIMI) == 1
+
+
+def test_olmayan_tur_iliskiye_baglanamaz(veritabani: vt.Veritabani, demo: Demo) -> None:
+    with pytest.raises(ti.TanimBulunamadi, match="nesne türü bulunamadı: kimlik 999"):
+        with veritabani.islem() as oturum:
+            ti.iliski_tanimla(
+                oturum, demo.surum_id, "KULLANIR", "Kullanır", demo.kisi_id, 999
+            )
+
+
+# --- kayıt türü ve kayıt alanı --------------------------------------------------------
+
+
+def test_kayit_turu_tanimlanir(veritabani: vt.Veritabani, demo: Demo) -> None:
+    with veritabani.islem() as oturum:
+        [olay] = ti.kayit_turlerini_listele(oturum, demo.surum_id)
+        assert (olay.id, olay.kod, olay.gosterim_adi) == (
+            demo.olay_id,
+            "TEST_OLAY",
+            "Olay",
+        )
+        assert olay.tanim_surumu_id == demo.surum_id
+
+
+def test_ayni_surumde_ayni_kayit_turu_kodu_reddedilir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with pytest.raises(ti.MukerrerTanim, match="'TEST_OLAY' bu sürümde zaten var"):
+        with veritabani.islem() as oturum:
+            ti.kayit_turu_tanimla(oturum, demo.surum_id, "TEST_OLAY", "Başka")
+
+    assert _sayi(veritabani, tt.KAYIT_TURU) == 1
+
+
+def test_nesne_turu_ve_kayit_turu_ayni_kodu_tasiyabilir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    """Kapsamlar ayrı: nesne türü kodu ile kayıt türü kodu çakışmaz."""
+    with veritabani.islem() as oturum:
+        ti.kayit_turu_tanimla(oturum, demo.surum_id, "TEST_KISI", "Kişi olayı")
+
+    assert _sayi(veritabani, tt.KAYIT_TURU) == 2
+
+
+def test_olmayan_surume_kayit_turu_eklenemez(veritabani: vt.Veritabani) -> None:
+    with pytest.raises(ti.TanimBulunamadi, match="tanım sürümü bulunamadı"):
+        with veritabani.islem() as oturum:
+            ti.kayit_turu_tanimla(oturum, 999, "TEST_OLAY", "Olay")
+
+
+def test_kayit_alani_kayit_turune_baglanir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with veritabani.islem() as oturum:
+        aciklama = ti.kayit_alani_tanimla(oturum, demo.olay_id, "aciklama", "Açıklama")
+        miktar = ti.kayit_alani_tanimla(oturum, demo.olay_id, "miktar", "Miktar")
+
+    with veritabani.islem() as oturum:
+        alanlar = ti.kayit_alani_tanimlarini_listele(oturum, demo.olay_id)
+        assert [(a.id, a.kod, a.gosterim_adi) for a in alanlar] == [
+            (aciklama.id, "aciklama", "Açıklama"),
+            (miktar.id, "miktar", "Miktar"),
+        ]
+        assert all(a.kayit_turu_id == demo.olay_id for a in alanlar)
+
+
+def test_ayni_kayit_turunde_ayni_alan_kodu_reddedilir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with veritabani.islem() as oturum:
+        ti.kayit_alani_tanimla(oturum, demo.olay_id, "miktar", "Miktar")
+
+    with pytest.raises(ti.MukerrerTanim, match="'miktar' kayıt türü 'TEST_OLAY'"):
+        with veritabani.islem() as oturum:
+            ti.kayit_alani_tanimla(oturum, demo.olay_id, "miktar", "Yine miktar")
+
+    assert _sayi(veritabani, tt.KAYIT_ALANI_TANIMI) == 1
+
+
+def test_olmayan_kayit_turune_alan_eklenemez(veritabani: vt.Veritabani) -> None:
+    with pytest.raises(ti.TanimBulunamadi, match="kayıt türü bulunamadı"):
+        with veritabani.islem() as oturum:
+            ti.kayit_alani_tanimla(oturum, 999, "miktar", "Miktar")
+
+
+def test_kayit_alani_dis_anahtari_veritabaninda_calisir(
+    veritabani: vt.Veritabani,
+) -> None:
+    with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(
+                text(
+                    "INSERT INTO kayit_alani_tanimi (kayit_turu_id, kod, gosterim_adi) "
+                    "VALUES (999, 'miktar', 'Miktar')"
+                )
+            )
+
+
+# --- listeleme ve okuma sözleşmesi ----------------------------------------------------
+
+
+def test_olmayan_ust_kayit_icin_listeleme_hata_verir(veritabani: vt.Veritabani) -> None:
+    """Boş liste ile 'üst kayıt yok' karışmaz."""
+    with veritabani.islem() as oturum:
+        with pytest.raises(ti.TanimBulunamadi):
+            ti.surumleri_listele(oturum, 999)
+        with pytest.raises(ti.TanimBulunamadi):
+            ti.nesne_turlerini_listele(oturum, 999)
+        with pytest.raises(ti.TanimBulunamadi):
+            ti.ozellik_tanimlarini_listele(oturum, 999)
+        with pytest.raises(ti.TanimBulunamadi):
+            ti.iliski_tanimlarini_listele(oturum, 999)
+        with pytest.raises(ti.TanimBulunamadi):
+            ti.kayit_turlerini_listele(oturum, 999)
+        with pytest.raises(ti.TanimBulunamadi):
+            ti.kayit_alani_tanimlarini_listele(oturum, 999)
+
+
+def test_hatalar_ortak_tabandan_turer() -> None:
+    for sinif in (
+        ti.GecersizTanim,
+        ti.TanimBulunamadi,
+        ti.MukerrerTanim,
+        ti.TanimSurumuUyusmuyor,
+    ):
+        assert issubclass(sinif, ti.TanimHatasi)
+    assert issubclass(ti.GecersizTanim, ValueError)
+    assert issubclass(ti.TanimBulunamadi, LookupError)
+
+
+# --- işlem sınırı ---------------------------------------------------------------------
+
+
+def test_islem_icindeki_hata_butun_tanimlari_geri_alir(
+    veritabani: vt.Veritabani,
+) -> None:
+    with pytest.raises(RuntimeError, match="sentetik"):
+        with veritabani.islem() as oturum:
+            paket = ti.paket_tanimla(oturum, "DEMO", "Demo")
+            surum = ti.surum_tanimla(oturum, paket.id, 1)
+            tur = ti.nesne_turu_tanimla(oturum, surum.id, "TEST_KISI", "Kişi")
+            ti.ozellik_tanimla(oturum, tur.id, "ad", "Ad")
+            raise RuntimeError("sentetik hata")
+
+    for tablo in tt.TANIM_TABLOLARI:
+        assert _sayi(veritabani, tablo) == 0, tablo
+
+
+def test_mukerrerlik_hatasi_ayni_islemdeki_onceki_yazmalari_da_geri_alir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with pytest.raises(ti.MukerrerTanim):
+        with veritabani.islem() as oturum:
+            ti.nesne_turu_tanimla(oturum, demo.surum_id, "TEST_ARAC", "Araç")
+            ti.ozellik_tanimla(oturum, demo.cihaz_id, "seri_no", "Seri")
+            ti.nesne_turu_tanimla(oturum, demo.surum_id, "TEST_KISI", "kopya")
+
+    assert _sayi(veritabani, tt.NESNE_TURU) == 2  # TEST_ARAC kalmadı
+    assert _sayi(veritabani, tt.OZELLIK_TANIMI) == 0
+
+
+def test_veritabani_kisit_hatasindan_sonra_kullanilabilir_kalir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    with pytest.raises(IntegrityError):
+        with veritabani.islem() as oturum:
+            ti.ozellik_tanimla(oturum, demo.cihaz_id, "seri_no", "Seri")
+            oturum.execute(
+                text(
+                    "INSERT INTO nesne_turu (tanim_surumu_id, kod, gosterim_adi) "
+                    "VALUES (:surum, 'TEST_KISI', 'kopya')"
+                ),
+                {"surum": demo.surum_id},
+            )
+
+    assert _sayi(veritabani, tt.OZELLIK_TANIMI) == 0
+    with veritabani.islem() as oturum:
+        ti.ozellik_tanimla(oturum, demo.cihaz_id, "seri_no", "Seri")
+        assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+    assert _sayi(veritabani, tt.OZELLIK_TANIMI) == 1
+
+
+def test_donen_nesneler_islem_kapaninca_okunabilir(veritabani: vt.Veritabani) -> None:
+    """``expire_on_commit=False``: sütunlar elde kalır; gecikmeli yükleme yoktur."""
+    with veritabani.islem() as oturum:
+        paket = ti.paket_tanimla(oturum, "DEMO", "Demo")
+        surum = ti.surum_tanimla(oturum, paket.id, 1)
+
+    assert (paket.kod, surum.tanim_paketi_id, surum.surum_no) == ("DEMO", paket.id, 1)
+
+
+# --- çekirdek domain bilmez -----------------------------------------------------------
+
+
+def test_iki_farkli_sahte_domain_ayni_mekanizmayla_tanimlanir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    """Plan madde 20: finans dışı iki paket aynı tablolarda, aynı işlevlerle."""
+    with veritabani.islem() as oturum:
+        envanter = ti.paket_tanimla(oturum, "ENVANTER", "Envanter")
+        surum = ti.surum_tanimla(oturum, envanter.id, 1)
+        depo = ti.nesne_turu_tanimla(oturum, surum.id, "DEPO", "Depo")
+        raf = ti.nesne_turu_tanimla(oturum, surum.id, "RAF", "Raf")
+        urun = ti.nesne_turu_tanimla(oturum, surum.id, "URUN", "Ürün")
+        ti.ozellik_tanimla(oturum, urun.id, "barkod", "Barkod")
+        ti.iliski_tanimla(oturum, surum.id, "ICERIR", "İçerir", depo.id, raf.id)
+        ti.iliski_tanimla(oturum, surum.id, "TASIR", "Taşır", raf.id, urun.id)
+        sayim = ti.kayit_turu_tanimla(oturum, surum.id, "SAYIM", "Sayım")
+        ti.kayit_alani_tanimla(oturum, sayim.id, "adet", "Adet")
+
+    with veritabani.islem() as oturum:
+        assert [p.kod for p in ti.paketleri_listele(oturum)] == ["DEMO", "ENVANTER"]
+        assert [t.kod for t in ti.nesne_turlerini_listele(oturum, surum.id)] == [
+            "DEPO",
+            "RAF",
+            "URUN",
+        ]
+        assert [t.kod for t in ti.nesne_turlerini_listele(oturum, demo.surum_id)] == [
+            "TEST_CIHAZ",
+            "TEST_KISI",
+        ]
+        assert [i.kod for i in ti.iliski_tanimlarini_listele(oturum, surum.id)] == [
+            "ICERIR",
+            "TASIR",
+        ]

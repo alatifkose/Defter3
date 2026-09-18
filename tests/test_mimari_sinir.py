@@ -29,9 +29,15 @@ Kapsam dışı (bilinçli sınır): çalışma anında kurulan metinler
 (``import_module(ad)`` değişkenle), ``sys.modules`` erişimi, ``getattr``,
 ``exec``/``eval``, üçüncü taraf paketlerin içinden geçen yollar. Bunlar
 statik denetimle çözülemez; kod incelemesinin konusudur.
+
+İkinci denetim (Aşama 4.2): çekirdek ağacı ve göç dosyaları finansal **ad**
+taşıyamaz. Tanımlayıcılar ve metin sabitleri parçalara ayrılır, yasak ad tam
+parça olarak aranır (``YASAK_FINANS_ADLARI``); docstring ve yorum denetim
+dışıdır. Ayrıntı dosyanın sonundaki bölümde.
 """
 
 import ast
+import re
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -513,3 +519,220 @@ def test_dolayli_denetim_finansa_ulasmayan_yardimciyi_gecirir(tmp_path: Path) ->
     )
 
     assert dolayli_ihlaller(_cekirdek(kok), kok) == {}
+
+
+# --- finansal ad denetimi (Aşama 4.2) -----------------------------------------
+# Bağımlılık yönü tek başına yetmez: çekirdek finansı import etmeden de
+# ``BANKA = "BANKA"`` ya da ``class HesapHareketi`` yazarak finansal anlam
+# taşıyabilir. Bu denetim çekirdek kaynak ağacında ve göç dosyalarında Python
+# AST'sinden tanımlayıcıları (ad, sınıf, fonksiyon, parametre, nitelik, anahtar
+# argüman, import adı) ve metin sabitlerini okur, her birini parçalara ayırır
+# (``HesapHareketi`` → HESAP, HAREKETI; ``para_birimi`` → PARA, BIRIMI; Türkçe
+# harfler ASCII'ye indirgenir) ve yasak adı **tam parça** olarak arar. Böylece
+# ``hesapla`` ya da ``kartela`` yakalanmaz, ``hesap_kodu`` ve ``kart_limiti``
+# yakalanır. Belge metinleri (docstring ve nitelik açıklamaları: tek başına
+# duran metin ifadeleri) ve yorumlar denetlenmez; sınır anlatılabilir, ad ve
+# veri değeri olarak taşınamaz.
+
+GOC_DIZINI = PROJE_KOKU / "alembic" / "versions"
+
+YASAK_FINANS_ADLARI: tuple[str, ...] = (
+    "BANKA",
+    "HESAP",
+    "KART",
+    "KREDI",
+    "KMH",
+    "PARA_BIRIMI",
+    "VARLIK",
+    "BORC",
+    "GIDER",
+    "BAKIYE",
+)
+"""Çekirdekte tanımlayıcı ya da metin sabiti olarak geçemeyecek finansal adlar.
+Çok parçalı ad (``PARA_BIRIMI``) ardışık parçalar olarak aranır."""
+
+_TURKCE_ASCII = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
+_AD_PARCASI = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+")
+_YASAK_PARCA_DIZILERI = tuple(tuple(ad.split("_")) for ad in YASAK_FINANS_ADLARI)
+
+
+def ad_parcalari(metin: str) -> list[str]:
+    """``HesapHareketi`` → ``["HESAP", "HAREKETI"]``, ``para_birimi`` →
+    ``["PARA", "BIRIMI"]``; Türkçe harfler ASCII'ye indirgenir, büyük harf."""
+    return [p.upper() for p in _AD_PARCASI.findall(metin.translate(_TURKCE_ASCII))]
+
+
+def yasak_finans_adi(metin: str) -> str | None:
+    """Metindeki ilk yasak finansal ad (tam parça eşleşmesi); yoksa ``None``."""
+    parcalar = ad_parcalari(metin)
+    for dizi in _YASAK_PARCA_DIZILERI:
+        n = len(dizi)
+        for i in range(len(parcalar) - n + 1):
+            if tuple(parcalar[i : i + n]) == dizi:
+                return "_".join(dizi)
+    return None
+
+
+def _belge_metinleri(agac: ast.AST) -> set[int]:
+    """Tek başına duran metin ifadeleri (docstring, nitelik açıklaması) — düğüm
+    kimlikleri; bunlar denetim dışıdır."""
+    return {
+        id(dugum.value)
+        for dugum in ast.walk(agac)
+        if isinstance(dugum, ast.Expr)
+        and isinstance(dugum.value, ast.Constant)
+        and isinstance(dugum.value.value, str)
+    }
+
+
+def finansal_adlar(dosya: Path) -> list[str]:
+    """Dosyadaki yasak finansal adlar: ``satır: tür 'metin' (YASAK_AD)``."""
+    agac = ast.parse(dosya.read_text(encoding="utf-8"), filename=str(dosya))
+    belge = _belge_metinleri(agac)
+    bulgular: list[str] = []
+
+    def kaydet(metin: str, satir: int, tur: str) -> None:
+        yasak = yasak_finans_adi(metin)
+        if yasak is None:
+            return
+        bulgu = f"{satir}: {tur} {metin!r} ({yasak})"
+        if bulgu not in bulgular:
+            bulgular.append(bulgu)
+
+    for dugum in ast.walk(agac):
+        if isinstance(dugum, ast.Name):
+            kaydet(dugum.id, dugum.lineno, "ad")
+        elif isinstance(dugum, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            kaydet(dugum.name, dugum.lineno, "tanım")
+        elif isinstance(dugum, ast.arg):
+            kaydet(dugum.arg, dugum.lineno, "parametre")
+        elif isinstance(dugum, ast.Attribute):
+            kaydet(dugum.attr, dugum.lineno, "nitelik")
+        elif isinstance(dugum, ast.keyword) and dugum.arg is not None:
+            kaydet(dugum.arg, dugum.lineno, "anahtar")
+        elif isinstance(dugum, ast.alias):
+            kaydet(dugum.asname or dugum.name, dugum.lineno, "import")
+        elif isinstance(dugum, ast.ImportFrom) and dugum.module:
+            kaydet(dugum.module, dugum.lineno, "import")
+        elif (
+            isinstance(dugum, ast.Constant)
+            and isinstance(dugum.value, str)
+            and id(dugum) not in belge
+        ):
+            kaydet(dugum.value, dugum.lineno, "metin")
+    return bulgular
+
+
+def finansal_ad_ihlalleri(*dizinler: Path) -> dict[str, list[str]]:
+    """Verilen ağaçlardaki her ``.py`` için bulgu listesi (proje köküne göre yol)."""
+    ihlaller: dict[str, list[str]] = {}
+    for dizin in dizinler:
+        for dosya in sorted(dizin.rglob("*.py")):
+            bulgular = finansal_adlar(dosya)
+            if bulgular:
+                ihlaller[dosya.relative_to(PROJE_KOKU).as_posix()] = bulgular
+    return ihlaller
+
+
+def test_cekirdek_ve_gocler_finansal_ad_tasimaz() -> None:
+    ihlaller = finansal_ad_ihlalleri(CEKIRDEK_DIZINI, GOC_DIZINI)
+
+    mesaj = "\n".join(
+        f"{dosya}: {'; '.join(bulgular)}" for dosya, bulgular in ihlaller.items()
+    )
+    assert ihlaller == {}, (
+        "çekirdek kaynak kodu ve göçler finansal ad taşıyamaz (Aşama 4.2 denetimi); "
+        f"finansal anlam tanım verisine yazılır:\n{mesaj}"
+    )
+
+
+YASAK_ADLI_BICIMLER: tuple[tuple[str, str], ...] = (
+    ('BANKA = "x"\n', "BANKA"),
+    ("class HesapHareketi:\n    pass\n", "HESAP"),
+    ("def bakiye_hesapla(x):\n    return x\n", "BAKIYE"),
+    ('KURUM_TURLERI = ("TEST", "KART")\n', "KART"),
+    ('x = {"para_birimi": 1}\n', "PARA_BIRIMI"),
+    ("ParaBirimi = 1\n", "PARA_BIRIMI"),
+    ("from enum import Enum\n\nclass Eksen(Enum):\n    VARLIK = 1\n", "VARLIK"),
+    ("def f(kredi_id):\n    return kredi_id\n", "KREDI"),
+    ("def f(n):\n    n.kmh_limiti = 1\n", "KMH"),
+    ("def f(**k):\n    pass\n\nf(borc=1)\n", "BORC"),
+    ("from defteriki.yardimci import gider_topla\n", "GIDER"),
+    ("import defteriki.yardimci as banka_yardimcisi\n", "BANKA"),
+    ('def f(x):\n    return f"hesap {x}"\n', "HESAP"),
+    ('def f():\n    raise ValueError("para birimi geçersiz")\n', "PARA_BIRIMI"),
+    ("BAKİYE = 1\n", "BAKIYE"),  # Türkçe harf ASCII'ye indirgenir
+    ("def f():\n    return dict(hesap_no=1)\n", "HESAP"),
+)
+
+
+def test_ad_denetleyicisi_her_yasak_bicimi_yakalar(tmp_path: Path) -> None:
+    kacan: list[str] = []
+    for sira, (icerik, beklenen) in enumerate(YASAK_ADLI_BICIMLER):
+        dosya = tmp_path / f"y{sira}.py"
+        dosya.write_text(icerik, encoding="utf-8")
+        bulgular = finansal_adlar(dosya)
+        if not any(b.endswith(f"({beklenen})") for b in bulgular):
+            kacan.append(f"{icerik!r} → {bulgular}")
+    assert kacan == [], "yakalanmayan yasak adlar:\n" + "\n".join(kacan)
+
+
+IZINLI_ADLI_BICIMLER: tuple[str, ...] = (
+    "def hesapla(x):\n    return x\n",  # 'hesapla' ≠ 'hesap' (tam parça)
+    "kartela = 1\nborclu = 2\nbankalar = 3\nkmhler = 4\n",  # ön ek eşleşmesi yetmez
+    '"""Bu modül banka, hesap ve kart bilmez."""\n',  # modül docstring
+    'KOD = 1\n"""Kart ya da banka kodu değil; nötr kimlik."""\n',  # nitelik açıklaması
+    'class A:\n    """hesap"""\n\n    def f(self):\n        """banka"""\n',
+    "# banka hesap kart\nx = 1\n",  # yorumlar AST'de yok
+    'x = "tanım paketi bulunamadı: kimlik 3"\n',
+    "from sqlalchemy import Integer, String\nfrom pathlib import Path\n",
+    "def f(kaynak_nesne_turu_id, hedef_nesne_turu_id):\n    return 0\n",
+    'x = "kredibilite"\n',  # 'kredibilite' ≠ 'kredi'
+)
+
+
+def test_ad_denetleyicisi_izinli_bicimlere_dokunmaz(tmp_path: Path) -> None:
+    takilan: list[str] = []
+    for sira, icerik in enumerate(IZINLI_ADLI_BICIMLER):
+        dosya = tmp_path / f"i{sira}.py"
+        dosya.write_text(icerik, encoding="utf-8")
+        bulgular = finansal_adlar(dosya)
+        if bulgular:
+            takilan.append(f"{icerik!r} → {bulgular}")
+    assert takilan == [], "yanlış yakalanan izinli biçimler:\n" + "\n".join(takilan)
+
+
+def test_ad_denetleyicisi_ihlali_dosya_ve_satirla_bildirir(tmp_path: Path) -> None:
+    kok = tmp_path / "src" / "defteriki" / "cekirdek"
+    kok.mkdir(parents=True)
+    (kok / "a.py").write_text('import os\n\nTURLER = ("BANKA",)\n', encoding="utf-8")
+    (kok / "b.py").write_text("x = 1\n", encoding="utf-8")
+
+    ihlaller = {
+        dosya: bulgular
+        for dosya, bulgular in (
+            (d.name, finansal_adlar(d)) for d in sorted(kok.glob("*.py"))
+        )
+        if bulgular
+    }
+
+    assert ihlaller == {"a.py": ["3: metin 'BANKA' (BANKA)"]}
+
+
+def test_ad_parcalama_kurali() -> None:
+    assert ad_parcalari("HesapHareketi") == ["HESAP", "HAREKETI"]
+    assert ad_parcalari("para_birimi") == ["PARA", "BIRIMI"]
+    assert ad_parcalari("PARA_BIRIMI") == ["PARA", "BIRIMI"]
+    assert ad_parcalari("KMHLimiti") == ["KMH", "LIMITI"]
+    assert ad_parcalari("bakıye_öz") == ["BAKIYE", "OZ"]
+    assert ad_parcalari("tanım paketi bulunamadı: kimlik 3") == [
+        "TANIM",
+        "PAKETI",
+        "BULUNAMADI",
+        "KIMLIK",
+        "3",
+    ]
+    assert yasak_finans_adi("hesapla") is None
+    assert yasak_finans_adi("hesap_kodu") == "HESAP"
+    assert yasak_finans_adi("para birimi listesi") == "PARA_BIRIMI"
+    assert yasak_finans_adi("para ve birim") is None  # ardışık değil
