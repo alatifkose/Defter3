@@ -363,13 +363,6 @@ Aynı kontrol her `git commit` öncesinde pre-commit kancasıyla otomatik
 çalışır (`.pre-commit-config.yaml`, tek kanca: `scripts/kontrol.py`);
 bir adım düşerse commit yapılmaz. Kanca kaynak dosyalarını değiştirmez.
 
-Aynı komut GitHub Actions'ta da çalışır (`.github/workflows/kalite.yml`,
-2026-09-18): `yeniden-insa` dalına her push ve bu dala açılan her pull request
-için Ubuntu üzerinde `uv sync --locked` ile kilitli bağımlılıklar kurulur ve
-`scripts/kontrol.py` çalıştırılır. Yalnız okuma izni vardır; depoya yazmaz.
-Windows'a özgü testler (junction) Linux'ta atlanır, simgesel bağlantı testi
-orada çalışır.
-
 ## Ayarlar
 
 Bütün yollar `defteriki.ayarlar` modülünden gelir; uygulamanın nereden
