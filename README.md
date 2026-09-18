@@ -203,15 +203,32 @@ sırlar ve ortam değişkenleri günlüğe yazılmaz. Hatalar yalnızca türüyl
 (`builtins.ValueError` gibi) kaydedilir; ham hata mesajı ve traceback dosyaya
 dökülmez. Kullanıcıya gösterilen hata metni stderr'e gider, dosyaya değil.
 Aynı kural dosyaya bağlanan dış kütüphane günlüğü (MCP SDK) için de geçerlidir
-(2026-09-18): SDK'nın istisna taşıyan kaydı (`logger.exception`) sarmalayıcı
-handler'da yalnız hata türüne indirgenir, mesaj, `exc_info` ve yığın izi
-düşmez; istisnasız bilgi ve uyarı kayıtları olduğu gibi yazılır. Sarmalayıcı
-kaydın kopyası üzerinde çalışır, aynı logger'a bağlı başka handler'ların
-gördüğü kayıt değişmez. Test (`tests/test_mcp_kapisi.py`) gerçek stdio
-çağrısında araç gövdesini sentetik hassas içerikli hatayla değiştirip dosyada
-yalnız `hata türü: ...UnexpectedToolError` kaldığını doğrular. Not: SDK araç
-hatasının metnini istemciye `isError` yanıtı içinde döndürür; bu MCP
-katmanının işidir ve araçlar geldiğinde ele alınır.
+(2026-09-18). Sarmalayıcı handler kütüphane kaydını üç kuralla indirger:
+
+* İstisna taşıyan kayıt (`logger.exception`; SDK'da beklenmeyen araç hatası)
+  yalnız `hata türü: ...` olarak yazılır; mesaj, `exc_info` ve yığın izi
+  düşmez.
+* Parametreli kayıt (SDK'nın beklenen `ToolError` yolu:
+  `logger.info("Tool %r failed: %r", ad, str(exc))`) yalnız sabit şablonuyla
+  yazılır, değerler yerine türleri not edilir:
+  `Tool %r failed: %r [parametreler gizlendi: str, str]`. Araç adı ve hata
+  metni dosyaya geçmez; şablon kütüphanenin kendi sabit metnidir.
+* Mesajı metin olmayan kayıt (`logger.warning(exc)`) yalnız mesaj nesnesinin
+  türüyle yazılır.
+
+Parametresiz, istisnasız sabit kayıtlar olduğu gibi yazılır; hiçbir seviye
+toptan kapatılmaz. Sarmalayıcı kaydın kopyası üzerinde çalışır, aynı logger'a
+bağlı başka handler'ların gördüğü kayıt değişmez. SDK'nın kurulu dosyalarına
+dokunulmaz. Testler (`tests/test_mcp_kapisi.py`) gerçek stdio çağrısında araç
+gövdesini sentetik hassas içerikli hatayla değiştirir: beklenmeyen hata için
+dosyada yalnız `hata türü: ...UnexpectedToolError`, beklenen `ToolError` için
+yalnız şablon kalır; araç `isError` sonucu döndürür. Bilinen sınır: kütüphane
+metni f-string ile önceden biçimlendirip parametresiz gönderirse değerler
+ayırt edilemez; SDK 2.2.0'ın sunucu yolunda istemci verisi taşıyan kayıtlar
+`%` biçimlidir, f-string'li kayıtları kayıt anındaki sunucu tarafı adlardır
+(araç, kaynak, istem adı). Not: SDK araç hatasının metnini istemciye `isError`
+yanıtı içinde döndürür; bu MCP katmanının işidir ve araçlar geldiğinde ele
+alınır.
 
 ## Kalite kontrolü
 

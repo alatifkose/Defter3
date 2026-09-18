@@ -215,14 +215,46 @@ def test_kutuphane_istisnasi_yalniz_hata_turuyle_yazilir(log_dizini: Path) -> No
     assert "kütüphane hata" not in icerik
 
 
-def test_kutuphane_uyarisi_istisnasiz_oldugu_gibi_yazilir(log_dizini: Path) -> None:
+def test_kutuphane_sabit_uyarisi_oldugu_gibi_yazilir(log_dizini: Path) -> None:
     dosya = gunluk.gunlugu_kur(log_dizini)
     gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
 
-    logging.getLogger("deneme_kutuphane").warning("bağlantı %s kapandı", "stdio")
+    logging.getLogger("deneme_kutuphane").warning("stdio bağlantısı kapandı")
 
     (satir,) = _satirlar(dosya)
-    assert "| WARNING | - | bağlantı stdio kapandı" in satir
+    assert "| WARNING | - | stdio bağlantısı kapandı" in satir
+
+
+def test_kutuphane_parametreli_kaydin_degerleri_gizlenir(log_dizini: Path) -> None:
+    """SDK'nın beklenen hata yolu: istisnasız INFO, hata metni parametrede."""
+    dosya = gunluk.gunlugu_kur(log_dizini)
+    gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
+
+    logging.getLogger("deneme_kutuphane").info(
+        "Tool %r failed: %r", "sistem_durumu", GIZLI_METIN
+    )
+    logging.getLogger("deneme_kutuphane").info(
+        "Processing request of type %s (%d)", "CallToolRequest", 3
+    )
+
+    ilk, ikinci = _satirlar(dosya)
+    assert "| INFO | - | Tool %r failed: %r [parametreler gizlendi: str, str]" in ilk
+    assert "[parametreler gizlendi: str, int]" in ikinci
+    icerik = dosya.read_text(encoding="utf-8")
+    assert GIZLI_METIN not in icerik
+    assert "sistem_durumu" not in icerik
+    assert "CallToolRequest" not in icerik
+
+
+def test_kutuphane_metin_olmayan_mesaj_turuyle_yazilir(log_dizini: Path) -> None:
+    dosya = gunluk.gunlugu_kur(log_dizini)
+    gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
+
+    logging.getLogger("deneme_kutuphane").warning(ValueError(GIZLI_METIN))
+
+    (satir,) = _satirlar(dosya)
+    assert "| WARNING | - | [mesaj gizlendi: builtins.ValueError]" in satir
+    assert GIZLI_METIN not in satir
 
 
 def test_kutuphane_suzgeci_ortak_kaydi_degistirmez(log_dizini: Path) -> None:
@@ -243,3 +275,20 @@ def test_kutuphane_suzgeci_ortak_kaydi_degistirmez(log_dizini: Path) -> None:
     assert kayit.msg == "kütüphane hata"
     assert kayit.exc_info is not None and kayit.exc_info[0] is ValueError
     assert "olay" not in kayit.__dict__
+
+
+def test_kutuphane_parametre_suzgeci_ortak_kaydi_degistirmez(log_dizini: Path) -> None:
+    gunluk.gunlugu_kur(log_dizini)
+    gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
+    yakalayici = _KayitYakalayici()
+    kutuphane = logging.getLogger("deneme_kutuphane")
+    kutuphane.addHandler(yakalayici)
+    try:
+        kutuphane.info("Tool %r failed: %r", "sistem_durumu", GIZLI_METIN)
+    finally:
+        kutuphane.removeHandler(yakalayici)
+
+    (kayit,) = yakalayici.kayitlar
+    assert kayit.msg == "Tool %r failed: %r"
+    assert kayit.args == ("sistem_durumu", GIZLI_METIN)
+    assert kayit.getMessage() == f"Tool 'sistem_durumu' failed: {GIZLI_METIN!r}"

@@ -273,6 +273,38 @@ HATALI_SUNUCU_KOMUTU = (
 )
 """Gerçek sunucu, araç gövdesi sentetik hassas içerikli hatayla değiştirilmiş."""
 
+BEKLENEN_HATALI_SUNUCU_KOMUTU = (
+    "import sys\n"
+    "from defteriki import mcp_kapisi\n"
+    "from mcp.server.mcpserver.exceptions import ToolError\n"
+    "def patlat(ayarlar):\n"
+    f"    raise ToolError({GIZLI_METIN!r})\n"
+    "mcp_kapisi.sistem_durumu = patlat\n"
+    "sys.exit(mcp_kapisi.main())\n"
+)
+"""Aynı sunucu, beklenen ToolError: SDK istisnasız INFO kaydıyla hata metnini loglar."""
+
+
+def test_stdio_beklenen_arac_hatasi_metni_gunluge_gecmez(
+    tmp_path: Path, test_koku: Path
+) -> None:
+    sonuc = _sunucuyla_konus(
+        tmp_path, dict(os.environ), ILK_ISTEKLER, komut=BEKLENEN_HATALI_SUNUCU_KOMUTU
+    )
+
+    assert sonuc.cikis_kodu == 0, sonuc.stderr
+    assert sonuc.yanitlar[3]["result"]["isError"] is True
+    icerik = (test_koku / ay.LOG_DIZIN_ADI / gunluk.GUNLUK_DOSYA_ADI).read_text(
+        encoding="utf-8"
+    )
+    # SDK: logger.info("Tool %r failed: %r", ad, str(exc)); yalnız şablon kalır.
+    assert "| INFO | - | Tool %r failed: %r [parametreler gizlendi: str, str]" in icerik
+    assert GIZLI_METIN not in icerik
+    assert "Traceback" not in icerik
+    assert "hata türü" not in icerik  # istisna kaydı yok, beklenen hata yolu
+    assert GIZLI_METIN not in sonuc.stderr
+    assert f"| INFO | {mcp_kapisi.OLAY_MCP_KAPANIS} |" in icerik
+
 
 def test_stdio_arac_hatasi_gunluge_yalniz_turuyle_gecer(
     tmp_path: Path, test_koku: Path

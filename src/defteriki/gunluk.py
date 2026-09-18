@@ -17,18 +17,31 @@ türünü kaydeder; mesaj ve yığın izi dosyaya dökülmez.
 Dış kütüphanelerin (örneğin MCP SDK'sının) tanı çıktısı stderr'e değil aynı
 dosyaya gitsin diye ``kutuphane_gunlugunu_yonlendir()`` vardır; kapatmada bu
 bağlantılar da geri alınır. Kütüphane kayıtları dosyaya ayrı bir sarmalayıcı
-handler üzerinden gider (``_KutuphaneIsleyicisi``): istisna taşıyan kayıt
-(``logger.exception`` ve benzeri) uygulamanın kuralına indirgenir, yalnız hata
-türü yazılır; ham mesaj, ``exc_info`` ve yığın izi dosyaya geçmez. İstisna
-taşımayan kayıtlar (bilgi, uyarı) olduğu gibi yazılır. Sarmalayıcı kaydın bir
-kopyası üzerinde çalışır; aynı logger'a bağlı başka handler'ların gördüğü
-``LogRecord`` değişmez.
+handler üzerinden gider (``_KutuphaneIsleyicisi``) ve üç kuralla indirgenir:
+
+* İstisna taşıyan kayıt (``logger.exception`` ve benzeri) yalnız hata türüyle
+  yazılır; ham mesaj, ``exc_info`` ve yığın izi dosyaya geçmez.
+* Parametreli kayıt (``logger.info("Tool %r failed: %r", ad, str(exc))`` gibi)
+  yalnız sabit şablonuyla yazılır; parametre değerleri (araç adı, hata metni,
+  istemciden gelen her şey) dosyaya geçmez, yerine parametre türleri not
+  edilir. Şablon kütüphanenin kendi sabit metnidir, güvenlidir.
+* Mesajı metin olmayan kayıt (``logger.warning(exc)`` gibi) yalnız mesaj
+  nesnesinin türüyle yazılır.
+
+Parametresiz, istisnasız kayıtlar (kütüphanenin sabit bilgi ve uyarı
+metinleri) olduğu gibi yazılır. Sarmalayıcı kaydın bir kopyası üzerinde
+çalışır; aynı logger'a bağlı başka handler'ların gördüğü ``LogRecord``
+değişmez. Bilinen sınır: kütüphane metni f-string ile önceden biçimlendirip
+parametresiz gönderirse değerler ayırt edilemez; SDK 2.2.0'ın sunucu
+yolunda istemci verisi taşıyan kayıtlar ``%`` biçimlidir, f-string'li
+kayıtları kayıt anındaki sunucu tarafı adlardır.
 """
 
 from __future__ import annotations
 
 import copy
 import logging
+from collections.abc import Iterable, Mapping
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -64,8 +77,10 @@ class _KutuphaneIsleyicisi(logging.Handler):
     """Dış kütüphane kayıtlarını dosya handler'ına gizlilik kuralıyla iletir.
 
     İstisna taşıyan kayıtta mesaj ``hata türü: <modül.ad>`` olur; ``exc_info``,
-    ``exc_text`` ve ``stack_info`` atılır. Kayıt kopyalanır: logger'ın diğer
-    handler'larına giden asıl ``LogRecord`` değişmez.
+    ``exc_text`` ve ``stack_info`` atılır. Parametreli kayıtta yalnız şablon
+    kalır, değerler yerine türleri yazılır. Metin olmayan mesaj türüyle
+    yazılır. Kayıt kopyalanır: logger'ın diğer handler'larına giden asıl
+    ``LogRecord`` değişmez.
     """
 
     def __init__(self, dosya_isleyicisi: logging.Handler) -> None:
@@ -77,19 +92,37 @@ class _KutuphaneIsleyicisi(logging.Handler):
 
 
 def _guvenli_kopya(record: logging.LogRecord) -> logging.LogRecord:
+    """Kütüphane kaydının dosyaya gidecek kopyası; asıl kayıt değişmez."""
     kopya = copy.copy(record)
-    if record.exc_info is None and record.exc_text is None and not record.stack_info:
+    if record.exc_info is not None or record.exc_text is not None or record.stack_info:
+        tur = record.exc_info[0] if record.exc_info else None
+        tur_adi = HATA_TURU_BILINMIYOR
+        if tur is not None:
+            tur_adi = _tur_adi(tur)
+        kopya.msg = f"hata türü: {tur_adi}"
+        kopya.args = ()
+        kopya.exc_info = None
+        kopya.exc_text = None
+        kopya.stack_info = None
         return kopya
-    tur = record.exc_info[0] if record.exc_info else None
-    tur_adi = HATA_TURU_BILINMIYOR
-    if tur is not None:
-        tur_adi = f"{tur.__module__}.{tur.__qualname__}"
-    kopya.msg = f"hata türü: {tur_adi}"
-    kopya.args = ()
-    kopya.exc_info = None
-    kopya.exc_text = None
-    kopya.stack_info = None
+    mesaj: object = record.msg
+    if not isinstance(mesaj, str):
+        kopya.msg = f"[mesaj gizlendi: {_tur_adi(type(mesaj))}]"
+        kopya.args = ()
+        return kopya
+    if record.args:
+        degerler: Iterable[object] = (
+            record.args.values() if isinstance(record.args, Mapping) else record.args
+        )
+        turler = ", ".join(type(d).__name__ for d in degerler)
+        kopya.msg = f"{mesaj} [parametreler gizlendi: {turler}]"
+        kopya.args = ()
     return kopya
+
+
+def _tur_adi(tur: type) -> str:
+    """``hata_kaydet`` ile aynı biçim: ``modül.ad`` (``builtins.ValueError``)."""
+    return f"{tur.__module__}.{tur.__qualname__}"
 
 
 def gunlugu_kur(log_dizini: Path) -> Path:
