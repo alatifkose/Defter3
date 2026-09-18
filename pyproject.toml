@@ -8,7 +8,9 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.13",
     "mcp>=2.2.0",
+    "sqlalchemy>=2.0",
 ]
 
 [project.scripts]
@@ -34,7 +36,7 @@ pythonpath = ["scripts"]
 
 [tool.ruff]
 target-version = "py313"
-src = ["src", "tests", "scripts"]
+src = ["src", "tests", "scripts", "alembic"]
 extend-exclude = [".venv", ".uv", "build", "dist", "wheels"]
 
 [tool.ruff.lint]
@@ -47,7 +49,7 @@ known-first-party = ["defteriki", "kontrol"]
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-include = ["src", "tests", "scripts"]
+include = ["src", "tests", "scripts", "alembic"]
 exclude = ["**/__pycache__", ".venv", ".uv", "build", "dist", "wheels"]
 extraPaths = ["src", "scripts"]
 venvPath = "."

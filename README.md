@@ -12,8 +12,9 @@ sınırı kuruldu ve testle korunuyor ("Mimari sınır" bölümü). Bu hat
 (`yeniden-insa`, depo [alatifkose/Defter3](https://github.com/alatifkose/Defter3))
 Aşama 3 kapısından yeniden başlar; önceki Aşama 4-6 geliştirme hattı
 [alatifkose/DefterIki](https://github.com/alatifkose/DefterIki) deposunun
-`main` dalında yedek olarak durur, oraya yazılmaz. Aşama 4.1 (veritabanı)
-henüz başlamadı. Bitenler:
+`main` dalında yedek olarak durur, oraya yazılmaz. Aşama 4.1 (genel
+veritabanı altyapısı, 2026-09-18) bitti; Aşama 4.2 (tanım sistemi) sırada.
+Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
 * Merkezi ayar yönetimi (`src/defteriki/ayarlar.py`)
@@ -34,8 +35,76 @@ henüz başlamadı. Bitenler:
   testleri gelen dizini değişkenini temizler, test ortamı yol sınırı fiziksel
   karşılığa bakar ("Ayarlar"), Defter3 yerel verisi eski hattan ayrıldı
   ("Defter3 yerel kurulumu")
+* Genel veritabanı altyapısı (Aşama 4.1): SQLAlchemy + Alembic,
+  `defteriki.cekirdek.veritabani` (bağlantı politikası, işlem sınırı) ve
+  `defteriki.cekirdek.gocler` (şema sürümü); ilk göç `0001` uygulama tablosu
+  içermez ("Veritabanı" bölümü)
 
-Henüz yok: veritabanı, veri modeli, GUI, ürün verisi yazan MCP aracı.
+Henüz yok: uygulama tablosu ve veri modeli, GUI, ürün verisi yazan MCP aracı.
+
+## Veritabanı
+
+Aşama 4.1 (2026-09-18; Yeniden İnşa Teknik Planı madde 26). Yalnız güvenilir
+persistence temeli: finansal ya da iş tablosu yoktur, `finans/` boştur.
+
+**Bağlantı (`src/defteriki/cekirdek/veritabani.py`).** SQLite dosyasının yolu
+tek kaynaktan gelir: `Ayarlar.veritabani_yolu`. Çekirdek bu yolu çağırandan
+`Path` olarak alır; `defteriki.ayarlar`ı import etmez, çalışma dizinine
+bakmaz. Adres metin birleştirilerek değil SQLAlchemy `URL.create` ile üretilir
+(`sqlite+pysqlite`, Windows yolu olduğu gibi); göreli yol reddedilir. Engine
+modül importunda değil `motor_olustur(yol)` ile açıkça kurulur ve kurulmak
+diske dokunmaz; dosya ilk bağlantıda oluşur. Bağlantı politikası tek yerde,
+her yeni bağlantıda uygulanır: `PRAGMA foreign_keys=ON` (bağlantı başına
+zorunlu) ve `PRAGMA journal_mode=WAL`. `TabloTabani` bütün tabloların ortak
+tabanıdır; tek `metadata`, isimli kısıt kalıbı (SQLite'ta Alembic `batch`
+kipi için gerekir).
+
+**İşlem sınırı.** `Veritabani(yol).islem()` bağlam yöneticisi: bir iş = bir
+kısa ömürlü oturum = bir transaction. Normal çıkışta `commit`, istisnada
+`rollback` ve istisna yeniden yükselir, her durumda oturum kapanır. Model ya
+da ileride gelecek depo kodu kendi başına `commit` etmez; sahip bu bağlam
+yöneticisidir. `kapat()` havuzu boşaltır (Windows'ta dosya kilidi için).
+
+**Göçler ve şema sürümü (`src/defteriki/cekirdek/gocler.py`, `alembic/`).**
+Şema sürümünü Alembic'in kendi `alembic_version` tablosu tutar; ayrı sürüm
+tablosu yoktur. Göçler `alembic/versions/` altında; `0001_genel_altyapi`
+zincirin başıdır ve tablo oluşturmaz. `alembic.ini` veritabanı adresi taşımaz;
+`alembic/env.py` yolu merkezi ayarlardan (ortam değişkenleri) alır, komut
+satırında yalnız veritabanı dosyasının dizinini açar. Göç çalıştırma açık bir
+işlemdir; `uv run defteriki` ve `uv run defteriki-mcp` göç çalıştırmaz,
+veritabanı dosyası oluşturmaz (testle sabit). Resmî komut:
+
+```bash
+uv run alembic upgrade head
+```
+
+Süreç içinde aynı iş `gocler.semayi_yukselt(veritabani)` ile yapılır (tek
+transaction, aynı `env.py`); `gocler.sema_surumu` sürümü okur,
+`gocler.beklenen_sema_surumu` zincirin başını verir. Otomatik göç (dağıtım
+politikası) ayrı bir karardır, bugün yoktur.
+
+Dikkat: komut hangi veritabanına gideceğini ortam değişkenlerinden okur.
+Kullanıcı düzeyi `setx DEFTERIKI_VERI_KOKU` hâlâ eski hattın kökünü
+gösteriyorsa, terminalden düz `uv run alembic upgrade head` eski veritabanını
+hedefler; eski dosya bu zincirde olmayan `0002` sürümünü taşıdığından Alembic
+"Can't locate revision" hatasıyla durur ve hiçbir şey değiştirmez, ama komut
+öncesi `DEFTERIKI_VERI_KOKU=C:\dev\Defter3-veri` açıkça verilmelidir. Defter3
+verisi için ilk göç 2026-09-18'de bu şekilde uygulandı:
+`C:\dev\Defter3-veri\gelistirme\defteriki.sqlite3`, sürüm `0001`.
+
+**Testler** (`tests/test_cekirdek_veritabani.py`, `tests/test_gocler.py`):
+gerçek SQLite dosyalarıyla, `test` ortamı ve `tmp_path` altında kök;
+`:memory:` yok. Kanıtlananlar: import ve engine kurulumu dosya oluşturmaz;
+adres verilen mutlak yoldan üretilir, göreli yol reddedilir, çalışma dizini
+etkisizdir; her bağlantıda `foreign_keys=1` ve `journal_mode=wal`; hatalı dış
+anahtar yazımı gerçekten reddedilir, geçerli olan kabul edilir; başarılı işlem
+commit olur, hata alan işlem tamamen rollback olur ve hata yükselir, oturum
+kapanır; test veritabanı ve WAL dosyası yalnız test kökünde oluşur; sıfır
+veritabanından `upgrade head` `0001`e çıkar ve yalnız `alembic_version`
+tablosu vardır; iki sıfır veritabanı aynı şemayı üretir; tekrar `upgrade`
+şemayı değiştirmez; başlangıç akışı göç çalıştırmaz; `alembic.ini` adres
+taşımaz; komut satırı `alembic upgrade head` başka bir çalışma dizininden
+merkezi yolu kullanır, stdout'a yazmaz, süreç içi göçle aynı şemayı verir.
 
 ## Mimari sınır: çekirdek ve finans
 
@@ -334,8 +403,12 @@ src/defteriki/    uygulama paketi
   baslangic.py    uv run defteriki giriş noktası; ortak hazırlık (ortami_hazirla)
   gunluk.py       teknik hata günlüğü
   mcp_kapisi.py   uv run defteriki-mcp; MCP sunucusu ve araçları
-  cekirdek/       genel çekirdek; finansı tanımaz (henüz boş)
+  cekirdek/       genel çekirdek; finansı tanımaz
+    veritabani.py   SQLite bağlantı politikası, TabloTabani, işlem sınırı
+    gocler.py       Alembic şema sürümü ve süreç içi göç
   finans/         finansal domain; çekirdeği kullanabilir (henüz boş)
+alembic.ini       Alembic yapılandırması (veritabanı adresi yok)
+alembic/          env.py (yol merkezi ayarlardan), versions/ (göç zinciri)
 tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı)
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
