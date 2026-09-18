@@ -47,19 +47,40 @@ belirlenir.
 * Finansal kavramlar finans paketinin sorumluluğudur.
 * İsim değiştirmek domain bağımsızlığı sayılmaz; aynı finansal varsayım başka
   adla da çekirdeğe taşınamaz.
+* Finansal semantik (para birimi, eksen, yön, işlem türü, mutabakat kuralı
+  gibi) Python enum'larına, sabitlerine ya da formüllerine değil, finans
+  paketinin okuduğu **tanım verisine** yazılır; çekirdek bu veriyi anlamını
+  bilmeden taşır ve denetler.
 * Bu sınır otomatik testle korunur.
 
 Test (`tests/test_mimari_sinir.py`) `src/defteriki/cekirdek/**/*.py`
-dosyalarını Python AST ile okur ve `defteriki.finans` bağımlılığı bulursa
-dosya ve satırla düşer: `import defteriki.finans[.x]`, `from
-defteriki.finans[.x] import y`, göreli import (`from .. import finans`,
-`from ..finans import x`), `importlib.import_module` ve `__import__` metin
-hedefleri. Test kelime aramaz; `TRY`, `TL` gibi sözcükler denetim konusu
+dosyalarını Python AST ile okur; `defteriki.finans` bağımlılığı bulursa dosya
+ve satırla, dolaylı bağımlılık bulursa modül zinciriyle düşer. Kapsam:
+
+* `import defteriki.finans[.x]` (`as` ile de), `from defteriki.finans[.x]
+  import y`, `from defteriki import finans`;
+* göreli import: `from .. import finans`, `from ..finans import x`, derin
+  paketlerde `...`;
+* metin hedefli dinamik import: `importlib.import_module(...)` ve
+  `__import__(...)`; hedef ilk konumsal argüman ya da `name=`; `package=` ile
+  ya da dosyanın kendi paketine göre çözülen göreli hedef (`".finans"`);
+  `import importlib as il` ve `from importlib import import_module as im`
+  takma adları;
+* fonksiyon gövdesi içindeki importlar;
+* dolaylı bağımlılık: çekirdek modülünün `defteriki` içindeki statik import
+  grafiği üzerinden (aynı biçimlerle) finansa ulaşması, örneğin çekirdek →
+  `defteriki.yardimci` → `defteriki.finans`.
+
+Kapsam dışı, bilinçli sınır: çalışma anında kurulan metinler
+(`import_module(ad)` değişkenle), `sys.modules` erişimi, `getattr`,
+`exec`/`eval`, üçüncü taraf paketlerin içinden geçen yollar. Test bütün
+Python dinamiklerini çözdüğünü iddia etmez; bunlar kod incelemesinin
+konusudur. Test kelime aramaz; `TRY`, `TL` gibi sözcükler denetim konusu
 değildir, korunan şey bağımlılık yönüdür. Denetleyicinin her yasak biçimi
-yakaladığı ve izinli biçimlere dokunmadığı sentetik ağaçta ayrıca sınanır;
-çekirdek boşken yeşil kalması tek başına kanıt sayılmaz. Semantik sızıntı
-(finansal varsayımın adsız biçimde çekirdeğe girmesi) sonraki aşamalarda ayrı
-denetlenir.
+yakaladığı, izinli biçimlere dokunmadığı ve dolaylı zinciri doğru
+raporladığı sentetik ağaçta ayrıca sınanır; çekirdek boşken yeşil kalması tek
+başına kanıt sayılmaz. Semantik sızıntı (finansal varsayımın adsız biçimde
+çekirdeğe girmesi) sonraki aşamalarda ayrı denetlenir.
 
 Bu aşamada iki paket de boştur (`__init__.py` yalnız docstring taşır);
 mevcut modüller taşınmamış, yeni model ya da soyutlama yazılmamıştır.
