@@ -587,16 +587,19 @@ def test_ayni_iliski_mukerrer_yazilamaz(
     assert _sayi(veritabani, nt.NESNE_ILISKISI) == 4  # raf→depo, a→raf, b→raf, a→b
 
 
-def test_nesne_kendisiyle_iliskilenemez(
+def test_hiyerarsik_olmayan_iliski_kendine_donebilir(
     veritabani: vt.Veritabani, env: Envanter
 ) -> None:
+    """Genel ilişkide A → A'ya çekirdek karışmaz; anlamı domain'in işidir."""
     depo = _depo(veritabani, env)
     raf = _raf(veritabani, env, depo)
     a = _urun(veritabani, env, [raf], "A")
-    with pytest.raises(ni.GecersizIliski, match="kendisiyle"):
-        with veritabani.islem() as o:
-            ni.iliski_kur(o, env.benzer_id, a, a)
-    with pytest.raises(IntegrityError, match="CHECK constraint failed"):
+    with veritabani.islem() as o:
+        satir = ni.iliski_kur(o, env.benzer_id, a, a)
+        assert (satir.kaynak_nesne_id, satir.hedef_nesne_id) == (a, a)
+    # Satır veritabanından geçti (0005: kontrol kısıtı yok); aynı satır ikinci kez
+    # yazılamaz, mükerrerlik benzersizliği hâlâ korunur.
+    with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
         with veritabani.islem() as o:
             o.execute(
                 text(
@@ -611,6 +614,106 @@ def test_nesne_kendisiyle_iliskilenemez(
                     "a": a,
                 },
             )
+
+
+@dataclass(frozen=True, slots=True)
+class Dugumler:
+    """Çevrim testleri için sürüm 2: tek tür ``DUGUM``, iki hiyerarşik ilişki."""
+
+    surum_id: int
+    dugum_id: int
+    ustu_id: int
+    """``USTU``: düğüm → düğüm, hiyerarşik (0..sınırsız)."""
+    bagli_id: int
+    """``BAGLI``: düğüm → düğüm, ayrı tanım, yine hiyerarşik (0..sınırsız)."""
+
+
+@pytest.fixture
+def dugumler(veritabani: vt.Veritabani, env: Envanter) -> Dugumler:
+    with veritabani.islem() as o:
+        surum = ti.surum_tanimla(o, env.paket_id, 2)
+        dugum = ti.nesne_turu_tanimla(o, surum.id, "DUGUM", "Düğüm")
+        ustu = ti.iliski_tanimla(o, surum.id, "USTU", "Üstü", dugum.id, dugum.id)
+        bagli = ti.iliski_tanimla(o, surum.id, "BAGLI", "Bağlı", dugum.id, dugum.id)
+        ti.hiyerarsi_kurali_tanimla(o, ustu.id, 0, None)
+        ti.hiyerarsi_kurali_tanimla(o, bagli.id, 0, None)
+        return Dugumler(surum.id, dugum.id, ustu.id, bagli.id)
+
+
+def _dugum(v: vt.Veritabani, d: Dugumler) -> int:
+    with v.islem() as o:
+        return ni.nesne_olustur(o, d.dugum_id).id
+
+
+def test_hiyerarsik_iliski_kendine_donemez(
+    veritabani: vt.Veritabani, dugumler: Dugumler
+) -> None:
+    a = _dugum(veritabani, dugumler)
+    with pytest.raises(ni.HiyerarsiIhlali, match="çevrim"):
+        with veritabani.islem() as o:
+            ni.iliski_kur(o, dugumler.ustu_id, a, a)
+    with pytest.raises(ni.HiyerarsiIhlali, match="çevrim"):
+        with veritabani.islem() as o:
+            ni.nesne_olustur(o, dugumler.dugum_id)  # kendine bağlantı verilemez zaten
+            b = ni.nesne_olustur(o, dugumler.dugum_id)
+            ni.iliski_kur(o, dugumler.ustu_id, b.id, b.id)
+    assert _sayi(veritabani, nt.NESNE_ILISKISI) == 0
+
+
+def test_hiyerarside_zincir_gecer_cevrim_reddedilir(
+    veritabani: vt.Veritabani, dugumler: Dugumler
+) -> None:
+    a, b, c = (_dugum(veritabani, dugumler) for _ in range(3))
+    with veritabani.islem() as o:
+        ni.iliski_kur(o, dugumler.ustu_id, a, b)  # A → B
+        ni.iliski_kur(o, dugumler.ustu_id, b, c)  # B → C
+    with pytest.raises(ni.HiyerarsiIhlali, match="çevrim"):
+        with veritabani.islem() as o:
+            ni.iliski_kur(o, dugumler.ustu_id, c, a)  # C → A: çevrim
+    with pytest.raises(ni.HiyerarsiIhlali, match="çevrim"):
+        with veritabani.islem() as o:
+            ni.iliski_kur(o, dugumler.ustu_id, b, a)  # B → A: iki düğümlü çevrim
+    assert _sayi(veritabani, nt.NESNE_ILISKISI) == 2  # kısmi ilişki yok
+    with veritabani.islem() as o:  # ağaç genişleyebilir: C → D
+        d = ni.nesne_olustur(
+            o, dugumler.dugum_id, None, [ni.UstBaglanti(dugumler.ustu_id, c)]
+        )
+        ni.iliski_kur(
+            o, dugumler.ustu_id, d.id, a
+        )  # D → A: A zaten üst değil, çevrim değil
+    assert _sayi(veritabani, nt.NESNE_ILISKISI) == 4
+
+
+def test_farkli_hiyerarsik_tanimlar_uzerinden_cevrim_reddedilir(
+    veritabani: vt.Veritabani, dugumler: Dugumler
+) -> None:
+    a, b, c = (_dugum(veritabani, dugumler) for _ in range(3))
+    with veritabani.islem() as o:
+        ni.iliski_kur(o, dugumler.ustu_id, a, b)  # A →USTU B
+        ni.iliski_kur(o, dugumler.bagli_id, b, c)  # B →BAGLI C
+    with pytest.raises(ni.HiyerarsiIhlali, match="çevrim"):
+        with veritabani.islem() as o:
+            ni.iliski_kur(
+                o, dugumler.ustu_id, c, a
+            )  # C →USTU A: BAGLI üzerinden çevrim
+    with pytest.raises(ni.HiyerarsiIhlali, match="çevrim"):
+        with veritabani.islem() as o:
+            ni.nesne_olustur(o, dugumler.dugum_id)  # sürüm kilitli; sorun değil
+            ni.iliski_kur(o, dugumler.bagli_id, c, a)  # C →BAGLI A: aynı çevrim
+    assert _sayi(veritabani, nt.NESNE_ILISKISI) == 2
+
+
+def test_cevrim_denetimi_hiyerarsik_olmayan_iliskiyi_izlemez(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    """BENZER (kuralsız) A → B varken hiyerarşik olmayan yol çevrim sayılmaz."""
+    depo = _depo(veritabani, env)
+    raf = _raf(veritabani, env, depo)
+    a = _urun(veritabani, env, [raf], "A")
+    b = _urun(veritabani, env, [raf], "B")
+    with veritabani.islem() as o:
+        ni.iliski_kur(o, env.benzer_id, a, b)
+        ni.iliski_kur(o, env.benzer_id, b, a)  # genel ilişkide çift yön serbest
 
 
 def test_olmayan_iliski_tanimi_ve_nesne_reddedilir(
@@ -778,25 +881,46 @@ def test_gerekli_durumda_olmayan_ust_reddedilir(
 def test_ust_durum_degisikligi_cocugu_bozarsa_reddedilir(
     veritabani: vt.Veritabani, env: Envanter
 ) -> None:
+    """Kural yaşam durumundan bağımsızdır: raf kapalı olsa da depo kapatılamaz,
+    kapalı raf son zorunlu üstünü kaybedemez."""
     depo = _depo(veritabani, env)
     raf = _raf(veritabani, env, depo)
     with pytest.raises(ni.HiyerarsiIhlali, match="'DEPODA' için en az 1 üst"):
         with veritabani.islem() as o:
             ni.yasam_durumunu_degistir(o, depo, KAPALI)
     assert _durum(veritabani, depo) == ETKIN.value
-    # Çocuk kapatılınca üst kapatılabilir; kapalı çocuk kapalı üstle yeniden açılamaz.
+
     with veritabani.islem() as o:
         ni.yasam_durumunu_degistir(o, raf, KAPALI)
-        ni.yasam_durumunu_degistir(o, depo, KAPALI)
-    assert _durum(veritabani, depo) == KAPALI.value
+    with pytest.raises(ni.HiyerarsiIhlali, match="'DEPODA' için en az 1 üst"):
+        with veritabani.islem() as o:
+            ni.yasam_durumunu_degistir(o, depo, KAPALI)  # çocuk kapalı diye geçilmez
+    assert _durum(veritabani, depo) == ETKIN.value
     with pytest.raises(ni.HiyerarsiIhlali, match="en az 1 üst"):
         with veritabani.islem() as o:
-            ni.yasam_durumunu_degistir(o, raf, ETKIN)
-    assert _durum(veritabani, raf) == KAPALI.value
-    with veritabani.islem() as o:  # üst açılınca çocuk açılabilir
-        ni.yasam_durumunu_degistir(o, depo, ETKIN)
-        ni.yasam_durumunu_degistir(o, raf, ETKIN)
+            [baglanti] = ni.iliskileri_listele(o, raf)
+            ni.iliski_kaldir(o, baglanti.id)  # kapalı çocuk da son üstünü kaybedemez
+    with veritabani.islem() as o:
+        assert len(ni.iliskileri_listele(o, raf)) == 1
+        ni.yasam_durumunu_degistir(o, raf, ETKIN)  # üst etkin: geri açılabilir
     assert _durum(veritabani, raf) == ETKIN.value
+
+
+def test_cocuksuz_ust_kapatilip_acilabilir(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    depo = _depo(veritabani, env)
+    with veritabani.islem() as o:
+        ni.yasam_durumunu_degistir(o, depo, KAPALI)
+    assert _durum(veritabani, depo) == KAPALI.value
+    with pytest.raises(ni.HiyerarsiIhlali, match="etkin durumda olmalı"):
+        with veritabani.islem() as o:
+            ni.nesne_olustur(
+                o, env.raf_id, {"kod": "A1"}, [ni.UstBaglanti(env.depoda_id, depo)]
+            )
+    with veritabani.islem() as o:
+        ni.yasam_durumunu_degistir(o, depo, ETKIN)
+    _raf(veritabani, env, depo)
 
 
 def test_ikinci_ust_varken_biri_kapatilabilir(
@@ -1056,3 +1180,179 @@ def test_eski_nesnenin_anlami_yeni_surumle_degismez(
             ni.ozellik_yaz(o, depo, "sehir", "Edirne")
         ni.yasam_durumunu_degistir(o, depo, KAPALI)  # eski nesne hâlâ yönetilebilir
     assert _durum(veritabani, depo) == KAPALI.value
+
+
+# --- servis hata atomikliği (SAVEPOINT) -----------------------------------------------
+# Hata çağıran tarafından aynı işlem içinde yakalanır, işlem normal commit olur;
+# başarısız çağrının hiçbir kısmi değişikliği kalmamalı.
+
+
+def test_eksik_zorunlu_ozellik_hatasi_yakalaninca_nesne_kalmaz(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    with veritabani.islem() as o:
+        try:
+            ni.nesne_olustur(o, env.depo_id, {})
+        except ni.NesneHatasi:
+            pass
+    assert _sayi(veritabani, nt.NESNE) == 0
+    assert _sayi(veritabani, nt.NESNE_OZELLIGI) == 0
+    with veritabani.islem() as o:
+        assert ti.surum_kilitli_mi(o, env.surum_id) is False
+
+
+def test_hiyerarsi_hatasi_yakalaninca_nesne_ve_ozellik_kalmaz(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    """Zorunlu üst eksikliği nesne yazıldıktan sonra anlaşılır; SAVEPOINT geri alır."""
+    with veritabani.islem() as o:
+        try:
+            ni.nesne_olustur(o, env.raf_id, {"kod": "A1", "kapasite": 3})
+        except ni.HiyerarsiIhlali:
+            pass
+    assert _sayi(veritabani, nt.NESNE) == 0
+    assert _sayi(veritabani, nt.NESNE_OZELLIGI) == 0
+    assert _sayi(veritabani, nt.NESNE_ILISKISI) == 0
+    with veritabani.islem() as o:
+        assert ti.surum_kilitli_mi(o, env.surum_id) is False
+
+
+def test_en_cok_ust_hatasi_yakalaninca_fazla_iliski_kalmaz(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    depo = _depo(veritabani, env)
+    r1, r2, r3 = (_raf(veritabani, env, depo, k) for k in ("A1", "A2", "A3"))
+    urun = _urun(veritabani, env, [r1, r2])
+    with veritabani.islem() as o:
+        try:
+            ni.iliski_kur(o, env.rafta_id, urun, r3)
+        except ni.HiyerarsiIhlali:
+            pass
+        try:
+            ni.nesne_olustur(
+                o,
+                env.urun_id,
+                {"barkod": "Y"},
+                [ni.UstBaglanti(env.rafta_id, r) for r in (r1, r2, r3)],
+            )
+        except ni.HiyerarsiIhlali:
+            pass
+    with veritabani.islem() as o:
+        assert sorted(
+            i.hedef_nesne_id for i in ni.iliskileri_listele(o, urun)
+        ) == sorted([r1, r2])
+        assert [n.id for n in ni.nesneleri_listele(o, env.urun_id)] == [urun]
+
+
+def test_son_ust_kaldirma_hatasi_yakalaninca_iliski_durur(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    depo = _depo(veritabani, env)
+    raf = _raf(veritabani, env, depo)
+    with veritabani.islem() as o:
+        [baglanti] = ni.iliskileri_listele(o, raf)
+        try:
+            ni.iliski_kaldir(o, baglanti.id)
+        except ni.HiyerarsiIhlali:
+            pass
+    with veritabani.islem() as o:
+        assert [i.id for i in ni.iliskileri_listele(o, raf)] == [baglanti.id]
+
+
+def test_ust_durum_hatasi_yakalaninca_eski_durum_korunur(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    depo = _depo(veritabani, env)
+    _raf(veritabani, env, depo)
+    with veritabani.islem() as o:
+        try:
+            ni.yasam_durumunu_degistir(o, depo, KAPALI)
+        except ni.HiyerarsiIhlali:
+            pass
+        assert ni.nesne_getir(o, depo).yasam_durumu == ETKIN.value  # işlem içinde de
+    assert _durum(veritabani, depo) == ETKIN.value
+
+
+def test_cevrim_hatasi_yakalaninca_iliski_kalmaz(
+    veritabani: vt.Veritabani, dugumler: Dugumler
+) -> None:
+    a, b = (_dugum(veritabani, dugumler) for _ in range(2))
+    with veritabani.islem() as o:
+        ni.iliski_kur(o, dugumler.ustu_id, a, b)
+        try:
+            ni.iliski_kur(o, dugumler.bagli_id, b, a)
+        except ni.HiyerarsiIhlali:
+            pass
+    assert _sayi(veritabani, nt.NESNE_ILISKISI) == 1
+
+
+def test_hatadan_sonra_ayni_islemde_gecerli_is_commit_olur(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    """Hata SAVEPOINT'i geri alır, dış işlem kullanılabilir kalır ve commit eder."""
+    depo = _depo(veritabani, env)
+    with veritabani.islem() as o:
+        for deneme in (
+            lambda: ni.nesne_olustur(o, env.raf_id, {"kod": "B"}),  # üst yok
+            lambda: ni.ozellik_yaz(o, depo, "ad", 5),  # tür uyuşmaz
+            lambda: ni.yasam_durumunu_degistir(
+                o, depo, KAPALI
+            ),  # önce çocuk yok, geçer
+        ):
+            try:
+                deneme()
+            except ni.NesneHatasi:
+                pass
+        ni.yasam_durumunu_degistir(o, depo, ETKIN)
+        raf = ni.nesne_olustur(
+            o, env.raf_id, {"kod": "A1"}, [ni.UstBaglanti(env.depoda_id, depo)]
+        )
+        try:
+            ni.iliski_kur(o, env.depoda_id, raf.id, depo)  # mükerrer
+        except ni.MukerrerIliski:
+            pass
+        ni.ozellik_yaz(o, raf.id, "kapasite", 12)
+    with veritabani.islem() as o:
+        assert [n.id for n in ni.nesneleri_listele(o, env.raf_id)] == [raf.id]
+        assert ni.ozellikleri_oku(o, raf.id) == {"kod": "A1", "kapasite": 12}
+        assert ni.ozellikleri_oku(o, depo) == {"ad": "Merkez"}
+        assert len(ni.iliskileri_listele(o, raf.id)) == 1
+        assert _durum(veritabani, depo) == ETKIN.value
+        assert o.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+
+
+def test_veritabani_kisit_hatasi_yakalaninca_islem_kullanilabilir_kalir(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    """Servis içindeki ``flush`` kısıt hatası verse de SAVEPOINT sayesinde dış
+    işlem bozulmaz (ham SQL ile önceden çakıştırılmış bir satır üzerinden)."""
+    depo = _depo(veritabani, env)
+    with veritabani.islem() as o:
+        [ad] = ti.ozellik_tanimlarini_listele(o, env.depo_id)
+        o.execute(text("DELETE FROM nesne_ozelligi"))
+        o.execute(
+            text(
+                "INSERT INTO nesne_ozelligi "
+                "(nesne_id, nesne_turu_id, ozellik_tanimi_id, deger) "
+                "VALUES (:n, :tur, :tanim, 'ham')"
+            ),
+            {"n": depo, "tur": env.depo_id, "tanim": ad.id},
+        )
+        o.execute(
+            text("UPDATE tanim_paketi SET kod = 'ENVANTER2'")
+        )  # işlemde başka geçerli değişiklik
+        try:
+            with o.begin_nested():
+                o.execute(
+                    text(
+                        "INSERT INTO nesne_ozelligi (nesne_id, nesne_turu_id, "
+                        "ozellik_tanimi_id, deger) VALUES (:n, :tur, :tanim, 'kopya')"
+                    ),
+                    {"n": depo, "tur": env.depo_id, "tanim": ad.id},
+                )
+        except IntegrityError:
+            pass
+        ni.ozellik_yaz(o, depo, "ad", "Güncel")
+    with veritabani.islem() as o:
+        assert ni.ozellikleri_oku(o, depo) == {"ad": "Güncel"}
+        assert ti.paket_bul(o, "ENVANTER2") is not None

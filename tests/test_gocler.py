@@ -5,7 +5,8 @@ Gerçek SQLite dosyaları, ``test`` ortamı, ``tmp_path`` altında kök. Süreç
 üzerinden aynı sonucu verir; komut satırı yolu merkezi ayarlardan alır.
 Aşama 4.2 ile zincir ``0002`` (tanım tabloları) ve ``0003`` (sürüm numarası
 kontrol kısıtı, tablo açık SQL ile yeniden kurulur), Aşama 4.3 ile ``0004``
-(nesne tabloları, hiyerarşi kuralı, özellik türü, sürüm kilidi); ``upgrade →
+(nesne tabloları, hiyerarşi kuralı, özellik türü, sürüm kilidi), ``0005``
+(genel ilişkide kendine dönüş kısıtı kalkar); ``upgrade →
 downgrade → upgrade`` döngüsü, adım adım zincir ve göç şemasının ORM
 metadata'sıyla birebirliği sınanır. Bütün göçler geçici test
 veritabanlarında çalışır; kalıcı geliştirme veritabanına dokunulmaz.
@@ -41,7 +42,8 @@ DEFTERIKI_DEGISKENLERI = (
 )
 BEKLEME_SANIYE = 120
 BASLANGIC_SURUMU = "0001"
-GUNCEL_SURUM = "0004"
+GUNCEL_SURUM = "0005"
+NESNE_SURUMU = "0004"
 TANIM_SURUMU = "0002"
 KISIT_SURUMU = "0003"
 UYGULAMA_TABLOLARI = (*tt.TANIM_TABLOLARI, *nt.NESNE_TABLOLARI)
@@ -314,7 +316,7 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 "kayit_alani_tanimi": [],
                 "nesne": ["ck_nesne_yasam_durumu_gecerli"],
                 "nesne_ozelligi": [],
-                "nesne_iliskisi": ["ck_nesne_iliskisi_kendine_degil"],
+                "nesne_iliskisi": [],
             }
             indeksler = {
                 tablo: sorted(str(ix["name"]) for ix in denetci.get_indexes(tablo))
@@ -349,10 +351,10 @@ def _cocuk_sayilari(oturum: Session) -> tuple[int, int, int]:
     )
 
 
-def test_zincir_adim_adim_0001_0002_0003_0004_ve_geri(
+def test_zincir_adim_adim_0001_0002_0003_0004_0005_ve_geri(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``0001 → 0002 → 0003 → 0004 → 0002 → 0001 → head``: her adımda sürüm ve
+    """``0001 → 0002 → 0003 → 0004 → 0005 → 0002 → 0001 → head``: her adımda sürüm ve
     ``tanim_surumu`` kontrol kısıtı beklenen; ``0003``ün tablo yeniden kurması
     ``0002``de yazılmış satırı ve diğer kısıt adlarını korur; ``0002``de kabul
     edilen REAL sürüm numarası ``0003``te reddedilir."""
@@ -451,12 +453,22 @@ def test_zincir_adim_adim_0001_0002_0003_0004_ve_geri(
             with v.islem() as oturum:
                 oturum.execute(ekle, {"no": 2.5})
 
-        goc(GUNCEL_SURUM)
-        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        goc(NESNE_SURUMU)
+        assert gocler.sema_surumu(v) == NESNE_SURUMU
         assert [ad for ad, _ in _kontrol_kisitlari(v, "tanim_surumu")] == [
             "ck_tanim_surumu_kilitli_ikili",
             "ck_tanim_surumu_surum_no_pozitif_tamsayi",
         ]
+        assert [ad for ad, _ in _kontrol_kisitlari(v, "nesne_iliskisi")] == [
+            "ck_nesne_iliskisi_kendine_degil"
+        ]
+        with v.islem() as oturum:
+            assert _cocuk_sayilari(oturum) == (1, 1, 1)
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+
+        goc(GUNCEL_SURUM)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        assert _kontrol_kisitlari(v, "nesne_iliskisi") == []
         with v.islem() as oturum:
             assert _cocuk_sayilari(oturum) == (1, 1, 1)
             assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
@@ -658,6 +670,124 @@ def test_0003_tam_sayi_olmayan_surum_no_varken_dusmez_geri_alinir(
                 ).all()
             ] == ["tanim_surumu"]
             assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+    finally:
+        v.kapat()
+
+
+def test_0004_0005_gecisi_iliski_satirlarini_korur(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0004``te yazılmış nesne ilişkisi ``0005``e taşınır, kendine dönen satır
+    artık kabul edilir, indeksler ve kısıt adları korunur, geçici tablo kalmaz;
+    ``head → 0004`` kendine dönen satır varken düşer ve geri alınır, satır
+    silinince geri alınır ve kısıt döner; tekrar ``head`` sıfırdan kurulanla
+    aynı şemayı verir."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    ekle = text(
+        "INSERT INTO nesne_iliskisi (iliski_tanimi_id, tanim_surumu_id, "
+        "kaynak_nesne_turu_id, hedef_nesne_turu_id, kaynak_nesne_id, hedef_nesne_id) "
+        "VALUES (1, 1, 1, 1, :k, :h)"
+    )
+    try:
+        goc(NESNE_SURUMU)
+        with v.islem() as oturum:
+            for sql in (
+                "INSERT INTO tanim_paketi (kod, gosterim_adi, olusturma_zamani) "
+                "VALUES ('DEMO', 'Demo', '2026-09-18 00:00:00')",
+                "INSERT INTO tanim_surumu (tanim_paketi_id, surum_no, "
+                "olusturma_zamani) VALUES (1, 1, '2026-09-18 00:00:00')",
+                "INSERT INTO nesne_turu (tanim_surumu_id, kod, gosterim_adi) "
+                "VALUES (1, 'TEST_KISI', 'Kişi')",
+                "INSERT INTO iliski_tanimi (tanim_surumu_id, kod, gosterim_adi, "
+                "kaynak_nesne_turu_id, hedef_nesne_turu_id) "
+                "VALUES (1, 'TANIR', 'Tanır', 1, 1)",
+                "INSERT INTO nesne (nesne_turu_id, tanim_surumu_id, yasam_durumu, "
+                "olusturma_zamani) VALUES (1, 1, 'etkin', '2026-09-18'), "
+                "(1, 1, 'etkin', '2026-09-18')",
+            ):
+                oturum.execute(text(sql))
+            oturum.execute(ekle, {"k": 1, "h": 2})
+        with pytest.raises(IntegrityError, match="kendine_degil"):
+            with v.islem() as oturum:
+                oturum.execute(ekle, {"k": 1, "h": 1})
+
+        goc(GUNCEL_SURUM)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        with v.islem() as oturum:
+            assert oturum.execute(
+                text("SELECT kaynak_nesne_id, hedef_nesne_id FROM nesne_iliskisi")
+            ).all() == [(1, 2)]
+            oturum.execute(ekle, {"k": 1, "h": 1})  # artık kabul
+            assert [
+                ad
+                for (ad,) in oturum.execute(
+                    text(
+                        "SELECT name FROM sqlite_master "
+                        "WHERE name LIKE 'nesne_iliskisi%'"
+                    )
+                ).all()
+            ] == ["nesne_iliskisi"]
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+        with v.motor.connect() as baglanti:
+            denetci = inspect(baglanti)
+            assert denetci.get_check_constraints("nesne_iliskisi") == []
+            assert sorted(
+                str(ix["name"]) for ix in denetci.get_indexes("nesne_iliskisi")
+            ) == [
+                "ix_nesne_iliskisi_hedef_nesne_id",
+                "ix_nesne_iliskisi_kaynak_nesne_id",
+            ]
+            assert sorted(
+                str(fk["name"]) for fk in denetci.get_foreign_keys("nesne_iliskisi")
+            ) == [
+                "fk_nesne_iliskisi_hedef_nesne_id_hedef_nesne_turu_id_tanim_surumu_id_nesne",
+                "fk_nesne_iliskisi_iliski_tanimi_id_tanim_surumu_id_"
+                "kaynak_nesne_turu_id_hedef_nesne_turu_id_iliski_tanimi",
+                "fk_nesne_iliskisi_kaynak_nesne_id_kaynak_nesne_turu_id_tanim_surumu_id_nesne",
+            ]
+        tam_sema = _sema(v)
+
+        with pytest.raises(
+            IntegrityError, match="kendine_degil"
+        ):  # kendine dönen satır var
+            goc(NESNE_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM  # geri alma uygulanmadı
+        assert _sema(v) == tam_sema
+        with v.islem() as oturum:
+            assert (
+                oturum.execute(text("SELECT count(*) FROM nesne_iliskisi")).scalar_one()
+                == 2
+            )
+            oturum.execute(
+                text(
+                    "DELETE FROM nesne_iliskisi WHERE kaynak_nesne_id = hedef_nesne_id"
+                )
+            )
+
+        goc(NESNE_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == NESNE_SURUMU
+        assert [ad for ad, _ in _kontrol_kisitlari(v, "nesne_iliskisi")] == [
+            "ck_nesne_iliskisi_kendine_degil"
+        ]
+        with v.islem() as oturum:
+            assert oturum.execute(
+                text("SELECT kaynak_nesne_id, hedef_nesne_id FROM nesne_iliskisi")
+            ).all() == [(1, 2)]
+
+        goc(GUNCEL_SURUM)
+        assert _sema(v) == tam_sema
+        assert _sema(v) == _yukselt(tmp_path / "sifir", monkeypatch)[1]
+        with v.islem() as oturum:
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
     finally:
         v.kapat()
 

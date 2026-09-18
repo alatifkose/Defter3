@@ -21,12 +21,14 @@ bağlı kimlik, yaşam durumu ve zaman damgasıdır; anlamı tanım verisinden g
   (id, tür, sürüm) üçlüsüne bağlanır. Böylece kaynak nesnenin türü tanımın
   kaynak türü, hedefinki hedef türü ve üçü aynı sürümde olmak zorundadır;
   ters tür çifti ya da başka sürüm veritabanında da reddedilir. Aynı tanım,
-  aynı iki nesne arasında bir kez yazılır; nesne kendisiyle ilişkilenmez.
+  aynı iki nesne arasında bir kez yazılır. Nesnenin kendisine dönen genel
+  ilişkiye çekirdek karışmaz (0004'teki kontrol kısıtı 0005 ile kalktı);
+  hiyerarşik ilişkide çevrim ``nesne_islemleri`` içinde engellenir.
 
 Yaşam durumu ``tanim_tablolari.YasamDurumu`` (etkin / kapalı) ile sınırlıdır.
 Hiyerarşi kuralları (en az / en çok üst, üstün gerekli durumu) veri olarak
-``hiyerarsi_kurali`` tablosundadır; sayım kuralları SQL ile güvenli ifade
-edilemediğinden ``nesne_islemleri`` içinde doğrulanır.
+``hiyerarsi_kurali`` tablosundadır; sayım ve çevrim kuralları SQL ile güvenli
+ifade edilemediğinden ``nesne_islemleri`` içinde doğrulanır.
 
 Bu modül yalnız şemadır; ``relationship`` yoktur (bkz. ``tanim_tablolari``).
 """
@@ -153,7 +155,6 @@ class NesneIliskisi(TabloTabani):
             ondelete="RESTRICT",
         ),
         UniqueConstraint("iliski_tanimi_id", "kaynak_nesne_id", "hedef_nesne_id"),
-        CheckConstraint("kaynak_nesne_id <> hedef_nesne_id", name="kendine_degil"),
         Index(None, "kaynak_nesne_id"),
         Index(None, "hedef_nesne_id"),
     )

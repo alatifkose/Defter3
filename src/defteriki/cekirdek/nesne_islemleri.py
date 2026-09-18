@@ -5,10 +5,14 @@
 envanter, kütüphane ya da başka bir alan için değişmeden çalışır.
 
 İşlem sınırı 4.1 kuralıdır: her işlev açık bir ``Session`` alır, çağıran
-``Veritabani.islem`` transaction'ının sahibidir; burada ``commit`` yoktur.
-Nesne oluşturma tek işte nesneyi, özelliklerini, üst bağlantılarını ve tanım
-sürümü kilidini yazar; herhangi bir adım düşerse çağıranın rollback'i hepsini
-geri alır.
+``Veritabani.islem`` transaction'ının sahibidir; burada ``commit`` ve dış
+``rollback`` yoktur. **Servis hata atomikliği:** her yazma işlevi önce
+doğrular, sonra yazar; yine de yazma sonrası doğrulama gereken yerler (nesne
+oluşturmada bütün bağlantılar yazıldıktan sonra en az üst kuralı) ve
+veritabanı kısıt hataları için her yazma işlevi kendi SAVEPOINT'i içinde
+çalışır (``Session.begin_nested``). Başarısız bir çağrı, hatası çağıran
+tarafından aynı işlem içinde yakalansa bile kendi yarattığı hiçbir değişikliği
+bırakmaz; dış işlem kullanılabilir kalır ve sonraki geçerli iş commit edilebilir.
 
 Sözleşmeler:
 
@@ -29,14 +33,18 @@ Sözleşmeler:
 * **İlişki** ``kaynak nesne → ilişki tanımı → hedef nesne``; kaynak nesnenin
   türü tanımın kaynak türü, hedefinki hedef türü, üçü aynı tanım sürümünde
   olmalı. Aynı tanımla aynı iki nesne arasında ikinci ilişki yazılmaz.
+  Hiyerarşik olmayan ilişkide nesnenin kendisine dönmesine çekirdek karışmaz
+  (``A → A`` geçerlidir); geçerli olup olmadığı domain'in işidir.
 * **Hiyerarşi**: kuralı olan ilişki üst bağlantısıdır (kaynak çocuk, hedef
-  üst). Her zaman korunan kural: etkin çocuğun, gerekli durumdaki üst sayısı
-  ``en_az_ust``'ten az olamaz; toplam üst bağlantısı ``en_cok_ust``'ü aşamaz;
-  bağlantı kurulurken üst gerekli yaşam durumunda olmalı. Bu, nesne
-  oluştururken, bağlantı kurarken ve kaldırırken, çocuğun ya da üstün yaşam
-  durumu değişirken yeniden doğrulanır. Kapalı çocuk için en az üst kuralı
-  aranmaz (bir alt ağaç önce çocuklardan başlayarak kapatılabilir); etkin
-  yapılırken yeniden aranır.
+  üst). Kural yaşam durumundan bağımsız, her zaman korunur: çocuğun gerekli
+  durumdaki üst sayısı ``en_az_ust``'ten az olamaz, toplam üst bağlantısı
+  ``en_cok_ust``'ü aşamaz, bağlantı kurulurken üst gerekli yaşam durumunda
+  olmalı. Nesne oluştururken, bağlantı kurarken ve kaldırırken, üstün yaşam
+  durumu değişirken yeniden doğrulanır; çocuğun kapalı olması kuralı
+  gevşetmez (böyle bir esneklik istenirse tanım verisi kararıdır, kodda
+  değildir). Hiyerarşik grafikte çevrim yoktur: nesne kendi üstü olamaz ve
+  ``A → B → … → A`` oluşamaz; denetim bütün hiyerarşik ilişki tanımları
+  üzerinden, üst bağlantılarını izleyerek yapılır.
 * **Yaşam durumu**: ``etkin`` / ``kapali``; geçiş yalnız
   ``yasam_durumunu_degistir`` ile ve hiyerarşi kurallarını bozamaz.
 
@@ -48,18 +56,19 @@ olduğu gibi gelir):
   özelliği de buraya girer), zorunlu özellik silinmek isteniyor;
   ``OzellikTuruUyusmuyor`` — değer tanımın türüne uymuyor;
   ``ZorunluOzellikEksik`` — nesne oluşturulurken zorunlu özellik verilmemiş.
-* ``GecersizIliski`` — tür ya da sürüm uyuşmuyor, nesne kendisiyle;
+* ``GecersizIliski`` — tür ya da sürüm uyuşmuyor;
   ``MukerrerIliski`` — aynı ilişki zaten var.
-* ``HiyerarsiIhlali`` — en az / en çok üst ya da üstün gerekli durumu.
+* ``HiyerarsiIhlali`` — en az / en çok üst, üstün gerekli durumu ya da çevrim.
 * ``YasamDurumuIhlali`` — geçersiz durum değeri.
 
 Veritabanı kısıtları (``nesne_tablolari``) tür/sürüm uyumunu, başka türün
 özelliğini, mükerrer özelliği ve mükerrer ilişkiyi ham SQL'e karşı da korur;
-sayım kuralları yalnız burada doğrulanır.
+sayım ve çevrim kuralları yalnız burada doğrulanır.
 """
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -105,7 +114,7 @@ class ZorunluOzellikEksik(GecersizOzellik):
 
 
 class GecersizIliski(NesneHatasi, ValueError):
-    """Tür ya da sürüm uyuşmuyor, nesne kendisiyle ilişkilendiriliyor."""
+    """Tür ya da sürüm uyuşmuyor."""
 
 
 class MukerrerIliski(GecersizIliski):
@@ -113,7 +122,7 @@ class MukerrerIliski(GecersizIliski):
 
 
 class HiyerarsiIhlali(NesneHatasi):
-    """En az / en çok üst sayısı ya da üstün gerekli yaşam durumu sağlanmıyor."""
+    """En az / en çok üst, üstün gerekli yaşam durumu ya da çevrim."""
 
 
 class YasamDurumuIhlali(NesneHatasi, ValueError):
@@ -251,38 +260,47 @@ def _kural_bul(oturum: Session, iliski_tanimi_id: int) -> HiyerarsiKurali | None
     ).scalar_one_or_none()
 
 
-def _ust_durumlari(oturum: Session, cocuk: Nesne, iliski: IliskiTanimi) -> list[str]:
-    """Çocuğun bu ilişkiyle bağlı üstlerinin yaşam durumları."""
-    return list(
-        oturum.execute(
-            select(Nesne.yasam_durumu)
-            .join(NesneIliskisi, NesneIliskisi.hedef_nesne_id == Nesne.id)
-            .where(
-                NesneIliskisi.iliski_tanimi_id == iliski.id,
-                NesneIliskisi.kaynak_nesne_id == cocuk.id,
-            )
-        ).scalars()
-    )
-
-
-def _kurali_dogrula(
+def _ust_durumlari(
     oturum: Session,
-    cocuk: Nesne,
-    kural: HiyerarsiKurali,
-    iliski: IliskiTanimi,
-    yalniz_en_cok: bool = False,
+    cocuk_id: int,
+    iliski_tanimi_id: int,
+    haric_baglanti_id: int | None = None,
+    durum_yerine: tuple[int, str] | None = None,
+) -> list[str]:
+    """Çocuğun bu ilişkiyle bağlı üstlerinin yaşam durumları.
+
+    ``haric_baglanti_id`` kaldırılmak istenen bağlantıyı saymaz;
+    ``durum_yerine`` (üst kimliği, aday durum) bir üstün durumu değişecekmiş
+    gibi hesaplar. İkisi de mutasyondan önce doğrulama içindir.
+    """
+    satirlar = oturum.execute(
+        select(NesneIliskisi.id, NesneIliskisi.hedef_nesne_id, Nesne.yasam_durumu)
+        .join(Nesne, Nesne.id == NesneIliskisi.hedef_nesne_id)
+        .where(
+            NesneIliskisi.iliski_tanimi_id == iliski_tanimi_id,
+            NesneIliskisi.kaynak_nesne_id == cocuk_id,
+        )
+    ).all()
+    durumlar: list[str] = []
+    for baglanti_id, ust_id, durum in satirlar:
+        if baglanti_id == haric_baglanti_id:
+            continue
+        if durum_yerine is not None and ust_id == durum_yerine[0]:
+            durum = durum_yerine[1]
+        durumlar.append(durum)
+    return durumlar
+
+
+def _sayimlari_dogrula(
+    cocuk_id: int, kural: HiyerarsiKurali, iliski: IliskiTanimi, durumlar: list[str]
 ) -> None:
-    """Tek kural: toplam üst ≤ en çok; etkin çocuk için gerekli durumdaki üst
-    ≥ en az. ``yalniz_en_cok`` bağlantı yazılırken kullanılır: en az kuralı iş
-    bitince (bütün bağlantılar yazılınca) aranır."""
-    durumlar = _ust_durumlari(oturum, cocuk, iliski)
+    """Tek kural, verilen üst durumları için: toplam ≤ en çok; gerekli
+    durumdaki üst ≥ en az. Çocuğun yaşam durumu kuralı değiştirmez."""
     if kural.en_cok_ust is not None and len(durumlar) > kural.en_cok_ust:
         raise HiyerarsiIhlali(
-            f"nesne {cocuk.id}: ilişki {iliski.kod!r} için en çok {kural.en_cok_ust} "
-            f"üst olabilir, {len(durumlar)} var."
+            f"nesne {cocuk_id}: ilişki {iliski.kod!r} için en çok {kural.en_cok_ust} "
+            f"üst olabilir, {len(durumlar)} olurdu."
         )
-    if yalniz_en_cok or cocuk.yasam_durumu != YasamDurumu.ETKIN.value:
-        return
     gecerli = [
         d
         for d in durumlar
@@ -295,42 +313,79 @@ def _kurali_dogrula(
             else ""
         )
         raise HiyerarsiIhlali(
-            f"nesne {cocuk.id}: ilişki {iliski.kod!r} için en az {kural.en_az_ust} "
-            f"üst{gerek} gerekli, {len(gecerli)} var."
+            f"nesne {cocuk_id}: ilişki {iliski.kod!r} için en az {kural.en_az_ust} "
+            f"üst{gerek} gerekli, {len(gecerli)} olurdu."
         )
 
 
 def _cocugu_dogrula(oturum: Session, cocuk: Nesne) -> None:
     for kural, iliski in _cocuk_kurallari(oturum, cocuk.nesne_turu_id):
-        _kurali_dogrula(oturum, cocuk, kural, iliski)
+        _sayimlari_dogrula(
+            cocuk.id, kural, iliski, _ust_durumlari(oturum, cocuk.id, iliski.id)
+        )
 
 
-def _cocuklari_dogrula(oturum: Session, ust: Nesne) -> None:
-    """Üstün durumu değişince, ondan durum isteyen kuralların çocuklarını yeniden
-    doğrular (yalnız etkin çocuklar aranır; ``_kurali_dogrula`` bunu bilir)."""
+def _cocuklari_dogrula(oturum: Session, ust: Nesne, aday_durum: str) -> None:
+    """Üstün durumu ``aday_durum`` olsaydı, ondan durum isteyen kuralların
+    çocukları hâlâ geçerli olur muydu? Mutasyondan önce çağrılır."""
     for kural, iliski in _ust_kurallari(oturum, ust.nesne_turu_id):
-        cocuklar = oturum.execute(
-            select(Nesne)
-            .join(NesneIliskisi, NesneIliskisi.kaynak_nesne_id == Nesne.id)
-            .where(
+        cocuk_idleri = oturum.execute(
+            select(NesneIliskisi.kaynak_nesne_id).where(
                 NesneIliskisi.iliski_tanimi_id == iliski.id,
                 NesneIliskisi.hedef_nesne_id == ust.id,
             )
         ).scalars()
-        for cocuk in cocuklar:
-            _kurali_dogrula(oturum, cocuk, kural, iliski)
+        for cocuk_id in cocuk_idleri:
+            _sayimlari_dogrula(
+                cocuk_id,
+                kural,
+                iliski,
+                _ust_durumlari(
+                    oturum, cocuk_id, iliski.id, durum_yerine=(ust.id, aday_durum)
+                ),
+            )
 
 
-# --- ilişki (iç) ----------------------------------------------------------------------
+def _cevrim_olusturur_mu(oturum: Session, cocuk_id: int, ust_id: int) -> bool:
+    """``cocuk → ust`` üst bağlantısı hiyerarşik grafikte çevrim yapar mı?
+
+    Çevrim, çocuğun zaten üstün (dolaylı) üstü olmasıdır: üstten başlayıp
+    bütün hiyerarşik ilişki tanımlarının üst bağlantılarını yukarı doğru
+    izleyerek çocuğa ulaşılıyorsa evet. ``cocuk == ust`` doğrudan çevrimdir.
+    Genişlik öncelikli tarama; her nesne bir kez ziyaret edilir.
+    """
+    if cocuk_id == ust_id:
+        return True
+    gorulen = {ust_id}
+    kuyruk: deque[int] = deque([ust_id])
+    while kuyruk:
+        simdiki = kuyruk.popleft()
+        ustler = oturum.execute(
+            select(NesneIliskisi.hedef_nesne_id)
+            .join(
+                HiyerarsiKurali,
+                HiyerarsiKurali.iliski_tanimi_id == NesneIliskisi.iliski_tanimi_id,
+            )
+            .where(NesneIliskisi.kaynak_nesne_id == simdiki)
+        ).scalars()
+        for ust in ustler:
+            if ust == cocuk_id:
+                return True
+            if ust not in gorulen:
+                gorulen.add(ust)
+                kuyruk.append(ust)
+    return False
+
+
+# --- ilişki (iç) --------------------------------------------------------------------
 
 
 def _iliski_yaz(
     oturum: Session, iliski: IliskiTanimi, kaynak: Nesne, hedef: Nesne
 ) -> NesneIliskisi:
-    """Doğrulanmış ilişki satırı; hiyerarşi kuralını (üst durumu, en çok) uygular.
-    En az üst kuralı çağıranın işi bitince ``_cocugu_dogrula`` ile aranır."""
-    if kaynak.id == hedef.id:
-        raise GecersizIliski(f"nesne {kaynak.id} kendisiyle ilişkilendirilemez.")
+    """Bütün doğrulamalar yazmadan önce: tür, sürüm, mükerrerlik; hiyerarşikse
+    üst durumu, en çok üst ve çevrim. En az üst kuralı bağlantı eklerken
+    bozulamaz; nesne oluşturmada iş bitince ``_cocugu_dogrula`` arar."""
     if kaynak.nesne_turu_id != iliski.kaynak_nesne_turu_id:
         raise GecersizIliski(
             f"ilişki {iliski.kod!r}: kaynak nesne {kaynak.id} türü "
@@ -359,15 +414,26 @@ def _iliski_yaz(
             f"ilişki {iliski.kod!r} nesne {kaynak.id} → {hedef.id} zaten var."
         )
     kural = _kural_bul(oturum, iliski.id)
-    if (
-        kural is not None
-        and kural.ust_yasam_durumu is not None
-        and hedef.yasam_durumu != kural.ust_yasam_durumu
-    ):
-        raise HiyerarsiIhlali(
-            f"ilişki {iliski.kod!r}: üst nesne {hedef.id} {kural.ust_yasam_durumu} "
-            f"durumda olmalı, {hedef.yasam_durumu}."
-        )
+    if kural is not None:
+        if (
+            kural.ust_yasam_durumu is not None
+            and hedef.yasam_durumu != kural.ust_yasam_durumu
+        ):
+            raise HiyerarsiIhlali(
+                f"ilişki {iliski.kod!r}: üst nesne {hedef.id} "
+                f"{kural.ust_yasam_durumu} durumda olmalı, {hedef.yasam_durumu}."
+            )
+        mevcut = _ust_durumlari(oturum, kaynak.id, iliski.id)
+        if kural.en_cok_ust is not None and len(mevcut) + 1 > kural.en_cok_ust:
+            raise HiyerarsiIhlali(
+                f"nesne {kaynak.id}: ilişki {iliski.kod!r} için en çok "
+                f"{kural.en_cok_ust} üst olabilir, {len(mevcut) + 1} olurdu."
+            )
+        if _cevrim_olusturur_mu(oturum, kaynak.id, hedef.id):
+            raise HiyerarsiIhlali(
+                f"ilişki {iliski.kod!r}: nesne {kaynak.id} → {hedef.id} hiyerarşide "
+                "çevrim oluşturur; nesne kendi (dolaylı) üstü olamaz."
+            )
     satir = NesneIliskisi(
         iliski_tanimi_id=iliski.id,
         tanim_surumu_id=iliski.tanim_surumu_id,
@@ -378,8 +444,6 @@ def _iliski_yaz(
     )
     oturum.add(satir)
     oturum.flush()
-    if kural is not None:
-        _kurali_dogrula(oturum, kaynak, kural, iliski, yalniz_en_cok=True)
     return satir
 
 
@@ -394,23 +458,16 @@ def nesne_olustur(
 ) -> Nesne:
     """Türün tanımıyla yeni, etkin nesne; özellikler ve üst bağlantılar tek işte.
 
-    Sıra: nesne satırı → özellikler (tanımsız kod, tür uyuşmazlığı, eksik
-    zorunlu özellik reddedilir) → bağlantılar (nesne kaynak, verilen nesne
-    hedef) → türün bütün hiyerarşi kuralları → tanım sürümü kilidi. Herhangi
-    bir hata çağıranın işlem sınırında yükselir; hiçbir parça kalmaz.
+    Sıra: özellikler yazmadan doğrulanır (tanımsız kod, tür uyuşmazlığı, eksik
+    zorunlu özellik) → SAVEPOINT içinde nesne satırı, özellik satırları,
+    bağlantılar (her biri yazmadan doğrulanır) → türün bütün hiyerarşi
+    kuralları (en az üst) → tanım sürümü kilidi. Herhangi bir hata SAVEPOINT'i
+    geri alır ve yükselir; çağıran yakalasa da hiçbir parça kalmaz.
     """
     tur = nesne_turu_getir(oturum, nesne_turu_id)
     surum = oturum.get(TanimSurumu, tur.tanim_surumu_id)
     if surum is None:  # dış anahtar bunu engeller; sözleşme için
         raise TanimBulunamadi(f"tanım sürümü bulunamadı: kimlik {tur.tanim_surumu_id}")
-    nesne = Nesne(
-        nesne_turu_id=tur.id,
-        tanim_surumu_id=tur.tanim_surumu_id,
-        yasam_durumu=YasamDurumu.ETKIN.value,
-        olusturma_zamani=simdi_utc(),
-    )
-    oturum.add(nesne)
-    oturum.flush()
 
     verilen = dict(ozellikler or {})
     tanimlar = {t.kod: t for t in _tur_tanimlari(oturum, tur.id)}
@@ -424,27 +481,37 @@ def nesne_olustur(
         raise ZorunluOzellikEksik(
             f"nesne türü {tur.kod!r}: zorunlu özellik eksik: {', '.join(eksik)}."
         )
-    for kod, deger in verilen.items():
-        tanim = tanimlar[kod]
-        oturum.add(
-            NesneOzelligi(
-                nesne_id=nesne.id,
-                nesne_turu_id=tur.id,
-                ozellik_tanimi_id=tanim.id,
-                deger=_degeri_kodla(tanim, deger),
-            )
+    kodlanmis = {
+        kod: _degeri_kodla(tanimlar[kod], deger) for kod, deger in verilen.items()
+    }
+
+    with oturum.begin_nested():
+        nesne = Nesne(
+            nesne_turu_id=tur.id,
+            tanim_surumu_id=tur.tanim_surumu_id,
+            yasam_durumu=YasamDurumu.ETKIN.value,
+            olusturma_zamani=simdi_utc(),
         )
-    oturum.flush()
-
-    for baglanti in ust_baglantilar:
-        iliski = iliski_tanimi_getir(oturum, baglanti.iliski_tanimi_id)
-        hedef = nesne_getir(oturum, baglanti.hedef_nesne_id)
-        _iliski_yaz(oturum, iliski, nesne, hedef)
-    _cocugu_dogrula(oturum, nesne)
-
-    if not surum.kilitli:
-        surum.kilitli = True
+        oturum.add(nesne)
         oturum.flush()
+        for kod, metin in kodlanmis.items():
+            oturum.add(
+                NesneOzelligi(
+                    nesne_id=nesne.id,
+                    nesne_turu_id=tur.id,
+                    ozellik_tanimi_id=tanimlar[kod].id,
+                    deger=metin,
+                )
+            )
+        oturum.flush()
+        for baglanti in ust_baglantilar:
+            iliski = iliski_tanimi_getir(oturum, baglanti.iliski_tanimi_id)
+            hedef = nesne_getir(oturum, baglanti.hedef_nesne_id)
+            _iliski_yaz(oturum, iliski, nesne, hedef)
+        _cocugu_dogrula(oturum, nesne)
+        if not surum.kilitli:
+            surum.kilitli = True
+            oturum.flush()
     return nesne
 
 
@@ -463,8 +530,8 @@ def yasam_durumunu_degistir(
 ) -> Nesne:
     """Nesnenin yaşam durumunu değiştirir; hiyerarşi kurallarını bozamaz.
 
-    Etkin yapılırken nesnenin kendi üst kuralları, herhangi bir değişimde
-    ondan durum isteyen kuralların (etkin) çocukları yeniden doğrulanır.
+    Ondan durum isteyen kuralların çocukları, aday durumla yazmadan önce
+    doğrulanır; ihlal varsa durum değişmez.
     """
     try:
         yeni_durum = YasamDurumu(yeni_durum)
@@ -473,11 +540,10 @@ def yasam_durumunu_degistir(
     nesne = nesne_getir(oturum, nesne_id)
     if nesne.yasam_durumu == yeni_durum.value:
         return nesne
-    nesne.yasam_durumu = yeni_durum.value
-    oturum.flush()
-    if yeni_durum is YasamDurumu.ETKIN:
-        _cocugu_dogrula(oturum, nesne)
-    _cocuklari_dogrula(oturum, nesne)
+    _cocuklari_dogrula(oturum, nesne, yeni_durum.value)
+    with oturum.begin_nested():
+        nesne.yasam_durumu = yeni_durum.value
+        oturum.flush()
     return nesne
 
 
@@ -497,17 +563,18 @@ def ozellik_yaz(
             NesneOzelligi.ozellik_tanimi_id == tanim.id,
         )
     ).scalar_one_or_none()
-    if satir is None:
-        satir = NesneOzelligi(
-            nesne_id=nesne.id,
-            nesne_turu_id=nesne.nesne_turu_id,
-            ozellik_tanimi_id=tanim.id,
-            deger=metin,
-        )
-        oturum.add(satir)
-    else:
-        satir.deger = metin
-    oturum.flush()
+    with oturum.begin_nested():
+        if satir is None:
+            satir = NesneOzelligi(
+                nesne_id=nesne.id,
+                nesne_turu_id=nesne.nesne_turu_id,
+                ozellik_tanimi_id=tanim.id,
+                deger=metin,
+            )
+            oturum.add(satir)
+        else:
+            satir.deger = metin
+        oturum.flush()
     return satir
 
 
@@ -530,8 +597,9 @@ def ozellik_sil(oturum: Session, nesne_id: int, kod: str) -> None:
         raise GecersizOzellik(
             f"nesne {nesne.id} üzerinde {kod!r} özelliği yazılı değil."
         )
-    oturum.delete(satir)
-    oturum.flush()
+    with oturum.begin_nested():
+        oturum.delete(satir)
+        oturum.flush()
 
 
 def ozellikleri_oku(oturum: Session, nesne_id: int) -> dict[str, object]:
@@ -552,23 +620,32 @@ def ozellikleri_oku(oturum: Session, nesne_id: int) -> dict[str, object]:
 def iliski_kur(
     oturum: Session, iliski_tanimi_id: int, kaynak_nesne_id: int, hedef_nesne_id: int
 ) -> NesneIliskisi:
-    """İki var olan nesne arasında ilişki; hiyerarşikse kuralı uygular."""
+    """İki var olan nesne arasında ilişki; hiyerarşikse kuralı ve çevrimi denetler."""
     iliski = iliski_tanimi_getir(oturum, iliski_tanimi_id)
     kaynak = nesne_getir(oturum, kaynak_nesne_id)
     hedef = nesne_getir(oturum, hedef_nesne_id)
-    return _iliski_yaz(oturum, iliski, kaynak, hedef)
+    with oturum.begin_nested():
+        return _iliski_yaz(oturum, iliski, kaynak, hedef)
 
 
 def iliski_kaldir(oturum: Session, nesne_iliskisi_id: int) -> None:
-    """İlişkiyi kaldırır; hiyerarşikse çocuğun en az üst kuralı bozulamaz."""
+    """İlişkiyi kaldırır; hiyerarşikse çocuğun en az üst kuralı bozulamaz
+    (silmeden önce, bu bağlantı sayılmadan doğrulanır)."""
     satir = _iliski_getir(oturum, nesne_iliskisi_id)
-    kaynak = nesne_getir(oturum, satir.kaynak_nesne_id)
     iliski = iliski_tanimi_getir(oturum, satir.iliski_tanimi_id)
     kural = _kural_bul(oturum, iliski.id)
-    oturum.delete(satir)
-    oturum.flush()
     if kural is not None:
-        _kurali_dogrula(oturum, kaynak, kural, iliski)
+        _sayimlari_dogrula(
+            satir.kaynak_nesne_id,
+            kural,
+            iliski,
+            _ust_durumlari(
+                oturum, satir.kaynak_nesne_id, iliski.id, haric_baglanti_id=satir.id
+            ),
+        )
+    with oturum.begin_nested():
+        oturum.delete(satir)
+        oturum.flush()
 
 
 def iliskileri_listele(oturum: Session, nesne_id: int) -> list[NesneIliskisi]:
