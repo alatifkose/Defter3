@@ -13,8 +13,9 @@ sınırı kuruldu ve testle korunuyor ("Mimari sınır" bölümü). Bu hat
 Aşama 3 kapısından yeniden başlar; önceki Aşama 4-6 geliştirme hattı
 [alatifkose/DefterIki](https://github.com/alatifkose/DefterIki) deposunun
 `main` dalında yedek olarak durur, oraya yazılmaz. Aşama 4.1 (genel
-veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de bitti;
-Aşama 4.3 (nesne motoru) sırada.
+veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de, Aşama 4.3
+(nesne motoru) 2026-09-19'da bitti; Aşama 4.4 (belge, arşiv, okuma ve
+kaynak) sırada.
 Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
@@ -45,9 +46,14 @@ Bitenler:
   (göç `0002`), `defteriki.cekirdek.tanim_tablolari` ve
   `defteriki.cekirdek.tanim_islemleri`; çekirdek hangi türlerin var olduğunu
   bilmez, testler nötr sahte paketlerle çalışır ("Tanım sistemi" bölümü)
+* Nesne motoru (Aşama 4.3): nesne, nesne özelliği ve nesne ilişkisi
+  tabloları, hiyerarşi kuralı, özellik değer türü ve zorunluluğu, tanım
+  sürümü kilidi, yaşam durumu (göç `0004`); `defteriki.cekirdek.nesne_tablolari`
+  ve `defteriki.cekirdek.nesne_islemleri` ("Nesne motoru" bölümü)
 
-Henüz yok: nesne ve kayıt verisi (tanımların örnekleri; Aşama 4.3 ve 4.7),
-finans tanım paketi (`finans/` boş), GUI, ürün verisi yazan MCP aracı.
+Henüz yok: kayıt (hareket) verisi (Aşama 4.7), belge ve arşiv (4.4), işlem
+paketi ve taslak (4.5), onay ve mükerrerlik (4.6), finans tanım paketi
+(`finans/` boş, 4.10), GUI, ürün verisi yazan MCP aracı.
 
 ## Veritabanı
 
@@ -90,8 +96,11 @@ yöneticisidir. `kapat()` havuzu boşaltır (Windows'ta dosya kilidi için).
 tablosu yoktur. Göçler `alembic/versions/` altında; `0001_genel_altyapi`
 zincirin başıdır ve tablo oluşturmaz, `0002_tanim_sistemi` yedi tanım
 tablosunu ekler, `0003_surum_no_tamsayi` `tanim_surumu` kontrol kısıtını
-depolama sınıfını da denetleyen biçimiyle değiştirir (zincirin başı bugün
-`0003`). `0003` tabloyu açık SQL adımlarıyla yeniden kurar, Alembic `batch`
+depolama sınıfını da denetleyen biçimiyle değiştirir, `0004_nesne_motoru`
+nesne tablolarını, hiyerarşi kuralını, özellik değer türü / zorunluluk
+sütunlarını ve sürüm kilidini ekler (zincirin başı bugün `0004`; ayrıntı
+"Nesne motoru" bölümünde). `0003` tabloyu açık SQL adımlarıyla yeniden kurar,
+Alembic `batch`
 kipiyle değil: göçler `foreign_keys=ON` bağlantıda ve tek transaction içinde
 çalıştığından (`PRAGMA foreign_keys` transaction içinde etkisizdir) `batch`
 ana tabloyu çocuk satırlar dururken düşürünce `FOREIGN KEY constraint
@@ -126,7 +135,7 @@ politikası) ayrı bir karardır, bugün yoktur. Atomiklik kanıtı
 oluşturup satır yazar, ikincisi tablo oluşturup bilinçli düşer; `upgrade
 head` hata verir, iki tablo da kalmaz, `alembic_version` yazılmamıştır
 (sürüm ilerlememiştir), ardından gerçek zincir aynı dosyada zincirin başına
-(bugün `0003`) çıkar ve `integrity_check` temizdir. Gerçek `0001_genel_altyapi` göçüne dokunulmaz.
+(bugün `0004`) çıkar ve `integrity_check` temizdir. Gerçek `0001_genel_altyapi` göçüne dokunulmaz.
 Aynı senaryo eski `sqlite3` kipinde denendiğinde birinci göçün tablosu
 (`sentetik_bir`) ve boş bir `alembic_version` tablosu geride kalıyordu;
 kanıt bu farktır.
@@ -140,7 +149,22 @@ hedefler; eski dosya bu zincirde olmayan `0002` sürümünü taşıdığından A
 verisi için ilk göç 2026-09-18'de bu şekilde uygulandı:
 `C:\dev\Defter3-veri\gelistirme\defteriki.sqlite3`, sürüm `0001`; göç `0002` aynı
 gün aynı komutla uygulandı, göç `0003` de aynı gün
-aynı komutla uygulandı, dosya `0003` sürümünde.
+aynı komutla uygulandı. 2026-09-18 akşamı Abdüllatif'in talimatıyla
+geliştirme veritabanı sıfırdan yeniden kuruldu: eski dosya
+`defteriki.sqlite3.eski-2026-09-18` adına alındı, yeni dosya `0001 → 0002 →
+0003` zinciriyle `0003` sürümünde ve boş. Göç `0004` bu dosyaya
+uygulanmadı; dosya `0003`te kalır, kod `0004` bekler ve bu bilinçli bir
+durumdur.
+
+**Geliştirme veritabanına göç politikası (karar 2026-09-18, Abdüllatif).**
+Geliştirme veritabanı depo dışındadır; commit ve geri alma fiziksel dosyayı
+geri almaz. Bu yüzden: göç geliştirme ve doğrulaması kalıcı geliştirme
+veritabanında yapılmaz, yalnız geçici / sıfır test veritabanlarında
+(`tmp_path`) yapılır; kalıcı dosyaya göç ancak Abdüllatif'in açık
+talimatıyla uygulanır; aşama bitişinde otomatik `upgrade head` yoktur;
+README'ye "geliştirme veritabanına uygulandı" kaydı ancak gerçekten onun
+talimatıyla yapıldıysa yazılır; göç zincirinin doğruluk kaynağı fiziksel
+dosya değil, Git'teki göç dosyaları ve sıfır veritabanından koşan testlerdir.
 
 **Testler** (`tests/test_cekirdek_veritabani.py`, `tests/test_gocler.py`):
 gerçek SQLite dosyalarıyla, `test` ortamı ve `tmp_path` altında kök;
@@ -154,8 +178,9 @@ kabul edilir; başarılı işlem commit olur, hata alan işlem tamamen rollback
 olur ve hata yükselir, oturum kapanır; işlem içindeki DDL de geri alınır
 (`CREATE TABLE` + hata → tablo yok); test veritabanı ve WAL dosyası yalnız
 test kökünde oluşur; sıfır
-veritabanından `upgrade head` `0003`e çıkar ve tablolar `alembic_version` +
-yedi tanım tablosudur; iki sıfır veritabanı aynı şemayı üretir; tekrar
+veritabanından `upgrade head` `0004`e çıkar ve tablolar `alembic_version` +
+sekiz tanım tablosu + üç nesne tablosudur; iki sıfır veritabanı aynı şemayı
+üretir; tekrar
 `upgrade` şemayı değiştirmez; `head → 0001 → head` döngüsünde tanım tabloları
 ve indeksleri gider, geri gelir ve `sqlite_master` birebir aynıdır,
 `integrity_check` temizdir; adım adım `0001 → 0002 → 0003 → 0002 → 0001 →
@@ -193,10 +218,11 @@ kısıtlar isimlidir (`pk_`, `fk_`, `uq_`, `ck_`, `ix_` kalıbı).
 | Tablo | Ne tutar | Benzersizlik |
 |---|---|---|
 | `tanim_paketi` | bir domain'in tanımlarını gruplayan paket | `kod` |
-| `tanim_surumu` | paketin sürümü; `typeof(surum_no) = 'integer' AND surum_no > 0` (kontrol kısıtı, göç `0003`) | `(tanim_paketi_id, surum_no)` |
+| `tanim_surumu` | paketin sürümü; `typeof(surum_no) = 'integer' AND surum_no > 0` (kontrol kısıtı, göç `0003`); `kilitli` (göç `0004`: altında nesne üretilince 1, ikili kontrol kısıtı) | `(tanim_paketi_id, surum_no)` |
 | `nesne_turu` | sürümdeki nesne türü | `(tanim_surumu_id, kod)`; ayrıca `(id, tanim_surumu_id)` bileşik dış anahtar hedefi |
-| `ozellik_tanimi` | nesne türünün özelliği | `(nesne_turu_id, kod)` |
-| `iliski_tanimi` | iki nesne türü arasında yönlü ilişki (kaynak → hedef) | `(tanim_surumu_id, kod)`; kaynak ve hedef için `ix_` indeksleri |
+| `ozellik_tanimi` | nesne türünün özelliği; `deger_turu` (metin / tam_sayi / mantiksal / ondalik, kontrol kısıtı) ve `zorunlu` (ikili) göç `0004` ile | `(nesne_turu_id, kod)`; ayrıca `(id, nesne_turu_id)` bileşik dış anahtar hedefi |
+| `iliski_tanimi` | iki nesne türü arasında yönlü ilişki (kaynak → hedef) | `(tanim_surumu_id, kod)`; kaynak ve hedef için `ix_` indeksleri; `(id, tanim_surumu_id, kaynak_nesne_turu_id, hedef_nesne_turu_id)` benzersiz indeksi nesne ilişkisinin bileşik dış anahtarı için (göç `0004`) |
+| `hiyerarsi_kurali` | bir ilişki tanımını hiyerarşik üst bağlantısı yapan kural (göç `0004`): `en_az_ust` ≥ 0, `en_cok_ust` ≥ 1 ve ≥ en az ya da NULL (sınırsız), `ust_yasam_durumu` (etkin / kapali / NULL); kontrol kısıtları depolama sınıfını da denetler | `iliski_tanimi_id` (bir ilişkinin en çok bir kuralı) |
 | `kayit_turu` | sürümdeki kayıt (olay) türü | `(tanim_surumu_id, kod)` |
 | `kayit_alani_tanimi` | kayıt türünün alanı | `(kayit_turu_id, kod)` |
 
@@ -231,21 +257,25 @@ bu SQLite davranışıdır, uygulama katmanı bu türleri zaten kabul etmez.
 **İşlevler (`src/defteriki/cekirdek/tanim_islemleri.py`).** Tanım tablolarına
 tek giriş noktası; her işlev açık bir `Session` alır ve
 `Veritabani.islem()` içinde çağrılır, kendi başına commit etmez. Yazma:
-`paket_tanimla`, `surum_tanimla`, `nesne_turu_tanimla`, `ozellik_tanimla`,
-`iliski_tanimla`, `kayit_turu_tanimla`, `kayit_alani_tanimla` (satırı ekler,
-`flush` eder, kimlik atanmış ORM nesnesini döndürür). Okuma: `paket_bul`,
-`paketleri_listele`, `surumleri_listele`, `nesne_turlerini_listele`,
-`ozellik_tanimlarini_listele`, `iliski_tanimlarini_listele`,
+`paket_tanimla`, `surum_tanimla`, `nesne_turu_tanimla`, `ozellik_tanimla`
+(Aşama 4.3'ten beri `deger_turu: DegerTuru` zorunlu, `zorunlu: bool = False`),
+`iliski_tanimla`, `hiyerarsi_kurali_tanimla` (4.3), `kayit_turu_tanimla`,
+`kayit_alani_tanimla` (satırı ekler, `flush` eder, kimlik atanmış ORM
+nesnesini döndürür). Okuma: `paket_bul`, `paketleri_listele`,
+`surumleri_listele`, `surum_kilitli_mi` (4.3), `nesne_turlerini_listele`,
+`nesne_turu_getir`, `ozellik_tanimlarini_listele`, `iliski_tanimlarini_listele`,
+`iliski_tanimi_getir`, `hiyerarsi_kurallarini_listele` (4.3),
 `kayit_turlerini_listele`, `kayit_alani_tanimlarini_listele`. Üst kaydı
 olmayan listeleme boş liste değil hata verir; boş liste ile "üst kayıt yok"
-karışmaz. Silme ve güncelleme işlevi bu aşamada yoktur.
+karışmaz. Tanım silme ve güncelleme işlevi yoktur.
 
 **Hata modeli.** Hepsi `TanimHatasi` altında, domain bağımsız:
 `GecersizTanim` (kod biçimi, boş gösterim adı, pozitif tam sayı olmayan sürüm no;
 `ValueError`), `TanimBulunamadi` (verilen paket/sürüm/tür kimliği yok;
 `LookupError`), `MukerrerTanim` (aynı kapsamda aynı kod ya da sürüm no),
-`TanimSurumuUyusmuyor` (ilişkinin kaynak/hedef türü başka sürümde). Bu
-denetimler uygulama sözleşmesidir; veritabanı kısıtları son savunmadır ve
+`TanimSurumuUyusmuyor` (ilişkinin kaynak/hedef türü başka sürümde),
+`TanimSurumuKilitli` (4.3: sürüm altında nesne üretildi, yeni tanım alamaz).
+Bu denetimler uygulama sözleşmesidir; veritabanı kısıtları son savunmadır ve
 aynı durumları ham `IntegrityError` ile de reddeder (testte iki düzey ayrı
 ayrı sınanır). Herhangi bir hata `islem()` bağlamında yükselir ve aynı
 işlemdeki bütün yazmalar geri alınır.
@@ -273,13 +303,156 @@ içindeki hata (sentetik, mükerrerlik, veritabanı kısıtı) aynı işlemdeki
 kapandıktan sonra dönen nesneler okunabilir; iki farklı sahte domain (`DEMO`,
 `ENVANTER`) aynı tablolarda aynı işlevlerle yan yana tanımlanır.
 
-**Bilinçli sınırlar (Aşama 4.2'de yok, sonraki aşamaların kararı):** özellik
-ve kayıt alanı için veri tipi / zorunluluk bilgisi (plan bu aşama için tip
-sistemi tanımlamaz; 4.3 "özellik doğrulama" için gerekince yeni göçle
-eklenir); ilişki için çokluk (cardinality), zorunluluk ve hiyerarşi kısıtları
-(plan madde 8, Aşama 4.3); sürümün kilitlenmesi / değişmezliği (nesneler
-sürüme bağlanınca gerekecek); nesne ve kayıt örnekleri; tanım silme ve
-güncelleme; finans tanım paketi (Aşama 4.10).
+**Aşama 4.3 ile gelenler:** özellik değer türü ve zorunluluk, hiyerarşi
+kuralı (çokluk, zorunluluk, üstün gerekli durumu), sürüm kilidi — hepsi
+"Nesne motoru" bölümünde. **Hâlâ yok (bilinçli):** kayıt alanı için veri
+tipi (kayıt sistemi Aşama 4.7'de); tanım silme ve güncelleme; finans tanım
+paketi (Aşama 4.10).
+
+## Nesne motoru
+
+Aşama 4.3 (2026-09-19; Yeniden İnşa Teknik Planı madde 7, 8 ve 28). Çekirdek
+bir nesnenin ne olduğunu bilmez: nesne, bir nesne türü tanımına bağlı kimlik,
+yaşam durumu ve zaman damgasıdır; anlamı, özellikleri, ilişkileri ve
+hiyerarşi kuralları tanım verisinden gelir. Aynı kod envanter, kütüphane ya
+da başka bir alan için değişmeden çalışır; testler nötr `ENVANTER` dünyasıyla
+(`DEPO`, `BOLGE`, `RAF`, `URUN`) yapılır, `finans/` boştur.
+
+**Tablolar (`src/defteriki/cekirdek/nesne_tablolari.py`, göç `0004`).** Bütün
+kısıtlar isimlidir; dış anahtarlar `ON DELETE RESTRICT`.
+
+| Tablo | Ne tutar | Veritabanı düzeyinde korunan |
+|---|---|---|
+| `nesne` | `nesne_turu_id`, `tanim_surumu_id`, `yasam_durumu`, `olusturma_zamani` | tür ve sürüm iki rastgele dış anahtar değildir: `(nesne_turu_id, tanim_surumu_id)` bileşik dış anahtarla `nesne_turu (id, tanim_surumu_id)` çiftine bağlıdır, türün o sürüme ait olduğu zorlanır; `yasam_durumu IN ('etkin', 'kapali')`; `(id, nesne_turu_id)` ve `(id, nesne_turu_id, tanim_surumu_id)` benzersiz (alt tabloların bileşik dış anahtar hedefleri); tür ve sürüm indeksleri |
+| `nesne_ozelligi` | `nesne_id`, `nesne_turu_id`, `ozellik_tanimi_id`, `deger` (kanonik metin) | iki bileşik dış anahtar aynı `nesne_turu_id` üzerinden: `(nesne_id, nesne_turu_id) → nesne` ve `(ozellik_tanimi_id, nesne_turu_id) → ozellik_tanimi`; başka türün özelliği yazılamaz; `(nesne_id, ozellik_tanimi_id)` benzersiz (aynı özellik iki kez yok) |
+| `nesne_iliskisi` | `iliski_tanimi_id`, `tanim_surumu_id`, kaynak/hedef tür ve nesne kimlikleri | dörtlü bileşik dış anahtar `iliski_tanimi (id, sürüm, kaynak tür, hedef tür)`, üçlü bileşik dış anahtarlar `nesne (id, tür, sürüm)` kaynak ve hedef için: kaynak nesnenin türü tanımın kaynak türü, hedefinki hedef türü, üçü aynı sürümde; `(iliski_tanimi_id, kaynak_nesne_id, hedef_nesne_id)` benzersiz (mükerrer ilişki yok); `kaynak_nesne_id <> hedef_nesne_id`; kaynak ve hedef indeksleri |
+
+`iliski_tanimi` üzerindeki `(id, tanim_surumu_id, kaynak_nesne_turu_id,
+hedef_nesne_turu_id)` benzersiz indeksi ve `ozellik_tanimi` üzerindeki `(id,
+nesne_turu_id)` benzersizliği bu bileşik dış anahtarların hedefleridir.
+Sayım kuralları (en az / en çok üst) SQL ile güvenli ifade edilemediğinden
+yalnız serviste doğrulanır; tetikleyici yoktur.
+
+**Nesne modeli.** `nesne_olustur(oturum, nesne_turu_id, ozellikler,
+ust_baglantilar)` tek işte nesneyi (etkin), başlangıç özelliklerini ve üst
+bağlantılarını yazar, türün bütün hiyerarşi kurallarını doğrular ve tanım
+sürümünü kilitler. Başarılı dönüşte nesne zorunlu özelliklerini taşır ve
+kuralları sağlar; "önce boş nesne, sonra belki özellik" yolu yoktur (taslak
+Aşama 4.5'in işidir). Nesne hangi sürümde üretildiyse `tanim_surumu_id` kalıcıdır.
+
+**Özellik modeli ve değer türleri.** `NESNE → NESNE ÖZELLİĞİ → ÖZELLİK
+TANIMI`; değerler ana tabloya sütun olarak eklenmez. `OzellikTanimi.deger_turu`
+dört teknik, domain bağımsız türden biridir (`DegerTuru`): `metin` (`str`),
+`tam_sayi` (`int`; `bool` reddedilir), `mantiksal` (`bool`), `ondalik`
+(`decimal.Decimal`, sonlu; `float` reddedilir, ölçek ya da birim varsayımı
+yoktur). Değer tanımın türüne göre doğrulanır ve kanonik metin olarak
+saklanır (metin olduğu gibi, `str(int)`, `"1"`/`"0"`, `str(Decimal)` —
+`12.50` `12.50` olarak kalır); `ozellikleri_oku` aynı kuralla Python değerine
+döner. Yanlış tür `OzellikTuruUyusmuyor`, tanımsız ya da başka türün
+özelliği `GecersizOzellik`, eksik zorunlu özellik `ZorunluOzellikEksik` verir.
+`ozellik_yaz` var olan değeri günceller (aynı özellik iki satır olmaz),
+`ozellik_sil` isteğe bağlı özelliği kaldırır, zorunluyu kaldırmaz. IBAN, kart
+numarası, para birimi gibi domain doğrulamaları yoktur; bunlar ileride tanım
+ve kural verisinin işidir.
+
+**İlişkiler.** `iliski_kur(oturum, iliski_tanimi_id, kaynak_nesne_id,
+hedef_nesne_id)`: tanım var mı, iki nesne var mı, kaynak nesnenin türü
+tanımın kaynak türü mü, hedefinki hedef türü mü, üçü aynı tanım sürümünde mi,
+aynı ilişki zaten var mı, nesne kendisiyle mi; hepsi serviste
+(`GecersizIliski`, `MukerrerIliski`) ve bileşik dış anahtar / benzersizlik /
+kontrol kısıtlarıyla veritabanında reddedilir. `iliski_kaldir` hiyerarşik
+ilişkide çocuğun en az üst kuralını bozamaz. `iliskileri_listele` nesnenin
+kaynak ya da hedef olduğu ilişkileri verir.
+
+**Hiyerarşi.** Genel ilişki ile hiyerarşik üst bağlantısı ayrıdır: bir
+ilişki tanımının `hiyerarsi_kurali` satırı varsa hiyerarşiktir; yön sabittir,
+ilişkinin **kaynağı çocuk, hedefi üst** türdür. Kural tanım verisiyle şu
+soruları cevaplar: çocuk tür (kaynak), üst tür (hedef), en az üst sayısı
+(`en_az_ust`; zorunluluk = `en_az_ust >= 1`), en çok üst sayısı (`en_cok_ust`;
+NULL sınırsız), üstün gerekli yaşam durumu (`ust_yasam_durumu`; NULL fark
+etmez). Sayısal seviye kavramı yoktur; çekirdek beş seviyeli ya da başka bir
+sabit yapı varsaymaz, `if seviye == 3` benzeri dal içermez. Aynı çocuk
+birden fazla üste bağlanabilir (testte ürün iki rafa, başka sürümde üç rafa).
+Kural her zaman korunur, yalnız oluştururken değil: üst olmadan çocuk
+oluşturmak, gerekli son üst bağlantısını kaldırmak, en çok üst sayısını
+aşmak, gerekli durumda olmayan üste bağlanmak ve üstün yaşam durumunu
+değiştirip mevcut çocuğu geçersiz bırakmak `HiyerarsiIhlali` ile reddedilir.
+Sayım kuralı: toplam üst bağlantısı `en_cok_ust`'ü aşamaz (çocuğun durumu ne
+olursa olsun); etkin çocuğun gerekli durumdaki üst sayısı `en_az_ust`'ten az
+olamaz. Kapalı çocuk için en az üst kuralı aranmaz (bir alt ağaç çocuklardan
+başlayarak kapatılabilir), etkin yapılırken yeniden aranır.
+
+**Yaşam durumu.** `YasamDurumu`: `etkin` / `kapali`; nesne etkin doğar, geçiş
+yalnız `yasam_durumunu_degistir` ile. Etkin yapılırken nesnenin kendi üst
+kuralları, her değişimde ondan durum isteyen kuralların etkin çocukları
+yeniden doğrulanır. Taslak, bekliyor, onay, şüpheli, mükerrer, reddedildi
+gibi durumlar yoktur; Aşama 4.5 / 4.6'nın işidir.
+
+**Tanım sürümü kilidi.** Sürüm altında ilk nesne üretilirken, aynı işlem
+içinde `tanim_surumu.kilitli` 1 yapılır; işlem rollback olursa kilit de
+kalkar. Kilitli sürüme `nesne_turu_tanimla`, `ozellik_tanimla`,
+`iliski_tanimla`, `hiyerarsi_kurali_tanimla`, `kayit_turu_tanimla`,
+`kayit_alani_tanimla` `TanimSurumuKilitli` verir; yeni sürüm açmak
+(`surum_tanimla`) serbesttir ve yeni sürüm kendi tanımlarını taşır. Böylece
+var olan nesnenin anlamı sonradan eklenen tanımlarla sessizce değişmez.
+Ayrı bir "yayınla" iş akışı yoktur. Kilit yalnız uygulama düzeyindedir
+(tetikleyicisiz SQLite'ta ifade edilemez; bilinçli sınır).
+
+**Hata modeli (`NesneHatasi` altında):** `NesneBulunamadi` (`LookupError`),
+`GecersizOzellik` (`ValueError`) ve alt sınıfları `OzellikTuruUyusmuyor`,
+`ZorunluOzellikEksik`; `GecersizIliski` (`ValueError`) ve alt sınıfı
+`MukerrerIliski`; `HiyerarsiIhlali`; `YasamDurumuIhlali`. Tanım hataları
+(`TanimBulunamadi`, `TanimSurumuKilitli`) `tanim_islemleri`'nden olduğu gibi
+gelir. Ham `IntegrityError` sözleşme değildir; veritabanı kısıtları servisi
+atlayan yazmaya karşı son savunmadır.
+
+**İşlem sınırı.** 4.1 kuralı: servisler `commit` etmez; çağıran
+`Veritabani.islem()` sahibidir. Nesne, özellikleri, bağlantıları ve sürüm
+kilidi tek transaction'dadır; ortada hata çıkarsa hiçbir parça kalmaz.
+
+**Servis yüzeyi (`src/defteriki/cekirdek/nesne_islemleri.py`):**
+`nesne_olustur`, `nesne_getir`, `nesneleri_listele`,
+`yasam_durumunu_degistir`, `ozellik_yaz`, `ozellik_sil`, `ozellikleri_oku`,
+`iliski_kur`, `iliski_kaldir`, `iliskileri_listele`; `UstBaglanti`
+(`iliski_tanimi_id`, `hedef_nesne_id`) nesne oluştururken verilen bağlantı.
+
+**Testler** (`tests/test_nesne_motoru.py`, gerçek SQLite, göç zinciriyle
+kurulmuş şema; tanım tarafı `tests/test_tanim_sistemi.py`): geçerli türle
+nesne oluşturulur ve üretildiği sürüm kalıcıdır; olmayan tür reddedilir; tür
+ve sürüm uyuşmazlığı ham SQL ile bileşik dış anahtarca reddedilir; dört değer
+türü yazılır ve aynı değerle okunur (kanonik metin doğrulanır); başka türün
+özelliği serviste ve iki bileşik dış anahtarla veritabanında reddedilir;
+tanımsız özellik, on üç yanlış tür durumu (`"10"`, `1.5`, `True`, `Decimal`
+tam sayıya; `5`, `None` metne; `1`, `"1"` mantıksala; `1.5`, `"1.5"`, `1`,
+`NaN`, `Infinity` ondalığa) reddedilir; zorunlu özellik olmadan nesne
+oluşmaz, isteğe bağlı olmayabilir; `ozellik_yaz` günceller ve tek satır
+kalır, ham SQL ile ikinci satır benzersizlikçe reddedilir; silme kuralları;
+geçerli ilişki kurulur ve iki yönden listelenir; hiyerarşik olmayan ilişki
+sayı kuralı taşımaz; ters tür çifti, başka sürümdeki tanım, mükerrer ilişki
+ve kendine ilişki hem serviste hem veritabanında reddedilir; olmayan tanım /
+nesne reddedilir; iki farklı üst desteklenir; zorunlu üst olmadan nesne
+oluşmaz ve hiçbir satır kalmaz; izin verilmeyen üst türü reddedilir; en çok
+üst hem oluştururken hem sonradan aşılamaz; üst sayıları tanım verisinden
+okunur (başka sürümde en az iki, sınırsız üst); zorunlu son üst bağlantısı
+kaldırılamaz, fazladan olan kaldırılabilir; kapalı üste bağlanılamaz; üstü
+kapatmak etkin çocuğu bozuyorsa reddedilir, çocuk kapatılınca üst
+kapatılabilir, kapalı üstle çocuk yeniden açılamaz, üst açılınca açılabilir;
+ikinci üst varken biri kapatılabilir; isteğe bağlı üst kuralı (bölgesiz raf,
+kapalı bölge olur, ikinci bölge olmaz, bağlantı kaldırılabilir); yaşam durumu
+servisle değişir, aynı duruma geçiş etkisizdir, geçersiz değer serviste ve
+kontrol kısıtıyla reddedilir; özellik / ilişki / hiyerarşi hatasında nesne ve
+kısmi satır kalmaz, kilit de kalkar; veritabanı kısıt hatasından sonra
+veritabanı kullanılabilir kalır; kilit: kullanılmamış sürüme tanım eklenir,
+ilk nesne kilitler (satırda `kilitli = 1`), rollback olan işlemde kilit
+kalmaz, kilitli sürüme nesne türü / özellik / ilişki / hiyerarşi kuralı /
+kayıt türü / kayıt alanı eklenemez, yeni sürüm açılır ve kendi tanımlarını
+taşır, eski nesnenin anlamı yeni sürümle değişmez.
+
+**Bilinçli kapsam dışı (Aşama 4.3'te yok):** belge ve arşiv, kaynak izi, işlem
+paketi ve taslak nesne, BEKLIYOR protokolü, kullanıcı onayı, mükerrerlik ve
+birleştirme, kayıt / hareket sistemi, kural motoru, projection, finans tanım
+paketi, MCP nesne araçları, GUI; nesne silme; tanım silme ve güncelleme;
+kilit için veritabanı düzeyi koruma.
 
 ## Mimari sınır: çekirdek ve finans
 
@@ -366,7 +539,14 @@ Aşama 4.0'da iki paket de boş açıldı. Aşama 4.1 sonrası `cekirdek/`
 `gocler.py` (Alembic şema sürümü ve göç) modüllerini içerir. Aşama 4.2
 `tanim_tablolari.py` ve `tanim_islemleri.py` modüllerini ekledi: tanım
 tabloları ve yazma/okuma işlevleri, hiçbir domain'in türünü bilmeden
-("Tanım sistemi" bölümü). `finans/` hâlâ boştur (`__init__.py` yalnız
+("Tanım sistemi" bölümü). Aşama 4.3 `nesne_tablolari.py` ve
+`nesne_islemleri.py` modüllerini ekledi: nesne, özellik, ilişki, hiyerarşi
+ve yaşam durumu, yine hiçbir domain'in türünü, özellik adını ya da ilişki
+adını bilmeden; çekirdekte yalnız teknik değer türleri (metin, tam sayı,
+mantıksal, ondalık) ve iki yaşam durumu (etkin, kapalı) sabittir ("Nesne
+motoru" bölümü). Bütün finans tanımları silinip yerine envanter gibi başka
+bir alanın tanımları konsa çekirdek kaynak kodu değişmez; nötr `ENVANTER`
+testleri bunun kanıtıdır. `finans/` hâlâ boştur (`__init__.py` yalnız
 docstring taşır). Eski hattan modül taşınmamış, iş modeli yazılmamıştır.
 
 ## Kurulum
@@ -419,7 +599,7 @@ kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çık�
 Bu sürümde tek araç var: `sistem_durumu`. Uygulama sürümü, ortam adı, şema
 sürümü ve yetenek listesini döndürür; yol, anahtar ya da ortam değişkeni
 içermez. Şema sürümü gerçektir (Aşama 4.1): veritabanı dosyası varsa
-Alembic'in `alembic_version` tablosundaki sürüm (bugün `0003`; zincirin
+Alembic'in `alembic_version` tablosundaki sürüm (bugün `0004`; zincirin
 başı neyse o), dosya yoksa ya da göç uygulanmamışsa `yok`. Dosya yokken
 bağlantı açılmaz, boş SQLite dosyası oluşmaz; araç göç çalıştırmaz. Testler
 dosya yok, dosya var ama göçsüz ve göç uygulanmış senaryolarını süreç içinde
@@ -612,11 +792,13 @@ src/defteriki/    uygulama paketi
     veritabani.py   SQLite bağlantı politikası, TabloTabani, işlem sınırı
     gocler.py       Alembic şema sürümü ve süreç içi göç
     tanim_tablolari.py  tanım paketi/sürüm/nesne türü/özellik/ilişki/kayıt türü/kayıt alanı tabloları
-    tanim_islemleri.py  tanım yazma ve okuma işlevleri, tanım hata modeli
+    tanim_islemleri.py  tanım yazma ve okuma işlevleri, tanım hata modeli, sürüm kilidi
+    nesne_tablolari.py  nesne, nesne özelliği, nesne ilişkisi tabloları
+    nesne_islemleri.py  nesne motoru: oluşturma, özellik doğrulama, ilişki, hiyerarşi, yaşam durumu
   finans/         finansal domain; çekirdeği kullanabilir (henüz boş)
 alembic.ini       Alembic yapılandırması (veritabanı adresi yok)
-alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı)
-tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi)
+alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı, 0004 nesne motoru)
+tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi; test_nesne_motoru.py: ENVANTER dünyası)
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
 kavramlar_sozlugu.md   ortak kavram tanımları; ekleme ve değişiklik yalnız Abdüllatif'in onayıyla

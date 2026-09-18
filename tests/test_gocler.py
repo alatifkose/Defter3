@@ -4,9 +4,11 @@ Gerçek SQLite dosyaları, ``test`` ortamı, ``tmp_path`` altında kök. Süreç
 ``semayi_yukselt`` ve komut satırı (``alembic upgrade head``) aynı ``env.py``
 üzerinden aynı sonucu verir; komut satırı yolu merkezi ayarlardan alır.
 Aşama 4.2 ile zincir ``0002`` (tanım tabloları) ve ``0003`` (sürüm numarası
-kontrol kısıtı, batch kipiyle tablo yeniden kurulur); ``upgrade → downgrade →
-upgrade`` döngüsü, adım adım zincir ve göç şemasının ORM metadata'sıyla
-birebirliği sınanır.
+kontrol kısıtı, tablo açık SQL ile yeniden kurulur), Aşama 4.3 ile ``0004``
+(nesne tabloları, hiyerarşi kuralı, özellik türü, sürüm kilidi); ``upgrade →
+downgrade → upgrade`` döngüsü, adım adım zincir ve göç şemasının ORM
+metadata'sıyla birebirliği sınanır. Bütün göçler geçici test
+veritabanlarında çalışır; kalıcı geliştirme veritabanına dokunulmaz.
 """
 
 import os
@@ -25,6 +27,7 @@ from sqlalchemy.orm import Session
 from defteriki import ayarlar as ay
 from defteriki import baslangic, gunluk
 from defteriki.cekirdek import gocler
+from defteriki.cekirdek import nesne_tablolari as nt
 from defteriki.cekirdek import tanim_tablolari as tt
 from defteriki.cekirdek import veritabani as vt
 
@@ -38,9 +41,11 @@ DEFTERIKI_DEGISKENLERI = (
 )
 BEKLEME_SANIYE = 120
 BASLANGIC_SURUMU = "0001"
-GUNCEL_SURUM = "0003"
+GUNCEL_SURUM = "0004"
 TANIM_SURUMU = "0002"
-GUNCEL_TABLOLAR = sorted((gocler.SURUM_TABLOSU, *tt.TANIM_TABLOLARI))
+KISIT_SURUMU = "0003"
+UYGULAMA_TABLOLARI = (*tt.TANIM_TABLOLARI, *nt.NESNE_TABLOLARI)
+GUNCEL_TABLOLAR = sorted((gocler.SURUM_TABLOSU, *UYGULAMA_TABLOLARI))
 
 
 @pytest.fixture(autouse=True)
@@ -191,7 +196,7 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
         gocler.semayi_yukselt(v)
         with v.motor.connect() as baglanti:
             denetci = inspect(baglanti)
-            for tablo in tt.TANIM_TABLOLARI:
+            for tablo in UYGULAMA_TABLOLARI:
                 assert denetci.get_pk_constraint(tablo)["name"] == f"pk_{tablo}"
                 assert denetci.get_pk_constraint(tablo)["constrained_columns"] == ["id"]
                 for fk in denetci.get_foreign_keys(tablo):
@@ -205,7 +210,7 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     assert str(ix["name"]).startswith(f"ix_{tablo}_"), ix
             dis_anahtarlar = {
                 tablo: sorted(str(fk["name"]) for fk in denetci.get_foreign_keys(tablo))
-                for tablo in tt.TANIM_TABLOLARI
+                for tablo in UYGULAMA_TABLOLARI
             }
             assert dis_anahtarlar == {
                 "tanim_paketi": [],
@@ -221,12 +226,28 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 "kayit_alani_tanimi": [
                     "fk_kayit_alani_tanimi_kayit_turu_id_kayit_turu"
                 ],
+                "hiyerarsi_kurali": [
+                    "fk_hiyerarsi_kurali_iliski_tanimi_id_iliski_tanimi"
+                ],
+                "nesne": ["fk_nesne_nesne_turu_id_tanim_surumu_id_nesne_turu"],
+                "nesne_ozelligi": [
+                    "fk_nesne_ozelligi_nesne_id_nesne_turu_id_nesne",
+                    "fk_nesne_ozelligi_ozellik_tanimi_id_nesne_turu_id_ozellik_tanimi",
+                ],
+                "nesne_iliskisi": [
+                    "fk_nesne_iliskisi_hedef_nesne_id_hedef_nesne_turu_id_"
+                    "tanim_surumu_id_nesne",
+                    "fk_nesne_iliskisi_iliski_tanimi_id_tanim_surumu_id_"
+                    "kaynak_nesne_turu_id_hedef_nesne_turu_id_iliski_tanimi",
+                    "fk_nesne_iliskisi_kaynak_nesne_id_kaynak_nesne_turu_id_"
+                    "tanim_surumu_id_nesne",
+                ],
             }
             benzersizler = {
                 tablo: sorted(
                     str(uq["name"]) for uq in denetci.get_unique_constraints(tablo)
                 )
-                for tablo in tt.TANIM_TABLOLARI
+                for tablo in UYGULAMA_TABLOLARI
             }
             assert benzersizler == {
                 "tanim_paketi": ["uq_tanim_paketi_kod"],
@@ -235,20 +256,78 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     "uq_nesne_turu_id_tanim_surumu_id",
                     "uq_nesne_turu_tanim_surumu_id_kod",
                 ],
-                "ozellik_tanimi": ["uq_ozellik_tanimi_nesne_turu_id_kod"],
+                "ozellik_tanimi": [
+                    "uq_ozellik_tanimi_id_nesne_turu_id",
+                    "uq_ozellik_tanimi_nesne_turu_id_kod",
+                ],
                 "iliski_tanimi": ["uq_iliski_tanimi_tanim_surumu_id_kod"],
                 "kayit_turu": ["uq_kayit_turu_tanim_surumu_id_kod"],
                 "kayit_alani_tanimi": ["uq_kayit_alani_tanimi_kayit_turu_id_kod"],
+                "hiyerarsi_kurali": ["uq_hiyerarsi_kurali_iliski_tanimi_id"],
+                "nesne": [
+                    "uq_nesne_id_nesne_turu_id",
+                    "uq_nesne_id_nesne_turu_id_tanim_surumu_id",
+                ],
+                "nesne_ozelligi": ["uq_nesne_ozelligi_nesne_id_ozellik_tanimi_id"],
+                "nesne_iliskisi": [
+                    "uq_nesne_iliskisi_iliski_tanimi_id_kaynak_nesne_id_hedef_nesne_id"
+                ],
             }
             assert sorted(
                 str(ix["name"]) for ix in denetci.get_indexes("iliski_tanimi")
             ) == [
                 "ix_iliski_tanimi_hedef_nesne_turu_id",
+                "ix_iliski_tanimi_id_tanim_surumu_id_kaynak_nesne_turu_id_"
+                "hedef_nesne_turu_id",
                 "ix_iliski_tanimi_kaynak_nesne_turu_id",
             ]
-            assert [
-                str(ck["name"]) for ck in denetci.get_check_constraints("tanim_surumu")
-            ] == ["ck_tanim_surumu_surum_no_pozitif_tamsayi"]
+            [bilesik] = [
+                ix
+                for ix in denetci.get_indexes("iliski_tanimi")
+                if str(ix["name"]).startswith("ix_iliski_tanimi_id_")
+            ]
+            assert bilesik["unique"]
+            kontroller = {
+                tablo: sorted(
+                    str(ck["name"]) for ck in denetci.get_check_constraints(tablo)
+                )
+                for tablo in UYGULAMA_TABLOLARI
+            }
+            assert kontroller == {
+                "tanim_paketi": [],
+                "tanim_surumu": [
+                    "ck_tanim_surumu_kilitli_ikili",
+                    "ck_tanim_surumu_surum_no_pozitif_tamsayi",
+                ],
+                "nesne_turu": [],
+                "ozellik_tanimi": [
+                    "ck_ozellik_tanimi_deger_turu_gecerli",
+                    "ck_ozellik_tanimi_zorunlu_ikili",
+                ],
+                "iliski_tanimi": [],
+                "hiyerarsi_kurali": [
+                    "ck_hiyerarsi_kurali_en_az_ust_dogal",
+                    "ck_hiyerarsi_kurali_en_cok_ust_tutarli",
+                    "ck_hiyerarsi_kurali_ust_yasam_durumu_gecerli",
+                ],
+                "kayit_turu": [],
+                "kayit_alani_tanimi": [],
+                "nesne": ["ck_nesne_yasam_durumu_gecerli"],
+                "nesne_ozelligi": [],
+                "nesne_iliskisi": ["ck_nesne_iliskisi_kendine_degil"],
+            }
+            indeksler = {
+                tablo: sorted(str(ix["name"]) for ix in denetci.get_indexes(tablo))
+                for tablo in nt.NESNE_TABLOLARI
+            }
+            assert indeksler == {
+                "nesne": ["ix_nesne_nesne_turu_id", "ix_nesne_tanim_surumu_id"],
+                "nesne_ozelligi": ["ix_nesne_ozelligi_ozellik_tanimi_id"],
+                "nesne_iliskisi": [
+                    "ix_nesne_iliskisi_hedef_nesne_id",
+                    "ix_nesne_iliskisi_kaynak_nesne_id",
+                ],
+            }
     finally:
         v.kapat()
 
@@ -270,10 +349,10 @@ def _cocuk_sayilari(oturum: Session) -> tuple[int, int, int]:
     )
 
 
-def test_zincir_adim_adim_0001_0002_0003_ve_geri(
+def test_zincir_adim_adim_0001_0002_0003_0004_ve_geri(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``0001 → 0002 → 0003 → 0002 → 0001 → head``: her adımda sürüm ve
+    """``0001 → 0002 → 0003 → 0004 → 0002 → 0001 → head``: her adımda sürüm ve
     ``tanim_surumu`` kontrol kısıtı beklenen; ``0003``ün tablo yeniden kurması
     ``0002``de yazılmış satırı ve diğer kısıt adlarını korur; ``0002``de kabul
     edilen REAL sürüm numarası ``0003``te reddedilir."""
@@ -340,8 +419,8 @@ def test_zincir_adim_adim_0001_0002_0003_ve_geri(
         with v.islem() as oturum:
             oturum.execute(text("DELETE FROM tanim_surumu WHERE surum_no = 2.5"))
 
-        goc(GUNCEL_SURUM)
-        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        goc(KISIT_SURUMU)
+        assert gocler.sema_surumu(v) == KISIT_SURUMU
         assert _kontrol_kisitlari(v, "tanim_surumu") == yeni_kisit
         with v.motor.connect() as baglanti:
             denetci = inspect(baglanti)
@@ -372,6 +451,16 @@ def test_zincir_adim_adim_0001_0002_0003_ve_geri(
             with v.islem() as oturum:
                 oturum.execute(ekle, {"no": 2.5})
 
+        goc(GUNCEL_SURUM)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        assert [ad for ad, _ in _kontrol_kisitlari(v, "tanim_surumu")] == [
+            "ck_tanim_surumu_kilitli_ikili",
+            "ck_tanim_surumu_surum_no_pozitif_tamsayi",
+        ]
+        with v.islem() as oturum:
+            assert _cocuk_sayilari(oturum) == (1, 1, 1)
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+
         goc(TANIM_SURUMU, geri=True)
         assert gocler.sema_surumu(v) == TANIM_SURUMU
         assert _kontrol_kisitlari(v, "tanim_surumu") == eski_kisit
@@ -386,9 +475,135 @@ def test_zincir_adim_adim_0001_0002_0003_ve_geri(
         assert gocler.sema_surumu(v) == BASLANGIC_SURUMU
 
         assert gocler.semayi_yukselt(v) == GUNCEL_SURUM
-        assert _kontrol_kisitlari(v, "tanim_surumu") == yeni_kisit
+        assert [ad for ad, _ in _kontrol_kisitlari(v, "tanim_surumu")] == [
+            "ck_tanim_surumu_kilitli_ikili",
+            "ck_tanim_surumu_surum_no_pozitif_tamsayi",
+        ]
         with v.islem() as oturum:
             assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+    finally:
+        v.kapat()
+
+
+def test_0003_0004_gecisi_verili_tabloyu_korur(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0003``te yazılmış tanımlar ``0004``e taşınır (özellik tanımı yeniden
+    kurulurken satırlar kalır, yeni sütunlar varsayılan alır, kilit 0), geçici
+    tablo kalmaz; ``0004 → 0003`` geri alınınca sütunlar gider satırlar kalır;
+    tekrar ``head`` sıfırdan kurulanla aynı şemayı verir."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    def sutunlar(tablo: str) -> list[str]:
+        with v.motor.connect() as baglanti:
+            return [str(c["name"]) for c in inspect(baglanti).get_columns(tablo)]
+
+    try:
+        goc(KISIT_SURUMU)
+        with v.islem() as oturum:
+            oturum.execute(
+                text(
+                    "INSERT INTO tanim_paketi (kod, gosterim_adi, olusturma_zamani) "
+                    "VALUES ('DEMO', 'Demo', '2026-09-18 00:00:00')"
+                )
+            )
+            oturum.execute(
+                text(
+                    "INSERT INTO tanim_surumu (tanim_paketi_id, surum_no, "
+                    "olusturma_zamani) VALUES (1, 1, '2026-09-18 00:00:00')"
+                )
+            )
+            oturum.execute(
+                text(
+                    "INSERT INTO nesne_turu (tanim_surumu_id, kod, gosterim_adi) "
+                    "VALUES (1, 'TEST_CIHAZ', 'Cihaz')"
+                )
+            )
+            oturum.execute(
+                text(
+                    "INSERT INTO ozellik_tanimi (nesne_turu_id, kod, gosterim_adi, "
+                    "aciklama) VALUES (1, 'seri_no', 'Seri', 'eski'), "
+                    "(1, 'model', 'Model', NULL)"
+                )
+            )
+            oturum.execute(
+                text(
+                    "INSERT INTO iliski_tanimi (tanim_surumu_id, kod, gosterim_adi, "
+                    "kaynak_nesne_turu_id, hedef_nesne_turu_id) "
+                    "VALUES (1, 'TANIR', 'Tanır', 1, 1)"
+                )
+            )
+
+        goc(GUNCEL_SURUM)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        assert sutunlar("ozellik_tanimi")[-2:] == ["deger_turu", "zorunlu"]
+        assert sutunlar("tanim_surumu")[-1] == "kilitli"
+        with v.islem() as oturum:
+            assert oturum.execute(
+                text(
+                    "SELECT id, kod, aciklama, deger_turu, zorunlu FROM ozellik_tanimi "
+                    "ORDER BY id"
+                )
+            ).all() == [
+                (1, "seri_no", "eski", "metin", 0),
+                (2, "model", None, "metin", 0),
+            ]
+            assert (
+                oturum.execute(text("SELECT kilitli FROM tanim_surumu")).scalar_one()
+                == 0
+            )
+            assert (
+                oturum.execute(text("SELECT count(*) FROM iliski_tanimi")).scalar_one()
+                == 1
+            )
+            assert [
+                ad
+                for (ad,) in oturum.execute(
+                    text(
+                        "SELECT name FROM sqlite_master "
+                        "WHERE name LIKE 'ozellik_tanimi%'"
+                    )
+                ).all()
+            ] == ["ozellik_tanimi"]
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+        with pytest.raises(IntegrityError, match="CHECK constraint failed"):
+            with v.islem() as oturum:
+                oturum.execute(text("UPDATE tanim_surumu SET kilitli = 2"))
+        tam_sema = _sema(v)
+
+        goc(KISIT_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == KISIT_SURUMU
+        assert "deger_turu" not in sutunlar("ozellik_tanimi")
+        assert "kilitli" not in sutunlar("tanim_surumu")
+        with v.islem() as oturum:
+            assert oturum.execute(
+                text("SELECT kod FROM ozellik_tanimi ORDER BY id")
+            ).scalars().all() == ["seri_no", "model"]
+            tablolar = (
+                oturum.execute(
+                    text("SELECT name FROM sqlite_master WHERE type = 'table'")
+                )
+                .scalars()
+                .all()
+            )
+            assert not any(
+                t.startswith("nesne") and t != "nesne_turu" for t in tablolar
+            )
+            assert "hiyerarsi_kurali" not in tablolar
+
+        goc(GUNCEL_SURUM)
+        assert _sema(v) == tam_sema
+        assert _sema(v) == _yukselt(tmp_path / "sifir", monkeypatch)[1]
+        with v.islem() as oturum:
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
     finally:
         v.kapat()
 
