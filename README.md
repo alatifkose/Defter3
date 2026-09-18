@@ -1090,15 +1090,19 @@ değişkenleriyle çalıştırır:
 | `DEFTERIKI_GELEN_DIZINI` | `C:\dev\Defter3-gelen` |
 
 Türetilen yollar: `C:\dev\Defter3-veri\gelistirme\defteriki.sqlite3`,
-`...\belgeler`, `...\logs`; gelen dizini `C:\dev\Defter3-gelen`. Eski hattın
-kökü `C:\dev\DefterIki-veri` (şema 0002 veritabanı, arşiv, günlükler) ve gelen
-dizini `C:\dev\DefterIki-gelen` olduğu gibi durur; taşınmaz, kopyalanmaz,
-silinmez. Bu dosya Git'e girmez; kurulum yalnız bu makinede geçerlidir. Paket
-ve komut adları (`defteriki`, `defteriki-mcp`) değişmedi; ayrım yalnız veri
-kökündedir. Dikkat: kullanıcı düzeyinde `setx` ile tanımlı
-`DEFTERIKI_VERI_KOKU` hâlâ eski kökü gösteriyorsa, terminalden doğrudan
-`uv run defteriki` eski kökü kullanır; MCP girdisindeki `env` bunu yalnız
-Cowork'un başlattığı sunucu için geçersiz kılar.
+`...\belgeler`, `...\logs`; gelen dizini `C:\dev\Defter3-gelen`. Bu dosya
+Git'e girmez; kurulum yalnız bu makinede geçerlidir. Paket ve komut adları
+(`defteriki`, `defteriki-mcp`) değişmedi; ayrım yalnız veri kökündedir.
+
+Düzeltme (2026-09-19): bu bölüm 2026-09-18'de MCP girdisinin Defter3
+köklerine çevrildiğini yazıyordu, ama dosya gerçekte değiştirilmemişti ve
+girdi eski `C:\dev\DefterIki-veri` / `C:\dev\DefterIki-gelen` köklerini
+gösteriyordu; Claude masaüstü her açılışta MCP sunucusunu başlatınca sunucu
+eski klasörleri yeniden oluşturuyordu. 2026-09-19'da girdi gerçekten
+düzeltildi (yedek `claude_desktop_config.json.yedek-2026-09-19`), kullanıcı
+düzeyindeki `setx` değişkenleri de aynı köklere çevrildi ve eski hattın
+`C:\dev\DefterIki-veri` / `C:\dev\DefterIki-gelen` klasörleri silindi
+(içlerinde veritabanı yoktu). Artık terminal ve Cowork aynı kökleri kullanır.
 
 ## Dizin düzeni
 
