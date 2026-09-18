@@ -5,6 +5,9 @@ değişkenleri her testten önce temizlenir; gerçek kullanıcı dizinlerine
 dokunulmaz.
 """
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -352,3 +355,97 @@ def test_test_ortaminda_ust_dizin_ile_kacis_reddedilir(
 
     with pytest.raises(ay.AyarHatasi, match="test veri kökünün dışına"):
         ay.ayarlari_yukle()
+
+
+# --- test ortamı: fiziksel yol sınırı (2026-09-18) --------------------------
+# Sınır yolun yazılı biçimine değil fiziksel karşılığına bakar: kök içindeki
+# bir bağlantı dışarıyı gösteriyorsa yol reddedilir, hiçbir dizin oluşmaz.
+
+
+def _simgesel_baglanti(baglanti: Path, hedef: Path) -> None:
+    """Dizin simgesel bağlantısı; yetki yoksa (Windows'ta sık) test atlanır."""
+    try:
+        os.symlink(hedef, baglanti, target_is_directory=True)
+    except OSError as hata:
+        pytest.skip(f"simgesel bağlantı kurulamadı (yetki?): {hata}")
+
+
+def _junction(baglanti: Path, hedef: Path) -> None:
+    """Windows junction (yetki gerektirmez); başka platformda test atlanır."""
+    if sys.platform != "win32":
+        pytest.skip("junction yalnız Windows'ta var")
+    sonuc = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(baglanti), str(hedef)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if sonuc.returncode != 0 or not baglanti.exists():
+        pytest.skip(f"junction kurulamadı: {sonuc.stderr.strip() or sonuc.stdout}")
+
+
+def _kok_ve_disari(tmp_path: Path, ortak_kok: Path) -> tuple[Path, Path]:
+    kok_test = ortak_kok / "test"
+    kok_test.mkdir(parents=True)
+    disari = tmp_path / "disari"
+    disari.mkdir()
+    return kok_test, disari
+
+
+def _disariya_kacan_baglanti_reddedilir(
+    kok_test: Path, disari: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(ay.ORTAM_DEGISKENI, "test")
+    monkeypatch.setenv(ay.LOG_DIZINI_DEGISKENI, str(kok_test / "bag" / "logs"))
+
+    with pytest.raises(ay.AyarHatasi, match="fiziksel karşılığı") as hata:
+        ay.ayarlari_yukle()
+
+    assert "test veri kökünün dışına" in str(hata.value)
+    assert list(disari.iterdir()) == []  # dışarıda hiçbir şey oluşmadı
+    assert not (kok_test / "bag" / "logs").exists()
+
+
+def test_test_ortaminda_simgesel_baglanti_ile_kacis_reddedilir(
+    tmp_path: Path, ortak_kok: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kok_test, disari = _kok_ve_disari(tmp_path, ortak_kok)
+    _simgesel_baglanti(kok_test / "bag", disari)
+
+    _disariya_kacan_baglanti_reddedilir(kok_test, disari, monkeypatch)
+
+
+def test_test_ortaminda_junction_ile_kacis_reddedilir(
+    tmp_path: Path, ortak_kok: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kok_test, disari = _kok_ve_disari(tmp_path, ortak_kok)
+    _junction(kok_test / "bag", disari)
+
+    _disariya_kacan_baglanti_reddedilir(kok_test, disari, monkeypatch)
+
+
+def test_test_ortaminda_kok_icini_gosteren_baglanti_kabul_edilir(
+    tmp_path: Path, ortak_kok: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kok_test, _ = _kok_ve_disari(tmp_path, ortak_kok)
+    (kok_test / "ic").mkdir()
+    if sys.platform == "win32":
+        _junction(kok_test / "bag", kok_test / "ic")
+    else:
+        _simgesel_baglanti(kok_test / "bag", kok_test / "ic")
+    monkeypatch.setenv(ay.ORTAM_DEGISKENI, "test")
+    monkeypatch.setenv(ay.LOG_DIZINI_DEGISKENI, str(kok_test / "bag" / "logs"))
+
+    ayar = ay.ayarlari_yukle()
+
+    assert ayar.log_dizini == kok_test / "bag" / "logs"  # verilen yol korunur
+
+
+def test_gelistirme_ortaminda_kok_disi_tekil_yol_serbest_kalir(
+    tmp_path: Path, ortak_kok: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fiziksel sınır yalnız test ortamınındır; diğer ortamların politikası aynı."""
+    monkeypatch.setenv(ay.ORTAM_DEGISKENI, "gelistirme")
+    monkeypatch.setenv(ay.LOG_DIZINI_DEGISKENI, str(tmp_path / "disari" / "logs"))
+
+    assert ay.ayarlari_yukle().log_dizini == tmp_path / "disari" / "logs"

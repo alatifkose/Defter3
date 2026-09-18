@@ -261,7 +261,14 @@ Kurallar:
 * Yollar mutlak olmalı; boş veya göreli değer hata verir.
 * Bilinmeyen ortam adı hata verir.
 * `test` ortamı `DEFTERIKI_VERI_KOKU` ister ve tekil yolların bu kökün dışına
-  çıkmasına izin vermez.
+  çıkmasına izin vermez. Sınır yolun yazılı biçimine değil fiziksel
+  karşılığına bakar (2026-09-18, `Path.resolve`): kök içindeki bir simgesel
+  bağlantı ya da junction dışarıyı gösteriyorsa yol reddedilir ve hiçbir dizin
+  oluşturulmaz; hata mesajı fiziksel karşılığı da söyler. Kabul edilen yol
+  verildiği biçimde saklanır. Bu sınır yalnız `test` ortamınındır; geliştirme
+  ve gerçek ortamların yol politikası değişmedi. Testler: normal yol, `..` ile
+  kaçış, simgesel bağlantıyla kaçış (Windows'ta yetki yoksa atlanır), junction
+  ile kaçış (yalnız Windows), kök içini gösteren bağlantı.
 * Tekil yol değişkenleri diğer ortamlarda ortam ayrımını geçersiz kılabilir.
 
 ## Dizin düzeni

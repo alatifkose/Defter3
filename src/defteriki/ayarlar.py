@@ -17,7 +17,11 @@ Ayarlar ``ayarlari_yukle()`` ile açıkça yüklenir; gerekli dizinler ayrıca
    tekil yollar ortam ayrımını geçersiz kılabilir; yani ``gelistirme``
    ortamında çalışırken bu değişkenlerle ``gercek`` ortamının dosyalarına
    işaret edilebilir. Tek istisna ``test`` ortamıdır: orada tekil yolların
-   test veri kökünün dışına çıkması reddedilir.
+   test veri kökünün dışına çıkması reddedilir. Bu sınır yolun yazılı
+   biçimine değil fiziksel karşılığına bakar (``Path.resolve``): kök
+   içindeki bir simgesel bağlantı ya da junction dışarıyı gösteriyorsa yol
+   reddedilir ve hiçbir dizin oluşturulmaz. Diğer ortamların yol politikası
+   değişmez.
 2. ``DEFTERIKI_VERI_KOKU``: ortamların ortak üst dizini. Seçilen ortamın
    adı bunun altına eklenir (``<kök>/<ortam>``), türetilmiş yollar bu
    ortam kökünden üretilir.
@@ -101,16 +105,21 @@ def ayarlari_yukle() -> Ayarlar:
     gelen_dizini = _yol_oku(GELEN_DIZINI_DEGISKENI) or veri_koku / GELEN_DIZIN_ADI
 
     if ortam is Ortam.TEST:
+        kok_fiziksel = _fiziksel_yol(veri_koku)
         for degisken, yol in (
             (VERITABANI_YOLU_DEGISKENI, veritabani_yolu),
             (BELGE_DIZINI_DEGISKENI, belge_dizini),
             (LOG_DIZINI_DEGISKENI, log_dizini),
             (GELEN_DIZINI_DEGISKENI, gelen_dizini),
         ):
-            if not yol.is_relative_to(veri_koku):
+            yol_fiziksel = _fiziksel_yol(yol)
+            if not yol_fiziksel.is_relative_to(kok_fiziksel):
+                ayrinti = str(yol)
+                if yol_fiziksel != yol:
+                    ayrinti += f" (fiziksel karşılığı {yol_fiziksel})"
                 raise AyarHatasi(
                     f"{degisken} test ortamında test veri kökünün dışına çıkamaz: "
-                    f"{yol} kökün ({veri_koku}) altında değil."
+                    f"{ayrinti} kökün ({veri_koku}) altında değil."
                 )
 
     return Ayarlar(
@@ -201,6 +210,12 @@ def _platform_veri_koku() -> Path:
     if xdg and Path(xdg).is_absolute():
         return Path(xdg) / UYGULAMA_DIZIN_ADI
     return ev / ".local" / "share" / UYGULAMA_DIZIN_ADI
+
+
+def _fiziksel_yol(yol: Path) -> Path:
+    """Yolun fiziksel karşılığı: var olan simgesel bağlantı ve junction'lar
+    çözülür, var olmayan kuyruk olduğu gibi kalır. Diske yazmaz."""
+    return yol.resolve()
 
 
 def _yol_oku(degisken: str) -> Path | None:
