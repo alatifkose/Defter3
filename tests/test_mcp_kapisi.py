@@ -149,11 +149,14 @@ class Konusma:
 
 
 def _sunucuyla_konus(
-    cwd: Path, cevre: dict[str, str], mesajlar: tuple[dict[str, Any], ...]
+    cwd: Path,
+    cevre: dict[str, str],
+    mesajlar: tuple[dict[str, Any], ...],
+    komut: str = SUNUCU_KOMUTU,
 ) -> Konusma:
     """Mesajları sırayla gönderir; istek olanların yanıtını bekler, sonra kapatır."""
     surec = subprocess.Popen(
-        [sys.executable, "-c", SUNUCU_KOMUTU],
+        [sys.executable, "-c", komut],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -257,6 +260,43 @@ def test_stdio_sunucusu_gunluge_yazar_stdout_a_yazmaz(
     assert f"| INFO | {mcp_kapisi.OLAY_MCP_KAPANIS} |" in icerik
     for satir in sonuc.stdout_satirlari:
         assert satir.startswith("{"), satir
+
+
+GIZLI_METIN = "SENTETIK-GIZLI IBAN TR00 0000 0000 0000 0000 00"
+HATALI_SUNUCU_KOMUTU = (
+    "import sys\n"
+    "from defteriki import mcp_kapisi\n"
+    "def patlat(ayarlar):\n"
+    f"    raise ValueError({GIZLI_METIN!r})\n"
+    "mcp_kapisi.sistem_durumu = patlat\n"
+    "sys.exit(mcp_kapisi.main())\n"
+)
+"""Gerçek sunucu, araç gövdesi sentetik hassas içerikli hatayla değiştirilmiş."""
+
+
+def test_stdio_arac_hatasi_gunluge_yalniz_turuyle_gecer(
+    tmp_path: Path, test_koku: Path
+) -> None:
+    sonuc = _sunucuyla_konus(
+        tmp_path, dict(os.environ), ILK_ISTEKLER, komut=HATALI_SUNUCU_KOMUTU
+    )
+
+    assert sonuc.cikis_kodu == 0, sonuc.stderr
+    assert sonuc.yanitlar[3]["result"]["isError"] is True
+    icerik = (test_koku / ay.LOG_DIZIN_ADI / gunluk.GUNLUK_DOSYA_ADI).read_text(
+        encoding="utf-8"
+    )
+    # SDK araç istisnasını kendi türüyle sarar; dosyaya yalnız o tür düşer.
+    assert (
+        f"| ERROR | {gunluk.OLAY_YOKSA} | hata türü: "
+        "mcp.server.mcpserver.exceptions.UnexpectedToolError"
+    ) in icerik
+    assert "ValueError" not in icerik
+    assert GIZLI_METIN not in icerik
+    assert "Traceback" not in icerik
+    assert GIZLI_METIN not in sonuc.stderr
+    assert "Traceback" not in sonuc.stderr
+    assert f"| INFO | {mcp_kapisi.OLAY_MCP_KAPANIS} |" in icerik
 
 
 def test_ayar_hatasinda_stdout_bos_stderr_aciklayici(tmp_path: Path) -> None:

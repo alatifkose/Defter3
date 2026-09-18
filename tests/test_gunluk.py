@@ -182,3 +182,64 @@ def test_kapatma_kutuphane_yonlendirmesini_cozer(log_dizini: Path) -> None:
 def test_yonlendirme_gunluk_kurulu_degilse_hata() -> None:
     with pytest.raises(gunluk.GunlukKurulumHatasi, match="kurulu değil"):
         gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
+
+
+GIZLI_METIN = "SENTETIK-GIZLI IBAN TR00 0000 0000 0000 0000 00"
+
+
+class _KayitYakalayici(logging.Handler):
+    """Aynı logger'a bağlı ikinci handler; gördüğü kayıt nesnelerini saklar."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.kayitlar: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.kayitlar.append(record)
+
+
+def test_kutuphane_istisnasi_yalniz_hata_turuyle_yazilir(log_dizini: Path) -> None:
+    dosya = gunluk.gunlugu_kur(log_dizini)
+    gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
+
+    try:
+        raise ValueError(GIZLI_METIN)
+    except ValueError:
+        logging.getLogger("deneme_kutuphane.alt").exception("kütüphane hata %s", "ek")
+
+    (satir,) = _satirlar(dosya)
+    assert f"| ERROR | {gunluk.OLAY_YOKSA} | hata türü: builtins.ValueError" in satir
+    icerik = dosya.read_text(encoding="utf-8")
+    assert GIZLI_METIN not in icerik
+    assert "Traceback" not in icerik
+    assert "kütüphane hata" not in icerik
+
+
+def test_kutuphane_uyarisi_istisnasiz_oldugu_gibi_yazilir(log_dizini: Path) -> None:
+    dosya = gunluk.gunlugu_kur(log_dizini)
+    gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
+
+    logging.getLogger("deneme_kutuphane").warning("bağlantı %s kapandı", "stdio")
+
+    (satir,) = _satirlar(dosya)
+    assert "| WARNING | - | bağlantı stdio kapandı" in satir
+
+
+def test_kutuphane_suzgeci_ortak_kaydi_degistirmez(log_dizini: Path) -> None:
+    gunluk.gunlugu_kur(log_dizini)
+    gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
+    yakalayici = _KayitYakalayici()
+    kutuphane = logging.getLogger("deneme_kutuphane")
+    kutuphane.addHandler(yakalayici)
+    try:
+        try:
+            raise ValueError(GIZLI_METIN)
+        except ValueError:
+            kutuphane.exception("kütüphane hata")
+    finally:
+        kutuphane.removeHandler(yakalayici)
+
+    (kayit,) = yakalayici.kayitlar
+    assert kayit.msg == "kütüphane hata"
+    assert kayit.exc_info is not None and kayit.exc_info[0] is ValueError
+    assert "olay" not in kayit.__dict__

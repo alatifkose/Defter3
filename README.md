@@ -173,6 +173,16 @@ Gizlilik: belge içeriği, finansal kayıt içeriği, IBAN, kimlik bilgileri,
 sırlar ve ortam değişkenleri günlüğe yazılmaz. Hatalar yalnızca türüyle
 (`builtins.ValueError` gibi) kaydedilir; ham hata mesajı ve traceback dosyaya
 dökülmez. Kullanıcıya gösterilen hata metni stderr'e gider, dosyaya değil.
+Aynı kural dosyaya bağlanan dış kütüphane günlüğü (MCP SDK) için de geçerlidir
+(2026-09-18): SDK'nın istisna taşıyan kaydı (`logger.exception`) sarmalayıcı
+handler'da yalnız hata türüne indirgenir, mesaj, `exc_info` ve yığın izi
+düşmez; istisnasız bilgi ve uyarı kayıtları olduğu gibi yazılır. Sarmalayıcı
+kaydın kopyası üzerinde çalışır, aynı logger'a bağlı başka handler'ların
+gördüğü kayıt değişmez. Test (`tests/test_mcp_kapisi.py`) gerçek stdio
+çağrısında araç gövdesini sentetik hassas içerikli hatayla değiştirip dosyada
+yalnız `hata türü: ...UnexpectedToolError` kaldığını doğrular. Not: SDK araç
+hatasının metnini istemciye `isError` yanıtı içinde döndürür; bu MCP
+katmanının işidir ve araçlar geldiğinde ele alınır.
 
 ## Kalite kontrolü
 
