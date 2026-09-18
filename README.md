@@ -77,7 +77,14 @@ ve satırla, dolaylı bağımlılık bulursa modül zinciriyle düşer. Kapsam:
 * fonksiyon gövdesi içindeki importlar;
 * dolaylı bağımlılık: çekirdek modülünün `defteriki` içindeki statik import
   grafiği üzerinden (aynı biçimlerle) finansa ulaşması, örneğin çekirdek →
-  `defteriki.yardimci` → `defteriki.finans`.
+  `defteriki.yardimci` → `defteriki.finans`. Python bir alt modülü yüklerken
+  üst paketlerin `__init__.py` dosyalarını da çalıştırdığından bunlar grafiğe
+  dahildir: `from defteriki.yardimci.alt import veri` yazan bir çekirdek
+  modülü, `alt.py` temiz olsa bile `yardimci/__init__.py` finansı yüklüyorsa
+  ihlaldir; başlangıç modülünün kendi üst paketleri de (`defteriki/__init__`,
+  `cekirdek/__init__`) sayılır. Zincir en kısa yol olarak ve üst paket adımı
+  `(üst paket, X yüklenirken)` etiketiyle raporlanır; her modül bir kez
+  ziyaret edilir, döngüler taramayı bitirir.
 
 Kapsam dışı, bilinçli sınır: çalışma anında kurulan metinler
 (`import_module(ad)` değişkenle), `sys.modules` erişimi, `getattr`,

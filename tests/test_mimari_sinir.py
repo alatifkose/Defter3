@@ -20,6 +20,10 @@ Kapsam (yakalanan biçimler):
 * fonksiyon gövdesi içindeki importlar;
 * dolaylı bağımlılık: çekirdek modülünün ``defteriki`` içindeki statik import
   grafiği üzerinden (aynı biçimlerle) finansa ulaşması; zincir raporlanır.
+  Python bir alt modülü yüklerken üst paketlerin ``__init__.py`` dosyalarını
+  da çalıştırdığından bunlar grafiğe dahildir (``from defteriki.yardimci.alt
+  import veri`` → ``defteriki/__init__`` ve ``defteriki/yardimci/__init__``
+  de yüklenir); zincirde ``(üst paket, X yüklenirken)`` etiketiyle görünür.
 
 Kapsam dışı (bilinçli sınır): çalışma anında kurulan metinler
 (``import_module(ad)`` değişkenle), ``sys.modules`` erişimi, ``getattr``,
@@ -199,27 +203,47 @@ def _modul_dosyalari(kaynak_koku: Path) -> dict[str, Path]:
     }
 
 
+def _yukleme_adimlari(hedef: str) -> list[tuple[str, str]]:
+    """``hedef`` import edilince Python'un çalıştırdığı modüller: önce üst
+    paketlerin ``__init__``'leri, sonra hedefin kendisi. (modül adı, zincirde
+    gösterilecek etiket) çiftleri."""
+    parcalar = hedef.split(".")
+    adimlar: list[tuple[str, str]] = []
+    for i in range(1, len(parcalar)):
+        ust = ".".join(parcalar[:i])
+        adimlar.append((ust, f"{ust} (üst paket, {hedef} yüklenirken)"))
+    adimlar.append((hedef, hedef))
+    return adimlar
+
+
 def _finansa_giden_zincir(
     baslangic: str, dosyalar: dict[str, Path], kaynak_koku: Path
 ) -> list[str] | None:
-    """En kısa ``baslangic → ... → defteriki.finans*`` zinciri; yoksa ``None``."""
-    kuyruk: deque[list[str]] = deque([[baslangic]])
-    gorulen = {baslangic}
+    """En kısa ``baslangic → ... → defteriki.finans*`` zinciri; yoksa ``None``.
+
+    Genişlik öncelikli tarama; her modül bir kez ziyaret edilir (döngüler
+    bitirir). Bir hedef yüklenirken çalışacak üst paket ``__init__``'leri de
+    düğüm olarak eklenir; zincirde ``(üst paket, X yüklenirken)`` etiketiyle
+    görünür. Başlangıç modülünün kendi üst paketleri de dahildir.
+    """
+    kuyruk: deque[tuple[str, list[str]]] = deque()
+    gorulen: set[str] = set()
+
+    def ekle(hedef: str, yol: list[str]) -> None:
+        for modul, etiket in _yukleme_adimlari(hedef):
+            if modul in gorulen or modul not in dosyalar:
+                continue
+            gorulen.add(modul)
+            kuyruk.append((modul, [*yol, etiket] if modul != baslangic else yol))
+
+    ekle(baslangic, [baslangic])
     while kuyruk:
-        yol = kuyruk.popleft()
-        dosya = dosyalar.get(yol[-1])
-        if dosya is None:
-            continue
-        for b in bagimliliklar(dosya, kaynak_koku):
+        modul, yol = kuyruk.popleft()
+        for b in bagimliliklar(dosyalar[modul], kaynak_koku):
             if _yasak_mi(b.hedef):
                 return [*yol, b.hedef]
-            if (
-                _uygulama_ici_mi(b.hedef)
-                and b.hedef in dosyalar
-                and b.hedef not in gorulen
-            ):
-                gorulen.add(b.hedef)
-                kuyruk.append([*yol, b.hedef])
+            if _uygulama_ici_mi(b.hedef):
+                ekle(b.hedef, yol)
     return None
 
 
@@ -403,6 +427,78 @@ def test_dolayli_bagimlilik_zincirle_yakalanir(tmp_path: Path) -> None:
             "defteriki.finans",
         ]
     }
+
+
+def test_ust_paket_initializer_uzerinden_finansa_ulasma_yakalanir(
+    tmp_path: Path,
+) -> None:
+    """İnceleme örneği: alt modül temiz, üst paketin __init__'i finansı yüklüyor."""
+    kok = _sentetik_agac(
+        tmp_path,
+        "from defteriki.yardimci.alt import veri\n",
+        ek_dosyalar={
+            "yardimci/__init__.py": "from defteriki import finans\n",
+            "yardimci/alt.py": "veri = 1\n",
+        },
+    )
+
+    assert sinir_ihlalleri(_cekirdek(kok), kok) == {}  # doğrudan ihlal yok
+    assert dolayli_ihlaller(_cekirdek(kok), kok) == {
+        "defteriki/cekirdek/a.py": [
+            "defteriki.cekirdek.a",
+            "defteriki.yardimci (üst paket, defteriki.yardimci.alt yüklenirken)",
+            "defteriki.finans",
+        ]
+    }
+
+
+def test_baslangic_modulunun_kendi_ust_paketi_de_denetlenir(tmp_path: Path) -> None:
+    """defteriki/__init__ finansı yüklerse hiçbir çekirdek modülü onsuz yüklenemez."""
+    kok = _sentetik_agac(
+        tmp_path,
+        "import os\n",
+        ek_dosyalar={"__init__.py": "import defteriki.finans\n"},
+    )
+
+    assert dolayli_ihlaller(_cekirdek(kok), kok) == {
+        "defteriki/cekirdek/__init__.py": [
+            "defteriki.cekirdek",
+            "defteriki (üst paket, defteriki.cekirdek yüklenirken)",
+            "defteriki.finans",
+        ],
+        "defteriki/cekirdek/a.py": [
+            "defteriki.cekirdek.a",
+            "defteriki (üst paket, defteriki.cekirdek.a yüklenirken)",
+            "defteriki.finans",
+        ],
+    }
+
+
+def test_finansa_baglanmayan_ust_paket_izinli_kalir(tmp_path: Path) -> None:
+    kok = _sentetik_agac(
+        tmp_path,
+        "from defteriki.yardimci.alt import veri\n",
+        ek_dosyalar={
+            "yardimci/__init__.py": "import os\nfrom . import alt\n",
+            "yardimci/alt.py": "veri = 1\n",
+        },
+    )
+
+    assert dolayli_ihlaller(_cekirdek(kok), kok) == {}
+
+
+def test_dolayli_tarama_dongude_biter(tmp_path: Path) -> None:
+    kok = _sentetik_agac(
+        tmp_path,
+        "from defteriki.yardimci.alt import veri\n",
+        ek_dosyalar={
+            "yardimci/__init__.py": "from defteriki import ara\n",
+            "yardimci/alt.py": "from defteriki import yardimci\n",
+            "ara.py": "from defteriki.yardimci import alt\n",  # ara ↔ yardimci döngüsü
+        },
+    )
+
+    assert dolayli_ihlaller(_cekirdek(kok), kok) == {}
 
 
 def test_dolayli_denetim_finansa_ulasmayan_yardimciyi_gecirir(tmp_path: Path) -> None:
