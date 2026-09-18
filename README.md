@@ -14,8 +14,8 @@ Aşama 3 kapısından yeniden başlar; önceki Aşama 4-6 geliştirme hattı
 [alatifkose/DefterIki](https://github.com/alatifkose/DefterIki) deposunun
 `main` dalında yedek olarak durur, oraya yazılmaz. Aşama 4.1 (genel
 veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de, Aşama 4.3
-(nesne motoru) 2026-09-19'da bitti; Aşama 4.4 (belge, arşiv, okuma ve
-kaynak) sırada.
+(nesne motoru) ve Aşama 4.4 (belge, arşiv, okuma ve kaynak) 2026-09-19'da
+bitti; Aşama 4.5 (işlem paketi ve taslak durumu) sırada.
 Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
@@ -50,17 +50,23 @@ Bitenler:
   tabloları, hiyerarşi kuralı, özellik değer türü ve zorunluluğu, tanım
   sürümü kilidi, yaşam durumu (göç `0004`); `defteriki.cekirdek.nesne_tablolari`
   ve `defteriki.cekirdek.nesne_islemleri` ("Nesne motoru" bölümü)
+* Belge zinciri (Aşama 4.4): gelen dizini sınırı, akışla SHA-256, içerik
+  adresli atomik arşiv, belge, okuma sürümleri, kaynak izi ve dosya/DB
+  uzlaştırma (göç `0006`); `defteriki.cekirdek.arsiv`,
+  `defteriki.cekirdek.belge_tablolari`, `defteriki.cekirdek.belge_islemleri`
+  ("Belge zinciri" bölümü)
 
-Henüz yok: kayıt (hareket) verisi (Aşama 4.7), belge ve arşiv (4.4), işlem
-paketi ve taslak (4.5), onay ve mükerrerlik (4.6), finans tanım paketi
-(`finans/` boş, 4.10), GUI, ürün verisi yazan MCP aracı.
+Henüz yok: kayıt (hareket) verisi (Aşama 4.7), işlem paketi ve taslak (4.5),
+onay ve mükerrerlik (4.6), finans tanım paketi (`finans/` boş, 4.10), GUI,
+ürün verisi yazan MCP aracı (belge alan MCP aracı dahil; 4.11).
 
 ## Veritabanı
 
 Aşama 4.1 (2026-09-18; Yeniden İnşa Teknik Planı madde 26). Güvenilir
 persistence temeli. Uygulama tabloları bugün Aşama 4.2'nin sekiz tanım
-tablosu ("Tanım sistemi" bölümü) ve Aşama 4.3'ün üç nesne tablosudur
-("Nesne motoru" bölümü). Finansal tablo yoktur, `finans/` boştur.
+tablosu ("Tanım sistemi" bölümü), Aşama 4.3'ün üç nesne tablosu ("Nesne
+motoru" bölümü) ve Aşama 4.4'ün dört belge zinciri tablosudur ("Belge
+zinciri" bölümü). Finansal tablo yoktur, `finans/` boştur.
 
 **Bağlantı (`src/defteriki/cekirdek/veritabani.py`).** SQLite dosyasının yolu
 tek kaynaktan gelir: `Ayarlar.veritabani_yolu`. Çekirdek bu yolu çağırandan
@@ -102,8 +108,11 @@ nesne tablolarını, hiyerarşi kuralını, özellik değer türü / zorunluluk
 sütunlarını ve sürüm kilidini ekler, `0005_iliski_kendine_serbest`
 `nesne_iliskisi` üzerindeki `kaynak_nesne_id <> hedef_nesne_id` kontrol
 kısıtını kaldırır (tablo açık SQL ile aynı kısıt adlarıyla yeniden kurulur;
-geri alma kendine dönen satır varsa kısıt hatasıyla düşer, veri silinmez)
-(zincirin başı bugün `0005`; ayrıntı "Nesne motoru" bölümünde). `0003`
+geri alma kendine dönen satır varsa kısıt hatasıyla düşer, veri silinmez),
+`0006_belge_zinciri` dört belge zinciri tablosunu ekler (var olan tablolara
+dokunmaz; geri alma dört tabloyu düşürür ama herhangi birinde satır varsa
+uygulanmaz ve hata verir, veri sessizce silinmez) (zincirin başı bugün
+`0006`; ayrıntı "Nesne motoru" ve "Belge zinciri" bölümlerinde). `0003`
 tabloyu açık SQL adımlarıyla yeniden kurar,
 Alembic `batch`
 kipiyle değil: göçler `foreign_keys=ON` bağlantıda ve tek transaction içinde
@@ -157,9 +166,10 @@ gün aynı komutla uygulandı, göç `0003` de aynı gün
 aynı komutla uygulandı. 2026-09-18 akşamı Abdüllatif'in talimatıyla
 geliştirme veritabanı sıfırdan yeniden kuruldu: eski dosya
 `defteriki.sqlite3.eski-2026-09-18` adına alındı, yeni dosya `0001 → 0002 →
-0003` zinciriyle `0003` sürümünde ve boş. Göç `0004` ve `0005` bu dosyaya
-uygulanmadı; dosya `0003`te kalır, kod `0005` bekler ve bu bilinçli bir
-durumdur.
+0003` zinciriyle `0003` sürümünde ve boş. Göç `0004`, `0005` ve `0006` bu
+dosyaya uygulanmadı; dosya `0003`te kalır, kod `0006` bekler ve bu bilinçli,
+istenen bir durumdur (2026-09-19'da Aşama 4.4 sonunda yeniden doğrulandı:
+dosyadaki `alembic_version` hâlâ `0003`).
 
 **Geliştirme veritabanına göç politikası (karar 2026-09-18, Abdüllatif).**
 Geliştirme veritabanı depo dışındadır; commit ve geri alma fiziksel dosyayı
@@ -183,8 +193,9 @@ kabul edilir; başarılı işlem commit olur, hata alan işlem tamamen rollback
 olur ve hata yükselir, oturum kapanır; işlem içindeki DDL de geri alınır
 (`CREATE TABLE` + hata → tablo yok); test veritabanı ve WAL dosyası yalnız
 test kökünde oluşur; sıfır
-veritabanından `upgrade head` `0005`e çıkar ve tablolar `alembic_version` +
-sekiz tanım tablosu + üç nesne tablosudur; iki sıfır veritabanı aynı şemayı
+veritabanından `upgrade head` `0006`ya çıkar ve tablolar `alembic_version` +
+sekiz tanım tablosu + üç nesne tablosu + dört belge zinciri tablosudur; iki
+sıfır veritabanı aynı şemayı
 üretir; tekrar
 `upgrade` şemayı değiştirmez; `head → 0001 → head` döngüsünde tanım tabloları
 ve indeksleri gider, geri gelir ve `sqlite_master` birebir aynıdır,
@@ -192,9 +203,10 @@ ve indeksleri gider, geri gelir ve `sqlite_master` birebir aynıdır,
 head` zincirinde her adımda `tanim_surumu` kontrol kısıtı beklenen addadır,
 `0002`de yazılan sürüm satırı ve ona bağlı çocuk satırlar (nesne türü, kayıt
 türü, ilişki) `0003`ün tablo yeniden kurmasından ve geri alınmasından sağ
-çıkar, zincir `0004` ve `0005`e kadar sürer ve her adımda `nesne_iliskisi`
-kontrol kısıtı beklenen durumdadır, `foreign_key_check` boş kalır, geçici
-tablo kalmaz, diğer kısıt adları
+çıkar, zincir `0004`, `0005` ve `0006`ya kadar sürer ve her adımda
+`nesne_iliskisi` kontrol kısıtı beklenen durumdadır, belge zinciri tabloları
+yalnız `0006`da vardır, `foreign_key_check` boş kalır, geçici tablo kalmaz,
+diğer kısıt adları
 korunur, `0002`de kabul edilen REAL sürüm numarası `0003`te reddedilir;
 `0002` şemasında REAL sürüm numarası varken `0003` uygulanamaz ve tamamen
 geri alınır (sürüm `0002`de kalır, satır dönüştürülmez, geçici tablo kalmaz);
@@ -202,8 +214,12 @@ geri alınır (sürüm `0002`de kalır, satır dönüştürülmez, geçici tablo
 kabul edilir, indeks ve kısıt adları korunur, `head → 0004` kendine dönen
 satır varken kısıt hatasıyla düşüp geri alınır, satır silinince geri alınır
 ve kısıt döner, tekrar `head` sıfırdan kurulanla aynı şemayı verir;
-elle yazılan `0002` ve `0003` göçlerinin ürettiği şema ORM
-metadata'sıyla Alembic karşılaştırmasında farksızdır; her tanım tablosunun
+`0005`te yazılmış tanım / nesne / özellik / ilişki / hiyerarşi satırları
+`0006`ya olduğu gibi taşınır, belge zinciri tabloları boş gelir, belge
+zinciri satırı varken `0006 → 0005` düşer ve uygulanmaz, satırlar silinince
+geri alınır ve tablolar gider, tekrar `head` sıfırdan kurulanla aynı şemayı
+verir; elle yazılan göçlerin ürettiği şema ORM
+metadata'sıyla Alembic karşılaştırmasında farksızdır; her uygulama tablosunun
 birincil anahtar, dış anahtar (`RESTRICT`), benzersizlik, kontrol ve indeks
 adları `KISIT_ADLANDIRMA` kalıbındadır ve beklenen listeyle birebirdir;
 başlangıç akışı göç çalıştırmaz; `alembic.ini` adres
@@ -504,6 +520,222 @@ birleştirme, kayıt / hareket sistemi, kural motoru, projection, finans tanım
 paketi, MCP nesne araçları, GUI; nesne silme; tanım silme ve güncelleme;
 kilit ve çevrim için veritabanı düzeyi koruma.
 
+## Belge zinciri
+
+Aşama 4.4 (2026-09-19; Yeniden İnşa Teknik Planı madde 11, 12, 13, 20, 23, 24
+ve 29). Belge zincirinin bu aşamada kurulan kısmı:
+
+```
+DOSYA → ARŞİV → BELGE → OKUMA → KAYNAK
+```
+
+Aday nesneler / kayıtlar, doğrulama, onay / şüphe / mükerrerlik ve kaydet
+halkaları sonraki aşamalardır. Çekirdek belgenin ne olduğunu bilmez: banka
+ekstresi, fatura, fiş gibi belge türleri Python kodunda yoktur; bir PDF ile bir
+envanter listesi arasında çekirdek açısından fark yoktur. Aynı sistem sağlık,
+envanter, arşiv ya da hukuk belgeleri için kullanılabilir; `finans/` boştur.
+Testler sentetik envanter PDF'i, metin ve sahte PNG / JPEG baytlarıyla çalışır.
+
+**Kavramlar.** *Arşiv dosyası* arşivdeki değişmez baytların kaydıdır. *Belge*
+uygulamadaki belge kimliğidir; fiziksel dosyanın kendisi değildir ve bir
+arşiv dosyasından en çok bir belge olur. *Okuma* dış okuyucunun (Cowork)
+belgeden çıkardığı yapılandırılmış içeriğin belirli bir sürümüdür; çekirdek
+belgeyi kendisi okumaz, LLM çağırmaz. *Kaynak* provenance çapasıdır: bu veri
+hangi belgenin hangi okumasından ve mümkünse belgenin neresinden geldi?
+Okuma içeriği kesin kayıt değildir; "okuma tamamlandı = deftere kaydedildi"
+semantiği yoktur ("Yazmak ve kayıt etmek" ayrımı, Aşama 4.5 ve sonrası).
+
+**Ayarlar ve bağımlılık.** Gelen dizini `Ayarlar.gelen_dizini`, arşiv dizini
+`Ayarlar.belge_dizini`dir; çekirdek modüller (`arsiv`, `belge_islemleri`)
+`defteriki.ayarlar`ı import etmez, iki dizini çağırandan `Path` olarak alır.
+Import edildiklerinde dizin / dosya oluşturmaz, ortam değişkeni okumaz.
+
+**Gelen dizini sınırı (`src/defteriki/cekirdek/arsiv.py`,
+`gelen_dosyayi_dogrula`).** Dosya yalnız izinli gelen dizininden alınır.
+Sırayla: yol boş olamaz → mutlak olmalı → `..` parçası olamaz → sözlüksel
+olarak gelen dizininin altında olmalı (Windows'ta büyük-küçük harf ayrımsız;
+`gelen2/` `gelen/`in altı değildir) → var olmalı → gelen dizininden dosyaya
+inen hiçbir parça simgesel bağlantı ya da Windows junction olamaz (hedefi
+içeride olsa da) → fiziksel çözülmüş yol (`Path.resolve`) gelen dizininin
+fiziksel çözülmüş yolunun altında olmalı → sıradan dosya olmalı (dizin
+reddedilir). Gelen dizininin kendisi bağlantı olabilir (ayar kararıdır).
+Hata mesajları kategoriktir; yerel yol ya da dosya adı taşımaz.
+
+**Dosya doğrulama.** Domain bağımsızdır. Boş dosya belge değildir. Teknik
+kaynak sınırı 50 MiB (`AZAMI_DOSYA_BOYUTU`; finans kuralı değil): aşan dosya
+kesilerek kabul edilmez, tamamı reddedilir; `stat` ön denetimine ek olarak
+akış sırasında da denetlenir. MIME ilk baytlardaki imzadan belirlenir (PDF,
+PNG, JPEG): imza biliniyorsa uzantı onunla uyuşmalıdır, imzalı bir uzantı
+(`.pdf` gibi) imzasız içerikle gelirse reddedilir; imza bilinmiyorsa güvenli
+genel değer `application/octet-stream` kullanılır, bilinmeyen tür belgeyi
+engellemez. MIME, uzantı ve kaynak dosya adı metadata'dır, fiziksel kimliğe
+girmez.
+
+**Arşiv kimliği ve fiziksel yol.** Fiziksel kimliğin tek kaynağı dosya
+baytlarının SHA-256 özetidir; uygulama özeti gerçek baytlardan, akışla
+(1 MiB parçalar, bütün dosya belleğe alınmaz) kendisi hesaplar. Arşiv yolu
+yalnız içerikten türer: `<sha256'nın ilk iki hex karakteri>/<sha256>`,
+uzantısız (`ab/abcdef…`). Aynı baytlar `ekstre.pdf`, `belge.PDF`, `dosya` ya
+da `x.bin` adıyla gelse de tek fiziksel dosyadır (imzalı içerik yanlış
+uzantıyla gelirse kapıda reddedilir, ikinci dosya oluşmaz). Yol dizin
+taramasıyla ya da "SHA ile başlayan dosya" aramasıyla değil doğrudan özetten
+hesaplanır. Veritabanına tam yerel yol yazılmaz; `arsiv_dosyasi.goreli_yol`
+arşiv köküne göre POSIX yoldur ve `belge_dizini + goreli_yol` çalışma
+zamanında kurulur.
+
+**Arşive atomik yazma (`dosyayi_arsivle`).** Gelen dosya doğrulanır → kaynak
+akışla okunur, ilk parçadan MIME belirlenir (boş dosya ve tür uyuşmazlığı
+geçici dosya açılmadan reddedilir) → `<arşiv>/gecici/<rastgele>.tmp` adına
+yazılırken SHA-256 ve boyut hesaplanır → `flush` + `fsync` → hedef yol
+özetten üretilir, üst dizin oluşturulur → `os.replace` ile aynı dosya sistemi
+üzerinde atomik taşınır (POSIX'te dizin girdisi de eşlenir) → geçici dosya
+temizlenir. Hangi adım düşerse düşsün geçici dosya silinir; yarım arşiv
+dosyası kalmaz. Hedef zaten varsa yalnız boyuta güvenilmez: mevcut dosya
+baştan sona özetlenir; aynıysa kopya atılır ve sonuç "diskte zaten vardı"
+olur, değilse açık `ArsivButunlukHatasi` (bozuk hedef sessizce duplicate
+sayılmaz, onarılmaz). Eşzamanlı iki süreç aynı içeriği getirirse ikisi de
+aynı baytları aynı yola bırakır; sonuç tek geçerli dosyadır. Windows'ta hedef
+o an açıkken taşıma reddedilirse hedef yine özetle doğrulanır.
+
+**Tablolar (`src/defteriki/cekirdek/belge_tablolari.py`, göç `0006`).** Bütün
+kısıtlar isimlidir; dış anahtarlar `ON DELETE RESTRICT`.
+
+| Tablo | Ne tutar | Veritabanı düzeyinde korunan |
+|---|---|---|
+| `arsiv_dosyasi` | `sha256`, `boyut`, `mime`, `kaynak_uzantisi`, `kaynak_adi`, `goreli_yol`, `olusturma_zamani` | `sha256` benzersiz; `goreli_yol` benzersiz; `sha256` 64 karakter küçük harf onaltılık (`length = 64 AND NOT GLOB '*[^0-9a-f]*'`); `goreli_yol = substr(sha256, 1, 2) \|\| '/' \|\| sha256` (yol yalnız içerikten türer); `typeof(boyut) = 'integer' AND boyut > 0` |
+| `belge` | `arsiv_dosyasi_id`, `olusturma_zamani` | `arsiv_dosyasi_id` benzersiz (bir arşiv dosyasından ikinci belge yok) ve dış anahtar |
+| `okuma` | `belge_id`, `surum_no`, `durum`, `icerik` (JSON metni), `olusturma_zamani`, `tamamlanma_zamani` | `(belge_id, surum_no)` benzersiz; `(id, belge_id)` benzersiz (kaynağın bileşik dış anahtar hedefi); `typeof(surum_no) = 'integer' AND surum_no > 0`; durum ile içerik / tamamlanma zamanı tutarlılığı (`basladi` ⇒ ikisi NULL, `tamamlandi` ⇒ ikisi dolu; başka durum değeri yok); `icerik IS NULL OR json_valid(icerik)` |
+| `kaynak` | `belge_id`, `okuma_id`, `konum` (JSON metni, isteğe bağlı), `olusturma_zamani` | `(okuma_id, belge_id)` bileşik dış anahtarla `okuma (id, belge_id)`: okumanın gerçekten o belgeye ait olduğu zorlanır, iki bağımsız dış anahtar yoktur; `konum IS NULL OR json_valid(konum)`; belge ve okuma indeksleri |
+
+**Servisler (`src/defteriki/cekirdek/belge_islemleri.py`).** Her servis açık
+`Session` alır; çağıran `Veritabani.islem` işleminin sahibidir. Servis hata
+atomikliği 4.3 kuralıyla sürer: doğrulama yazmadan önce, yazma kendi
+SAVEPOINT'inde (`begin_nested`); başarısız çağrı aynı dış işlemde yakalansa
+bile kısmi satır bırakmaz, dış işlem kullanılabilir kalır.
+
+* `belge_al(veritabani, yol, gelen_dizini=…, arsiv_dizini=…)` — **tek
+  istisna**: dosya sistemi ile SQLite aynı transaction'a giremez, bu
+  saklanmaz. Sıra: gelen dosya doğrulanır → içerik güvenli biçimde arşive
+  yazılır → SHA-256 kesinleşir → kısa `Veritabani.islem` işleminde
+  `belge_tanimla`. Sınırı dardır: başka hiçbir servis kendi işlemini açmaz.
+* `belge_tanimla(oturum, arsivlenen, arsiv_dizini)` — yazmadan önce fiziksel
+  dosyanın yerinde ve beklenen boyutta olduğunu bir daha denetler
+  (invariant: veritabanındaki belge hiçbir zaman arşive güvenli biçimde
+  yazılmamış dosyaya dayanmaz). Aynı SHA-256 varsa mevcut belgeyi
+  `zaten_vardi=True` ile döndürür: ikinci `arsiv_dosyasi`, ikinci fiziksel
+  dosya, ikinci `belge` oluşmaz; ilk gelen dosyanın adı / uzantısı metadata
+  olarak kalır. Sonuç ayrıca `dosya_zaten_vardi` (fiziksel dosya arşivde
+  zaten vardı) bilgisini taşır. Bu **belge seviyesinde SHA-256 duplicate
+  algılamasıdır**; işlem anahtarı (işlem seviyesi, madde 23) ve mükerrer
+  nesne (nesne seviyesi) ayrı mekanizmalardır ve bu aşamada kurulmadı.
+* `okuma_baslat(oturum, belge_id, arsiv_dizini)` — önce arşiv dosyasının
+  var, sıradan dosya, beklenen boyutta ve beklenen SHA-256'da olduğu
+  doğrulanır (DB satırına kör güvenilmez; eksikse `ArsivDosyasiEksik`,
+  bozuksa `ArsivButunlukHatasi`, okuma açılmaz); sonra belge içinde bir
+  sonraki sürüm numarasıyla `basladi` durumunda satır. Aynı belge birden çok
+  kez okunabilir; sürüm numarası sistem türetir.
+* `okuma_tamamla(oturum, okuma_id, icerik)` — yalnız `basladi` okuma; içerik
+  JSON nesnesi (anahtar → değer) olmalı, JSON'a çevrilebilmeli (`NaN` /
+  sonsuz, `Decimal`, `bytes` reddedilir), UTF-8 kanonik JSON metni 4 MiB'ı
+  (`AZAMI_OKUMA_ICERIGI_BOYUTU`) aşmamalı. Tamamlanan okuma değiştirilmez:
+  ikinci çağrı `OkumaDurumuGecersiz`, içerik güncelleyen işlev yok; yeni
+  okuma gerekiyorsa yeni sürüm açılır. Okuma yaşam döngüsü yalnız iki teknik
+  durumdur (`basladi`, `tamamlandi`); TASLAK / BEKLIYOR / paket / kullanıcı
+  kararı buraya girmez. İçerik domain bağımsızdır: çekirdek hesap numarası,
+  tarih, tutar gibi alanları bilmez. `okuma_icerigi` JSON'u çözüp döndürür.
+* `kaynak_olustur(oturum, okuma_id, konum=None)` — `belge_id` okumadan
+  alınır, çağıran veremez (servis düzeyinde uyuşmazlık imkânsız; ham SQL'de
+  bileşik dış anahtar reddeder). Konum isteğe bağlı, küçük, genel bir JSON
+  nesnesidir (sayfa, satır, hücre, görsel bölge gibi yalnız yer bilgisi;
+  banka ekstresi satırı gibi özel alan yoktur), 4 KiB
+  (`AZAMI_KAYNAK_KONUMU_BOYUTU`) ile sınırlıdır ve belge içeriğinin ikinci
+  kopyası değildir. Kaynak satırı değişmez provenance verisidir: güncelleyen
+  işlev yoktur, yanlışsa yeni kaynak üretilir. `kaynak_zinciri` kaynaktan
+  okumaya, belgeye ve arşiv dosyasına deterministik geri gider. Kaynak bu
+  aşamada nesneye ya da kayda bağlanmaz; aday nesne (4.5) ve kesin kayıt
+  (4.7) yapıları ileride bu kararlı kimliğe referans verir.
+* `arsivi_uzlastir(oturum, arsiv_dizini)` — dosya/DB bütünlük kontrol yüzeyi.
+  Her `arsiv_dosyasi` satırı için fiziksel dosya boyut ve özetle doğrulanır;
+  arşiv dizini taranır. Rapor altı durumu ayırt eder: **temiz** (satır var,
+  dosya doğru), **eksik** (satır var, dosya yok), **bozuk** (satır var,
+  hedefte yanlış boyut / özet ya da sıradan dosya değil), **sahipsiz**
+  (içerik adresli dosya var, satır yok), **yarım** (`gecici/` altında kalmış
+  artık), **tanınmayan** (arşiv düzenine uymayan başka dosya). Yalnız tespit
+  eder ve raporlar; silmez, onarmaz. Sahipsiz dosya özellikle silinmez:
+  DB hatası sonrası yeniden deneme ya da eşzamanlı işlem olabilir.
+
+**Dosya/DB atomik olmama politikası ve sahipsiz dosya.** Fiziksel dosya önce
+güvenli biçimde arşive girer, DB kaydı sonra açılır. DB adımı düşerse
+kesinlikle DB'de dosyasız belge kaydı kalmaz; arşivde sahipsiz dosya
+kalabilir. Bu yarım belge kaydı değil, dosya/DB atomik olmamasının doğal
+sonucudur ve uzlaştırılabilir: aynı dosya yeniden geldiğinde arşiv mevcut
+hedefi özetle doğrulayıp kullanır (ikinci fiziksel kopya yok) ve belge kaydı
+tamamlanır.
+
+**Hata modeli.** Dosya katmanı `arsiv.ArsivHatasi` altında:
+`GelenDosyaGecersiz` (yol kuralları, boş dosya), `DosyaOkunamadi`,
+`DosyaCokBuyuk`, `DosyaTuruUyusmuyor`, `ArsivYazilamadi`, `ArsivDosyasiEksik`,
+`ArsivButunlukHatasi`. Servis katmanı `belge_islemleri.BelgeHatasi` altında:
+`BelgeBulunamadi`, `OkumaBulunamadi`, `KaynakBulunamadi`,
+`OkumaDurumuGecersiz`, `OkumaIcerigiGecersiz`, `KaynakKonumuGecersiz`. Ham
+`OSError`, `IntegrityError` ve SQLite hata metni doğrulama yollarında
+sözleşme değildir. Mesajlarda belge içeriği ve tam yerel yol yoktur.
+
+**Teknik log ≠ iş denetim izi.** Bu aşamanın modülleri hiçbir şeyi günlüğe
+yazmaz; belge baytları, okuma içeriği, kaynak konumu ve tam yerel dosya yolu
+teknik loga hiçbir zaman yazılmaz. Teknik Plan madde 24'teki iş denetim izi
+("belge alındı", "okuma tamamlandı" gibi olaylar) ayrı bir mekanizmadır ve
+Aşama 4.6 kapsamındadır; burada erkenden kurulmadı.
+
+**Testler** (`tests/test_arsiv.py`, `tests/test_belge_zinciri.py`;
+`tests/test_gocler.py` göç `0006` için). Gelen dizini: geçerli dosya, boş
+yol, göreli yol, `..`, dosya yok, dizin, gelen dizininin kendisi, dizin dışı,
+ön ek benzerliği, simgesel bağlantıyla dışarı kaçış (Windows'ta yetki yoksa
+atlanır), simgesel dizin bağlantısı / junction ile içeride görünürken
+fiziksel dışarı çıkma, içeriyi gösteren bağlantı, gelen dizininin kendisinin
+bağlantı olması, okunamayan dosya (enjeksiyon), test kökü dışındaki dosyaya
+dokunulmaması, hata mesajının yol taşımaması. Arşiv: içerik adresli
+uzantısız yol, boş dosya, 50 MiB sabiti, tam sınırda kabul / bir bayt fazlası
+red (küçük sınırla ve gerçek 50 MiB ile), akış sırasında büyüyen dosya,
+parçalı okuma ve özet, PDF / PNG / JPEG imza algılama ve `octet-stream`
+fallback, imza / uzantı uyuşmazlığı (geçici dosya açılmaz), uzantı metadata
+kuralı, aynı baytlar farklı ad / dizin / uzantısız / bilinmeyen uzantı → tek
+fiziksel dosya, geçici yazma hatası ve taşıma hatasında artık kalmaması,
+Windows tarzı taşıma reddi, bozuk mevcut hedef (aynı ve farklı boyut)
+duplicate sayılmaz, sekiz iş parçacığı aynı içerik → tek geçerli dosya,
+yol hesabı ve bütünlük doğrulama, tarama sınıflaması. Belge: ilk dosya yeni
+belge, aynı SHA mevcut belge (ikinci satır / dosya yok, ilk metadata kalır),
+farklı içerik farklı belge, tam yerel yol DB'de yok, benzersizlik ve kontrol
+kısıtları ham SQL ile, dosyasız arşiv sonucuyla belge yazılmaz, yalnız arşiv
+satırı varken belge tamamlanır, servis hata atomikliği. Okuma: başlatma,
+çoklu sürüm, tamamlama ve kanonik JSON, tamamlananın değiştirilememesi, yeni
+sürüm, geçersiz içerik (liste / metin / `NaN` / sonsuz / `Decimal` / `bytes` /
+küme / karışık anahtar), aşırı içerik, arşiv eksik / bozukken başlamama,
+yazma hatasında yarım satır kalmaması, kısıtlar ham SQL ile. Kaynak: zincir,
+konumsuz kaynak, genel JSON konum, geçersiz / aşırı konum, başka belgeyle
+kaynak yazılamaması (bileşik dış anahtar ham SQL ile), deterministik geri
+gidiş, hata atomikliği. Dosya/DB hata senaryoları (sentetik enjeksiyon):
+kaynak okunurken hata, geçici dosya yazılırken hata, atomik taşıma hatası
+(DB'de hiçbir şey yok, artık yok); arşiv başarılı + DB hatası (dosya kalır,
+belge kaydı yok, uzlaştırma sahipsiz sayar) ve aynı dosyanın yeniden
+denenmesi (ikinci kopya yok, belge açılır); enjeksiyonsuz gerçek DB hatası
+(açılamayan dosya); DB belge var + dosya silinmiş (uzlaştırma eksik, okuma
+açık hata); DB belge var + dosya değiştirilmiş (uzlaştırma bozuk, okuma ve
+yeniden geliş açık hata, sessiz onarım yok). Uzlaştırma altı durumu birlikte
+ayırt eder ve hiçbir dosyayı silmez.
+
+**Bilinçli kapsam dışı (Aşama 4.4'te yok):** aday nesne / kayıt, işlem paketi,
+TASLAK ve BEKLIYOR durumları, kullanıcı onayı, şüphe, mükerrer nesne
+protokolü, kesin kaydetme, geri alma, projection, kural motoru, finans tanım
+paketi ve belge türleri, tutar / bakiye / mutabakat, kayıt-kaynak bağı, genel
+işlem anahtarı sistemi, iş denetim izi, MCP belge araçları (`belge_al` aracı
+Aşama 4.11), GUI; okuma için "vazgeçildi" gibi ek durum (yalnız iki teknik
+durum var); kaynağın okumanın hangi durumunda üretilebileceğine dair kısıt
+(karar verilmedi, açık bırakıldı); tamamlanan okuma ve kaynak satırı için
+veritabanı düzeyi değişmezlik (yalnız uygulama düzeyi; SQLite'ta
+tetikleyicisiz ifade edilemez); sahipsiz / yarım / bozuk dosyaların otomatik
+temizliği ya da onarımı.
+
 ## Mimari sınır: çekirdek ve finans
 
 Karar (2026-09-18, Abdüllatif). Önceki geliştirme hattında genel mekanik ile
@@ -649,7 +881,7 @@ kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çık�
 Bu sürümde tek araç var: `sistem_durumu`. Uygulama sürümü, ortam adı, şema
 sürümü ve yetenek listesini döndürür; yol, anahtar ya da ortam değişkeni
 içermez. Şema sürümü gerçektir (Aşama 4.1): veritabanı dosyası varsa
-Alembic'in `alembic_version` tablosundaki sürüm (bugün `0005`; zincirin
+Alembic'in `alembic_version` tablosundaki sürüm (bugün `0006`; zincirin
 başı neyse o), dosya yoksa ya da göç uygulanmamışsa `yok`. Dosya yokken
 bağlantı açılmaz, boş SQLite dosyası oluşmaz; araç göç çalıştırmaz. Testler
 dosya yok, dosya var ama göçsüz ve göç uygulanmış senaryolarını süreç içinde
@@ -845,10 +1077,13 @@ src/defteriki/    uygulama paketi
     tanim_islemleri.py  tanım yazma ve okuma işlevleri, tanım hata modeli, sürüm kilidi
     nesne_tablolari.py  nesne, nesne özelliği, nesne ilişkisi tabloları
     nesne_islemleri.py  nesne motoru: oluşturma, özellik doğrulama, ilişki, hiyerarşi, yaşam durumu
+    arsiv.py            gelen dizini sınırı, akışla SHA-256, içerik adresli atomik arşiv, bütünlük, tarama
+    belge_tablolari.py  arşiv dosyası, belge, okuma, kaynak tabloları
+    belge_islemleri.py  belge alma, okuma sürümleri, kaynak izi, dosya/DB uzlaştırma
   finans/         finansal domain; çekirdeği kullanabilir (henüz boş)
 alembic.ini       Alembic yapılandırması (veritabanı adresi yok)
-alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı, 0004 nesne motoru, 0005 kendine dönüş serbest)
-tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi; test_nesne_motoru.py: ENVANTER dünyası)
+alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı, 0004 nesne motoru, 0005 kendine dönüş serbest, 0006 belge zinciri)
+tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi; test_nesne_motoru.py: ENVANTER dünyası; test_arsiv.py ve test_belge_zinciri.py: belge zinciri)
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
 kavramlar_sozlugu.md   ortak kavram tanımları; ekleme ve değişiklik yalnız Abdüllatif'in onayıyla

@@ -14,7 +14,7 @@ from alembic import context
 from sqlalchemy import Connection
 
 from defteriki.ayarlar import ayarlari_yukle
-from defteriki.cekirdek import nesne_tablolari, tanim_tablolari
+from defteriki.cekirdek import belge_tablolari, nesne_tablolari, tanim_tablolari
 from defteriki.cekirdek.veritabani import TabloTabani, motor_olustur, veritabani_url
 
 yapilandirma = context.config
@@ -23,6 +23,7 @@ hedef_metadata = TabloTabani.metadata
 # karşılaştırması için tanım tabloları burada kayda girer.
 assert set(tanim_tablolari.TANIM_TABLOLARI) <= set(hedef_metadata.tables)
 assert set(nesne_tablolari.NESNE_TABLOLARI) <= set(hedef_metadata.tables)
+assert set(belge_tablolari.BELGE_TABLOLARI) <= set(hedef_metadata.tables)
 
 
 def _gocleri_calistir(baglanti: Connection) -> None:

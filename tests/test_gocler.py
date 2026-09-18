@@ -1,4 +1,4 @@
-"""Göç zinciri ve şema sürümü testleri (Aşama 4.1, 4.2).
+"""Göç zinciri ve şema sürümü testleri (Aşama 4.1, 4.2, 4.3, 4.4).
 
 Gerçek SQLite dosyaları, ``test`` ortamı, ``tmp_path`` altında kök. Süreç içi
 ``semayi_yukselt`` ve komut satırı (``alembic upgrade head``) aynı ``env.py``
@@ -6,7 +6,8 @@ Gerçek SQLite dosyaları, ``test`` ortamı, ``tmp_path`` altında kök. Süreç
 Aşama 4.2 ile zincir ``0002`` (tanım tabloları) ve ``0003`` (sürüm numarası
 kontrol kısıtı, tablo açık SQL ile yeniden kurulur), Aşama 4.3 ile ``0004``
 (nesne tabloları, hiyerarşi kuralı, özellik türü, sürüm kilidi), ``0005``
-(genel ilişkide kendine dönüş kısıtı kalkar); ``upgrade →
+(genel ilişkide kendine dönüş kısıtı kalkar), Aşama 4.4 ile ``0006`` (belge
+zinciri tabloları; geri alma satır varken uygulanmaz); ``upgrade →
 downgrade → upgrade`` döngüsü, adım adım zincir ve göç şemasının ORM
 metadata'sıyla birebirliği sınanır. Bütün göçler geçici test
 veritabanlarında çalışır; kalıcı geliştirme veritabanına dokunulmaz.
@@ -27,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from defteriki import ayarlar as ay
 from defteriki import baslangic, gunluk
+from defteriki.cekirdek import belge_tablolari as bt
 from defteriki.cekirdek import gocler
 from defteriki.cekirdek import nesne_tablolari as nt
 from defteriki.cekirdek import tanim_tablolari as tt
@@ -42,11 +44,12 @@ DEFTERIKI_DEGISKENLERI = (
 )
 BEKLEME_SANIYE = 120
 BASLANGIC_SURUMU = "0001"
-GUNCEL_SURUM = "0005"
+GUNCEL_SURUM = "0006"
+KENDINE_SURUMU = "0005"
 NESNE_SURUMU = "0004"
 TANIM_SURUMU = "0002"
 KISIT_SURUMU = "0003"
-UYGULAMA_TABLOLARI = (*tt.TANIM_TABLOLARI, *nt.NESNE_TABLOLARI)
+UYGULAMA_TABLOLARI = (*tt.TANIM_TABLOLARI, *nt.NESNE_TABLOLARI, *bt.BELGE_TABLOLARI)
 GUNCEL_TABLOLAR = sorted((gocler.SURUM_TABLOSU, *UYGULAMA_TABLOLARI))
 
 
@@ -244,6 +247,10 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     "fk_nesne_iliskisi_kaynak_nesne_id_kaynak_nesne_turu_id_"
                     "tanim_surumu_id_nesne",
                 ],
+                "arsiv_dosyasi": [],
+                "belge": ["fk_belge_arsiv_dosyasi_id_arsiv_dosyasi"],
+                "okuma": ["fk_okuma_belge_id_belge"],
+                "kaynak": ["fk_kaynak_okuma_id_belge_id_okuma"],
             }
             benzersizler = {
                 tablo: sorted(
@@ -274,6 +281,13 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 "nesne_iliskisi": [
                     "uq_nesne_iliskisi_iliski_tanimi_id_kaynak_nesne_id_hedef_nesne_id"
                 ],
+                "arsiv_dosyasi": [
+                    "uq_arsiv_dosyasi_goreli_yol",
+                    "uq_arsiv_dosyasi_sha256",
+                ],
+                "belge": ["uq_belge_arsiv_dosyasi_id"],
+                "okuma": ["uq_okuma_belge_id_surum_no", "uq_okuma_id_belge_id"],
+                "kaynak": [],
             }
             assert sorted(
                 str(ix["name"]) for ix in denetci.get_indexes("iliski_tanimi")
@@ -317,10 +331,22 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 "nesne": ["ck_nesne_yasam_durumu_gecerli"],
                 "nesne_ozelligi": [],
                 "nesne_iliskisi": [],
+                "arsiv_dosyasi": [
+                    "ck_arsiv_dosyasi_boyut_pozitif_tamsayi",
+                    "ck_arsiv_dosyasi_goreli_yol_icerikten",
+                    "ck_arsiv_dosyasi_sha256_bicimi",
+                ],
+                "belge": [],
+                "okuma": [
+                    "ck_okuma_durum_icerik_tutarli",
+                    "ck_okuma_icerik_json",
+                    "ck_okuma_surum_no_pozitif_tamsayi",
+                ],
+                "kaynak": ["ck_kaynak_konum_json"],
             }
             indeksler = {
                 tablo: sorted(str(ix["name"]) for ix in denetci.get_indexes(tablo))
-                for tablo in nt.NESNE_TABLOLARI
+                for tablo in (*nt.NESNE_TABLOLARI, *bt.BELGE_TABLOLARI)
             }
             assert indeksler == {
                 "nesne": ["ix_nesne_nesne_turu_id", "ix_nesne_tanim_surumu_id"],
@@ -329,6 +355,10 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     "ix_nesne_iliskisi_hedef_nesne_id",
                     "ix_nesne_iliskisi_kaynak_nesne_id",
                 ],
+                "arsiv_dosyasi": [],
+                "belge": [],
+                "okuma": [],
+                "kaynak": ["ix_kaynak_belge_id", "ix_kaynak_okuma_id"],
             }
     finally:
         v.kapat()
@@ -351,13 +381,13 @@ def _cocuk_sayilari(oturum: Session) -> tuple[int, int, int]:
     )
 
 
-def test_zincir_adim_adim_0001_0002_0003_0004_0005_ve_geri(
+def test_zincir_adim_adim_0001_0002_0003_0004_0005_0006_ve_geri(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``0001 → 0002 → 0003 → 0004 → 0005 → 0002 → 0001 → head``: her adımda sürüm ve
-    ``tanim_surumu`` kontrol kısıtı beklenen; ``0003``ün tablo yeniden kurması
-    ``0002``de yazılmış satırı ve diğer kısıt adlarını korur; ``0002``de kabul
-    edilen REAL sürüm numarası ``0003``te reddedilir."""
+    """``0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0002 → 0001 → head``: her
+    adımda sürüm ve ``tanim_surumu`` kontrol kısıtı beklenen; ``0003``ün tablo
+    yeniden kurması ``0002``de yazılmış satırı ve diğer kısıt adlarını korur;
+    ``0002``de kabul edilen REAL sürüm numarası ``0003``te reddedilir."""
     ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
     v = vt.Veritabani(ayar.veritabani_yolu)
     alembic = gocler.alembic_ayari()
@@ -466,9 +496,17 @@ def test_zincir_adim_adim_0001_0002_0003_0004_0005_ve_geri(
             assert _cocuk_sayilari(oturum) == (1, 1, 1)
             assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
 
+        goc(KENDINE_SURUMU)
+        assert gocler.sema_surumu(v) == KENDINE_SURUMU
+        assert _kontrol_kisitlari(v, "nesne_iliskisi") == []
+        with v.islem() as oturum:
+            assert _cocuk_sayilari(oturum) == (1, 1, 1)
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+        assert not set(bt.BELGE_TABLOLARI) & {ad for _, ad, _ in _sema(v)}
+
         goc(GUNCEL_SURUM)
         assert gocler.sema_surumu(v) == GUNCEL_SURUM
-        assert _kontrol_kisitlari(v, "nesne_iliskisi") == []
+        assert set(bt.BELGE_TABLOLARI) <= {ad for t, ad, _ in _sema(v) if t == "table"}
         with v.islem() as oturum:
             assert _cocuk_sayilari(oturum) == (1, 1, 1)
             assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
@@ -939,5 +977,118 @@ def test_komut_satiri_upgrade_head_merkezi_yolu_kullanir(
     try:
         assert gocler.sema_surumu(v) == GUNCEL_SURUM
         assert _sema(v) == _yukselt(tmp_path / "surec_ici", monkeypatch)[1]
+    finally:
+        v.kapat()
+
+
+def test_0005_0006_gecisi_nesne_verisini_korur_ve_dolu_geri_alinmaz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0005``te yazılmış tanım / nesne / ilişki satırları ``0006``ya olduğu gibi
+    taşınır, belge zinciri tabloları boş gelir, geçici tablo kalmaz; belge zinciri
+    satırı varken ``0006 → 0005`` düşer ve uygulanmaz, satırlar silinince geri
+    alınır ve tablolar gider; tekrar ``head`` sıfırdan kurulanla aynı şemayı verir."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    def tablolar() -> list[str]:
+        return [ad for tur, ad, _ in _sema(v) if tur == "table"]
+
+    def sayilar(oturum: Session) -> dict[str, int]:
+        return {
+            t: int(oturum.execute(text(f"SELECT count(*) FROM {t}")).scalar_one())
+            for t in (*tt.TANIM_TABLOLARI, *nt.NESNE_TABLOLARI)
+        }
+
+    ozet = "a" * 64
+    try:
+        goc(KENDINE_SURUMU)
+        with v.islem() as oturum:
+            for sql in (
+                "INSERT INTO tanim_paketi (kod, gosterim_adi, olusturma_zamani) "
+                "VALUES ('ENVANTER', 'Envanter', '2026-09-19 00:00:00')",
+                "INSERT INTO tanim_surumu (tanim_paketi_id, surum_no, "
+                "olusturma_zamani, kilitli) VALUES (1, 1, '2026-09-19 00:00:00', 1)",
+                "INSERT INTO nesne_turu (tanim_surumu_id, kod, gosterim_adi) "
+                "VALUES (1, 'RAF', 'Raf')",
+                "INSERT INTO ozellik_tanimi (nesne_turu_id, kod, gosterim_adi, "
+                "deger_turu, zorunlu) VALUES (1, 'kod', 'Kod', 'metin', 1)",
+                "INSERT INTO iliski_tanimi (tanim_surumu_id, kod, gosterim_adi, "
+                "kaynak_nesne_turu_id, hedef_nesne_turu_id) "
+                "VALUES (1, 'YANINDA', 'Yanında', 1, 1)",
+                "INSERT INTO hiyerarsi_kurali (iliski_tanimi_id, en_az_ust, "
+                "en_cok_ust) VALUES (1, 0, 1)",
+                "INSERT INTO nesne (nesne_turu_id, tanim_surumu_id, yasam_durumu, "
+                "olusturma_zamani) VALUES (1, 1, 'etkin', '2026-09-19'), "
+                "(1, 1, 'kapali', '2026-09-19')",
+                "INSERT INTO nesne_ozelligi (nesne_id, nesne_turu_id, "
+                "ozellik_tanimi_id, deger) VALUES (1, 1, 1, 'A1'), (2, 1, 1, 'A2')",
+                "INSERT INTO nesne_iliskisi (iliski_tanimi_id, tanim_surumu_id, "
+                "kaynak_nesne_turu_id, hedef_nesne_turu_id, kaynak_nesne_id, "
+                "hedef_nesne_id) VALUES (1, 1, 1, 1, 1, 2)",
+            ):
+                oturum.execute(text(sql))
+            once = sayilar(oturum)
+        eski_tablolar = tablolar()
+
+        goc(GUNCEL_SURUM)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        assert tablolar() == sorted([*eski_tablolar, *bt.BELGE_TABLOLARI])
+        with v.islem() as oturum:
+            assert sayilar(oturum) == once
+            assert oturum.execute(
+                text("SELECT nesne_id, deger FROM nesne_ozelligi ORDER BY id")
+            ).all() == [(1, "A1"), (2, "A2")]
+            for t in bt.BELGE_TABLOLARI:
+                assert (
+                    oturum.execute(text(f"SELECT count(*) FROM {t}")).scalar_one() == 0
+                )
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert not any(ad.endswith("_yeni") for ad in tablolar())
+        tam_sema = _sema(v)
+
+        with v.islem() as oturum:
+            oturum.execute(
+                text(
+                    "INSERT INTO arsiv_dosyasi (sha256, boyut, mime, kaynak_uzantisi, "
+                    "kaynak_adi, goreli_yol, olusturma_zamani) VALUES (:s, 3, "
+                    "'application/octet-stream', '', 'a', :y, '2026-09-19 00:00:00')"
+                ),
+                {"s": ozet, "y": f"{ozet[:2]}/{ozet}"},
+            )
+            oturum.execute(
+                text(
+                    "INSERT INTO belge (arsiv_dosyasi_id, olusturma_zamani) "
+                    "VALUES (1, '2026-09-19 00:00:00')"
+                )
+            )
+        with pytest.raises(RuntimeError, match="geri alınamaz.*belge"):
+            goc(KENDINE_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM  # geri alma uygulanmadı
+        assert _sema(v) == tam_sema
+        with v.islem() as oturum:
+            assert oturum.execute(text("SELECT count(*) FROM belge")).scalar_one() == 1
+            oturum.execute(text("DELETE FROM belge"))
+            oturum.execute(text("DELETE FROM arsiv_dosyasi"))
+
+        goc(KENDINE_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == KENDINE_SURUMU
+        assert tablolar() == eski_tablolar
+        with v.islem() as oturum:
+            assert sayilar(oturum) == once
+
+        goc(GUNCEL_SURUM)
+        assert _sema(v) == tam_sema
+        assert _sema(v) == _yukselt(tmp_path / "sifir", monkeypatch)[1]
+        with v.islem() as oturum:
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
     finally:
         v.kapat()
