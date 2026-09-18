@@ -20,8 +20,10 @@ yazar (``arsiv.dosyayi_arsivle``), SHA-256 kesinleşir, sonra kendi kısa
 ``Veritabani.islem`` işleminde ``belge_tanimla`` çağırır. Sınırı dardır:
 başka hiçbir servis kendi işlemini açmaz. Sonuç invariantı: veritabanındaki
 belge hiçbir zaman arşive güvenli biçimde yazılmamış dosyaya dayanmaz
-(``belge_tanimla`` yazmadan önce dosyanın yerinde ve beklenen boyutta
-olduğunu bir daha denetler). Ters yönde, DB adımı düşerse arşivde **sahipsiz**
+(``belge_tanimla`` hiçbir satır yazmadan önce dosyanın yerinde, sıradan
+dosya, beklenen boyutta ve beklenen SHA-256'da olduğunu baştan sona bir daha
+doğrular; aynı boyutta bozuk dosya DB'ye bağlanamaz). Ters yönde, DB adımı
+düşerse arşivde **sahipsiz**
 dosya kalabilir: bu yarım belge kaydı değil, dosya/DB atomik olmamasının
 doğal sonucudur; aynı dosya yeniden geldiğinde arşiv onu özetle doğrulayıp
 kullanır ve belge kaydı tamamlanır. Sahipsiz dosyalar ``arsivi_uzlastir`` ile
@@ -31,7 +33,19 @@ raporlanır, silinmez.
 ikinci ``ArsivDosyasi``, ikinci fiziksel dosya ve ikinci ``Belge`` oluşmaz;
 mevcut belge ``zaten_vardi=True`` ile döner. Bu belge seviyesindeki
 mekanizmadır; işlem anahtarı (işlem seviyesi) ve mükerrer nesne (nesne
-seviyesi) ayrı mekanizmalardır ve bu aşamada kurulmaz.
+seviyesi) ayrı mekanizmalardır ve bu aşamada kurulmaz. **Eşzamanlı aynı
+belge:** iki bağımsız işlem (ayrı süreç ya da iş parçacığı) aynı SHA-256'yı
+aynı anda ``belge_al`` ile verirse ikisi de "satır yok" görüp yazmaya
+kalkabilir; veritabanı benzersizliği son savunmadır ve ikinciyi
+``IntegrityError`` ya da SQLite WAL anlık görüntü çakışması ("database is
+locked") ile durdurur. ``belge_al`` bu iki hatayı yakalar, işlemi geri alır,
+kısa ve sınırlı bir süre bekler (``YENIDEN_DENEME_BEKLEMELERI``) ve DB
+adımını yeni bir işlemde sınırlı sayıda (``BELGE_YAZMA_DENEMESI``) yeniden
+dener; yeni işlem artık commit edilmiş satırı görür ve normal duplicate
+sonucu (``zaten_vardi=True``) döner. Global kilit yoktur; sonsuz retry
+yoktur; denemeler tükenirse ``BelgeYazmaCakismasi`` yükselir. Çakışma
+olmayan veritabanı hataları yeniden denenmez, olduğu gibi yükselir. Sonuç her
+zaman tek fiziksel dosya, tek ``arsiv_dosyasi``, tek ``belge``dir.
 
 **Okuma**: ``okuma_baslat`` önce arşiv dosyasının var, sıradan, beklenen
 boyutta ve beklenen SHA-256'da olduğunu doğrular (DB satırına kör
@@ -44,14 +58,17 @@ kanonik JSON metni olarak saklanır. Tamamlanan okuma değiştirilemez: ikinci
 ``okuma_tamamla`` ``OkumaDurumuGecersiz`` verir, içerik güncelleyen bir işlev
 yoktur; yeni okuma gerekiyorsa yeni sürüm açılır.
 
-**Kaynak**: ``kaynak_olustur`` okumadan başlar; ``belge_id`` okumadan alınır,
+**Kaynak**: ``kaynak_olustur`` yalnız ``tamamlandi`` okumadan üretilir
+(karar 2026-09-19): kaynak "bu veri hangi okumanın neresinden geldi?"
+sorusunun cevabıdır, içeriği henüz oluşmamış ``basladi`` okuma kararlı
+kaynak olamaz; böyle bir istek ``OkumaDurumuGecersiz`` verir. Bu servis
+invariantıdır, veritabanında tetikleyici yoktur. ``belge_id`` okumadan alınır,
 çağıran veremez (servis düzeyinde uyuşmazlık imkânsız; ham SQL'e karşı
 bileşik dış anahtar). ``konum`` isteğe bağlı JSON nesnesidir, yalnız yer
 bilgisi taşır, ``AZAMI_KAYNAK_KONUMU_BOYUTU`` ile sınırlıdır. Kaynak satırı
 değişmez veridir: güncelleyen işlev yoktur; yanlışsa yeni kaynak üretilir.
 ``kaynak_zinciri`` kaynaktan okumaya, belgeye ve arşiv dosyasına deterministik
-geri gider. Kaynağın okumanın hangi durumunda üretilebileceğine dair kısıt
-yoktur (bu aşamada karar verilmedi; not edildi).
+geri gider.
 
 **Uzlaştırma** (``arsivi_uzlastir``): veritabanı satırları ile arşiv dizinini
 karşılaştırır ve her şeyi sınıflar (temiz / eksik / bozuk / sahipsiz / yarım
@@ -60,19 +77,23 @@ artık / tanınmayan). Yalnız tespit eder ve raporlar; silmez, onarmaz.
 Hata modeli (``BelgeHatasi`` altında; arşiv dosya katmanı hataları
 ``arsiv.ArsivHatasi`` altında olduğu gibi gelir): ``BelgeBulunamadi``,
 ``OkumaBulunamadi``, ``KaynakBulunamadi``, ``OkumaDurumuGecersiz``,
-``OkumaIcerigiGecersiz``, ``KaynakKonumuGecersiz``. Mesajlarda belge içeriği
-ve yerel yol yoktur. Bu modül hiçbir şeyi günlüğe yazmaz.
+``OkumaIcerigiGecersiz``, ``KaynakKonumuGecersiz``, ``BelgeYazmaCakismasi``.
+Ham ``IntegrityError`` ve "database is locked" ``belge_al`` sözleşmesinden
+dışarı çıkmaz. Mesajlarda belge içeriği ve yerel yol yoktur. Bu modül hiçbir
+şeyi günlüğe yazmaz.
 """
 
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from defteriki.cekirdek import arsiv
@@ -90,6 +111,13 @@ AZAMI_OKUMA_ICERIGI_BOYUTU = 4 * 1024 * 1024
 """Kanonik JSON metninin UTF-8 bayt sınırı; teknik sınır, domain kuralı değil."""
 AZAMI_KAYNAK_KONUMU_BOYUTU = 4 * 1024
 """Konum küçük bir yer bilgisidir; belge içeriğinin kopyası olamaz."""
+BELGE_YAZMA_DENEMESI = 4
+"""``belge_al`` DB adımının eşzamanlı çakışmada en çok kaç kez denendiği."""
+YENIDEN_DENEME_BEKLEMELERI: tuple[float, ...] = (0.02, 0.1, 0.5)
+"""Denemeler arası bekleme (saniye), sırayla; toplam üst sınır ~0,6 s. SQLite,
+açık okuma işlemi olan bağlantıyı yazmaya yükseltirken başka yazıcı kilidi
+tutuyorsa beklemeden "locked" döndürür; diğer yazıcının commit etmesi için
+kısa, sınırlı bir bekleme gerekir."""
 
 
 class BelgeHatasi(Exception):
@@ -118,6 +146,10 @@ class OkumaIcerigiGecersiz(BelgeHatasi, ValueError):
 
 class KaynakKonumuGecersiz(BelgeHatasi, ValueError):
     """Konum JSON nesnesi değil, JSON'a çevrilemiyor ya da sınırı aşıyor."""
+
+
+class BelgeYazmaCakismasi(BelgeHatasi):
+    """Eşzamanlı belge yazımı sınırlı denemeye rağmen uzlaştırılamadı."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,10 +327,13 @@ def belge_tanimla(
     """Arşive girmiş dosya için ``ArsivDosyasi`` + ``Belge`` tanımlar ya da aynı
     SHA-256'nın mevcut belgesini döndürür.
 
-    Yazmadan önce fiziksel dosyanın yerinde ve beklenen boyutta olduğu denetlenir
-    (DB'de dosyasız belge oluşmaz). Yazma SAVEPOINT içindedir.
+    Hiçbir satır yazılmadan önce fiziksel dosya baştan sona doğrulanır: var,
+    sıradan dosya, beklenen boyut, beklenen SHA-256 (DB'de dosyasız ya da bozuk
+    dosyalı belge oluşmaz). Yazma SAVEPOINT içindedir.
     """
-    arsiv.arsiv_dosyasini_dogrula(arsiv_dizini, arsivlenen.goreli_yol, arsivlenen.boyut)
+    arsiv.arsiv_dosyasini_dogrula(
+        arsiv_dizini, arsivlenen.goreli_yol, arsivlenen.boyut, arsivlenen.sha256
+    )
     dosya = oturum.execute(
         select(ArsivDosyasi).where(ArsivDosyasi.sha256 == arsivlenen.sha256)
     ).scalar_one_or_none()
@@ -345,13 +380,35 @@ def belge_al(
 
     Bu modülde kendi işlemini açan tek servis (bkz. modül açıklaması). Arşiv
     adımı düşerse DB'ye dokunulmaz; DB adımı düşerse fiziksel dosya arşivde
-    kalabilir, belge kaydı kalmaz.
+    kalabilir, belge kaydı kalmaz. Eşzamanlı aynı belge çakışmasında DB adımı
+    yeni işlemde sınırlı sayıda yeniden denenir ve mevcut belgeye uzlaşır.
     """
     arsivlenen = arsiv.dosyayi_arsivle(
         yol, gelen_dizini=gelen_dizini, arsiv_dizini=arsiv_dizini
     )
-    with veritabani.islem() as oturum:
-        return belge_tanimla(oturum, arsivlenen, arsiv_dizini)
+    for deneme in range(1, BELGE_YAZMA_DENEMESI + 1):
+        try:
+            with veritabani.islem() as oturum:
+                return belge_tanimla(oturum, arsivlenen, arsiv_dizini)
+        except (IntegrityError, OperationalError) as hata:
+            if not _cakisma_mi(hata):
+                raise  # çakışma değil; olduğu gibi yükselir
+            if deneme == BELGE_YAZMA_DENEMESI:
+                raise BelgeYazmaCakismasi(
+                    "belge kaydı eşzamanlı yazımla çakıştı ve "
+                    f"{BELGE_YAZMA_DENEMESI} denemede uzlaştırılamadı."
+                ) from None
+            time.sleep(YENIDEN_DENEME_BEKLEMELERI[deneme - 1])
+    raise AssertionError("erişilmez")  # döngü ya döner ya yükseltir
+
+
+def _cakisma_mi(hata: IntegrityError | OperationalError) -> bool:
+    """Yeniden denemeye değer hata: benzersizlik ihlali ya da SQLite kilit /
+    anlık görüntü çakışması. Başka veritabanı hataları yeniden denenmez."""
+    if isinstance(hata, IntegrityError):
+        return "UNIQUE constraint failed" in str(hata.orig)
+    metin = str(hata.orig).lower()
+    return "locked" in metin or "busy" in metin
 
 
 # --- okuma ----------------------------------------------------------------------------
@@ -409,9 +466,15 @@ def okuma_tamamla(oturum: Session, okuma_id: int, icerik: Mapping[str, Any]) -> 
 def kaynak_olustur(
     oturum: Session, okuma_id: int, konum: Mapping[str, Any] | None = None
 ) -> Kaynak:
-    """Okumaya bağlı kaynak; belge okumadan alınır. ``konum`` isteğe bağlı JSON
-    nesnesi. Konum yazmadan önce doğrulanır."""
+    """Tamamlanmış okumaya bağlı kaynak; belge okumadan alınır. ``konum``
+    isteğe bağlı JSON nesnesi. Durum ve konum yazmadan önce doğrulanır;
+    ``basladi`` okuma için ``OkumaDurumuGecersiz``."""
     okuma = okuma_getir(oturum, okuma_id)
+    if okuma.durum != OkumaDurumu.TAMAMLANDI.value:
+        raise OkumaDurumuGecersiz(
+            f"okuma {okuma.id} {okuma.durum} durumunda; kaynak yalnız "
+            f"{OkumaDurumu.TAMAMLANDI.value} okumadan üretilir."
+        )
     metin = (
         None
         if konum is None

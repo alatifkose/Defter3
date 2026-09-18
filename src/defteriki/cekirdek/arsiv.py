@@ -18,9 +18,8 @@ ayarıdır); altındaki bağlantılar reddedilir. Hata mesajları kategoriktir; 
 ya da dosya adı taşımaz.
 
 **Arşive atomik yazma** (``dosyayi_arsivle``): kaynak akışla okunur (bütün
-dosya belleğe alınmaz), ilk parçadan MIME belirlenir ve uzantıyla
-karşılaştırılır (boş dosya ve tür uyuşmazlığı geçici dosya açılmadan
-reddedilir), ``<arşiv>/gecici/<rastgele>.tmp`` adına yazılırken SHA-256 ve
+dosya belleğe alınmaz), ilk parçadan MIME belirlenir (boş dosya geçici dosya
+açılmadan reddedilir), ``<arşiv>/gecici/<rastgele>.tmp`` adına yazılırken SHA-256 ve
 boyut hesaplanır, ``AZAMI_DOSYA_BOYUTU`` aşılırsa dosya kesilmez, tamamı
 reddedilir; ``flush`` + ``fsync``; hedef yol yalnız özetten türer
 (``arsiv_goreli_yolu``: ``<ilk iki hex>/<sha256>``, uzantısız); üst dizin
@@ -38,11 +37,13 @@ Windows'ta hedef o an açıkken taşıma reddedilirse hedef yine özetle doğrul
 Arşiv yolu dizin taramasıyla ya da "SHA ile başlayan dosya" aramasıyla değil,
 doğrudan özetten hesaplanır.
 
-**MIME** ilk baytlardaki imzadan belirlenir (PDF, PNG, JPEG). İmza biliniyorsa
-verilen uzantı onunla uyuşmalıdır; imzalı bir uzantı (``.pdf`` gibi) imzasız
-içerikle gelirse reddedilir. İmza bilinmiyorsa güvenli genel değer
-``application/octet-stream`` kullanılır; bilinmeyen tür belgeyi engellemez.
-MIME, uzantı ve kaynak adı metadata'dır, fiziksel kimliğe girmez.
+**MIME** yalnız ilk baytlardaki imzadan belirlenir (PDF, PNG, JPEG); imza
+bilinmiyorsa güvenli genel değer ``application/octet-stream`` kullanılır.
+Dosyanın adı ve uzantısı güvenilir içerik bilgisi değildir (karar 2026-09-19):
+uzantı yalnız metadata'dır, imzayla uyuşmaması arşivlemeye engel değildir;
+``.pdf`` adlı imzasız dosya da, ``.png`` adlı PDF de arşive girer. Arşiv
+baytları saklar, belgeyi çalıştırmaz. MIME, uzantı ve kaynak adı metadata'dır,
+fiziksel kimliğe girmez.
 
 Teknik sınırlar: ``AZAMI_DOSYA_BOYUTU`` (50 MiB) domain kuralı değil kaynak
 sınırıdır. Bu modül hiçbir şeyi günlüğe yazmaz.
@@ -70,13 +71,10 @@ VARSAYILAN_MIME = "application/octet-stream"
 SHA256_BICIMI = re.compile(r"[0-9a-f]{64}")
 GORELI_YOL_BICIMI = re.compile(r"([0-9a-f]{2})/([0-9a-f]{64})")
 
-_IMZALAR: tuple[tuple[bytes, str, frozenset[str]], ...] = (
-    (b"%PDF-", "application/pdf", frozenset({".pdf"})),
-    (b"\x89PNG\r\n\x1a\n", "image/png", frozenset({".png"})),
-    (b"\xff\xd8\xff", "image/jpeg", frozenset({".jpg", ".jpeg"})),
-)
-_IMZALI_UZANTILAR: frozenset[str] = frozenset(
-    uzanti for _, _, uzantilar in _IMZALAR for uzanti in uzantilar
+_IMZALAR: tuple[tuple[bytes, str], ...] = (
+    (b"%PDF-", "application/pdf"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
 )
 
 
@@ -94,10 +92,6 @@ class DosyaOkunamadi(ArsivHatasi):
 
 class DosyaCokBuyuk(ArsivHatasi):
     """Dosya ``AZAMI_DOSYA_BOYUTU`` sınırını aşıyor; kesilmez, reddedilir."""
-
-
-class DosyaTuruUyusmuyor(ArsivHatasi):
-    """İçerik imzası ile dosya uzantısı çelişiyor."""
 
 
 class ArsivYazilamadi(ArsivHatasi):
@@ -322,7 +316,7 @@ def dosyayi_arsivle(
 
     gecici = _gecici_ad(arsiv_dizini)
     try:
-        ozet, boyut, mime = _akisla_kopyala(kaynak, gecici, uzanti, azami_boyut)
+        ozet, boyut, mime = _akisla_kopyala(kaynak, gecici, azami_boyut)
         goreli_yol = arsiv_goreli_yolu(ozet)
         hedef = arsiv_yolu(arsiv_dizini, goreli_yol)
         _dizini_hazirla(hedef.parent)
@@ -355,12 +349,13 @@ def _dizini_hazirla(dizin: Path) -> None:
 
 
 def _akisla_kopyala(
-    kaynak: Path, gecici: Path, uzanti: str, azami_boyut: int
+    kaynak: Path, gecici: Path, azami_boyut: int
 ) -> tuple[str, int, str]:
     """Kaynağı geçici dosyaya akışla kopyalar; (sha256, boyut, mime) döndürür.
 
-    İlk parça okunur okunmaz boş dosya ve tür uyuşmazlığı reddedilir; geçici
-    dosya ancak bundan sonra açılır. Sınır aşımında kopya durur ve hata yükselir.
+    İlk parça okunur okunmaz boş dosya reddedilir ve MIME imzadan belirlenir;
+    geçici dosya ancak bundan sonra açılır. Sınır aşımında kopya durur ve hata
+    yükselir.
     """
     ozet = hashlib.sha256()
     boyut = 0
@@ -375,7 +370,7 @@ def _akisla_kopyala(
             raise DosyaOkunamadi("dosya okunamadı.") from None
         if not parca:
             raise GelenDosyaGecersiz("boş dosya belge olamaz.")
-        mime = _mime_belirle(parca, uzanti)
+        mime = _mime_belirle(parca)
         try:
             with _geciciyi_ac(gecici) as cikti:
                 while parca:
@@ -446,18 +441,11 @@ def _uzanti(ad: str) -> str:
     return uzanti
 
 
-def _mime_belirle(bas: bytes, uzanti: str) -> str:
-    for imza, mime, uzantilar in _IMZALAR:
+def _mime_belirle(bas: bytes) -> str:
+    """MIME yalnız içerik imzasından; bilinmiyorsa güvenli genel değer."""
+    for imza, mime in _IMZALAR:
         if bas.startswith(imza):
-            if uzanti and uzanti not in uzantilar:
-                raise DosyaTuruUyusmuyor(
-                    f"içerik {mime} imzası taşıyor, uzantı bununla uyuşmuyor."
-                )
             return mime
-    if uzanti in _IMZALI_UZANTILAR:
-        raise DosyaTuruUyusmuyor(
-            f"uzantı {uzanti} bilinen bir imza bekler, içerik onu taşımıyor."
-        )
     return VARSAYILAN_MIME
 
 

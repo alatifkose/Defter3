@@ -26,6 +26,7 @@ PDF = b"%PDF-1.7\n% envanter listesi: raf A1, 12 kalem\n"
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 24
 METIN = "raf;urun;adet\nA1;vida;12\n".encode()
+VARSAYILAN = arsiv.VARSAYILAN_MIME
 
 
 @pytest.fixture
@@ -370,21 +371,28 @@ def test_imza_algilama_ve_guvenli_fallback(
 
 
 @pytest.mark.parametrize(
-    ("ad", "icerik"),
+    ("ad", "icerik", "mime", "uzanti"),
     [
-        ("liste.png", PDF),  # PDF imzası, PNG uzantısı
-        ("raf.pdf", PNG),
-        ("raf.jpg", PNG),
-        ("liste.pdf", METIN),  # imzalı uzantı, imzasız içerik
-        ("raf.png", METIN),
+        ("liste.png", PDF, "application/pdf", ".png"),  # PDF imzası, PNG uzantısı
+        ("raf.pdf", PNG, "image/png", ".pdf"),
+        ("raf.jpg", PNG, "image/png", ".jpg"),
+        ("raf.PNG", JPEG, "image/jpeg", ".png"),
+        ("liste.pdf", METIN, "application/octet-stream", ".pdf"),  # imzasız .pdf
+        ("raf.png", METIN, "application/octet-stream", ".png"),
     ],
 )
-def test_imza_uzanti_uyusmazligi_reddedilir(
-    gelen: Path, arsiv_dizini: Path, ad: str, icerik: bytes
+def test_imza_uzanti_uyusmazligi_red_sebebi_degil(
+    gelen: Path, arsiv_dizini: Path, ad: str, icerik: bytes, mime: str, uzanti: str
 ) -> None:
-    with pytest.raises(arsiv.DosyaTuruUyusmuyor):
-        _arsivle(_yaz(gelen / ad, icerik), gelen, arsiv_dizini)
-    assert _dosyalar(arsiv_dizini) == set()  # geçici dosya hiç açılmadı
+    """Karar 2026-09-19: ad ve uzantı güvenilir içerik bilgisi değildir; MIME'ı
+    imza belirler, uzantı yalnız metadata'dır, uyuşmazlık arşivlemeye engel
+    değildir."""
+    sonuc = _arsivle(_yaz(gelen / ad, icerik), gelen, arsiv_dizini)
+
+    assert (sonuc.mime, sonuc.kaynak_uzantisi) == (mime, uzanti)
+    assert sonuc.goreli_yol == _yol(icerik)
+    assert arsiv.arsiv_yolu(arsiv_dizini, sonuc.goreli_yol).read_bytes() == icerik
+    assert not hasattr(arsiv, "DosyaTuruUyusmuyor")
 
 
 def test_uzanti_metadata_kurali(gelen: Path, arsiv_dizini: Path) -> None:
@@ -396,40 +404,36 @@ def test_uzanti_metadata_kurali(gelen: Path, arsiv_dizini: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("adlar", "icerik"),
+    ("adlar", "icerik", "mime"),
     [
-        (("liste.pdf", "belge.PDF"), PDF),  # farklı ad
-        (("a.pdf", "alt/a.pdf"), PDF),  # aynı ad, farklı dizin
-        (("a.pdf", "dosya"), PDF),  # uzantısız
-        # İmzasız içerik: pdf / PDF / uzantısız / bilinmeyen uzantı hepsi tek dosya
-        (("liste.txt", "belge.TXT", "dosya", "x.bin"), METIN),
+        # Aynı PDF baytları: doğru uzantı, yanlış uzantı, başka imzanın uzantısı,
+        # uzantısız, bilinmeyen uzantı → tek fiziksel dosya, MIME imzadan
+        (("a.pdf", "a.bin", "a.png", "a", "herhangi.xyz"), PDF, "application/pdf"),
+        (("foto.png", "foto.jpg", "foto", "foto.pdf", "x.dat"), PNG, "image/png"),
+        (("r.jpg", "r.jpeg", "r.png", "r", "r.bin"), JPEG, "image/jpeg"),
+        (("liste.pdf", "belge.PDF"), PDF, "application/pdf"),  # büyük-küçük harf
+        (("a.pdf", "alt/a.pdf"), PDF, "application/pdf"),  # aynı ad, farklı dizin
+        # İmzasız içerik: her ad octet-stream, yine tek dosya
+        (("liste.txt", "belge.TXT", "dosya", "x.bin", "y.pdf"), METIN, VARSAYILAN),
     ],
 )
 def test_ayni_baytlar_tek_fiziksel_dosya(
-    gelen: Path, arsiv_dizini: Path, adlar: tuple[str, ...], icerik: bytes
+    gelen: Path, arsiv_dizini: Path, adlar: tuple[str, ...], icerik: bytes, mime: str
 ) -> None:
     sonuclar = [_arsivle(_yaz(gelen / ad, icerik), gelen, arsiv_dizini) for ad in adlar]
 
     assert {s.sha256 for s in sonuclar} == {_sha(icerik)}
     assert {s.goreli_yol for s in sonuclar} == {_yol(icerik)}
+    assert {s.mime for s in sonuclar} == {mime}
     assert [s.diskte_zaten_vardi for s in sonuclar] == [False] + [True] * (
         len(adlar) - 1
     )
     assert [s.kaynak_adi for s in sonuclar] == [Path(a).name for a in adlar]
+    assert [s.kaynak_uzantisi for s in sonuclar] == [
+        arsiv._uzanti(a)  # pyright: ignore[reportPrivateUsage]
+        for a in adlar
+    ]  # her gelişin kendi metadata'sı
     assert _dosyalar(arsiv_dizini) == {_yol(icerik)}
-
-
-def test_ayni_baytlar_bilinmeyen_uzantiyla_pdf_uzantisiyla_ayni_dosya(
-    gelen: Path, arsiv_dizini: Path
-) -> None:
-    """Uzantı ve MIME fiziksel kimliğe girmez: PDF imzalı içerik uzantısız gelince
-    de aynı dosyadır; ancak imzalı içerik yanlış uzantıyla gelirse kapıda reddedilir."""
-    ilk = _arsivle(_yaz(gelen / "a.pdf", PDF), gelen, arsiv_dizini)
-    ikinci = _arsivle(_yaz(gelen / "a", PDF), gelen, arsiv_dizini)
-    assert ikinci.goreli_yol == ilk.goreli_yol and ikinci.mime == ilk.mime
-    with pytest.raises(arsiv.DosyaTuruUyusmuyor):
-        _arsivle(_yaz(gelen / "a.bin", PDF), gelen, arsiv_dizini)
-    assert _dosyalar(arsiv_dizini) == {ilk.goreli_yol}
 
 
 def test_gecici_yazma_hatasi_gecici_dosya_birakmaz(

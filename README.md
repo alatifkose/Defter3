@@ -564,28 +564,32 @@ Hata mesajları kategoriktir; yerel yol ya da dosya adı taşımaz.
 **Dosya doğrulama.** Domain bağımsızdır. Boş dosya belge değildir. Teknik
 kaynak sınırı 50 MiB (`AZAMI_DOSYA_BOYUTU`; finans kuralı değil): aşan dosya
 kesilerek kabul edilmez, tamamı reddedilir; `stat` ön denetimine ek olarak
-akış sırasında da denetlenir. MIME ilk baytlardaki imzadan belirlenir (PDF,
-PNG, JPEG): imza biliniyorsa uzantı onunla uyuşmalıdır, imzalı bir uzantı
-(`.pdf` gibi) imzasız içerikle gelirse reddedilir; imza bilinmiyorsa güvenli
-genel değer `application/octet-stream` kullanılır, bilinmeyen tür belgeyi
-engellemez. MIME, uzantı ve kaynak dosya adı metadata'dır, fiziksel kimliğe
-girmez.
+akış sırasında da denetlenir. MIME yalnız ilk baytlardaki imzadan belirlenir
+(PDF, PNG, JPEG); imza bilinmiyorsa güvenli genel değer
+`application/octet-stream` kullanılır, bilinmeyen tür belgeyi engellemez.
+Karar (2026-09-19, inceleme): dosyanın adı ve uzantısı güvenilir içerik bilgisi
+**değildir**; uzantı yalnız metadata'dır, imzayla uyuşmaması red sebebi
+değildir. `.png` adlı PDF `application/pdf` olarak, `.pdf` adlı imzasız dosya
+`application/octet-stream` olarak arşive girer; arşiv baytları saklar,
+belgeyi çalıştırmaz. MIME, uzantı ve kaynak dosya adı metadata'dır, fiziksel
+kimliğe girmez.
 
 **Arşiv kimliği ve fiziksel yol.** Fiziksel kimliğin tek kaynağı dosya
 baytlarının SHA-256 özetidir; uygulama özeti gerçek baytlardan, akışla
 (1 MiB parçalar, bütün dosya belleğe alınmaz) kendisi hesaplar. Arşiv yolu
 yalnız içerikten türer: `<sha256'nın ilk iki hex karakteri>/<sha256>`,
-uzantısız (`ab/abcdef…`). Aynı baytlar `ekstre.pdf`, `belge.PDF`, `dosya` ya
-da `x.bin` adıyla gelse de tek fiziksel dosyadır (imzalı içerik yanlış
-uzantıyla gelirse kapıda reddedilir, ikinci dosya oluşmaz). Yol dizin
+uzantısız (`ab/abcdef…`). Aynı PDF baytları `a.pdf`, `a.bin`, `a.png`, `a` ya
+da `herhangi.xyz` adıyla gelse de tek fiziksel dosyadır ve MIME'ı
+`application/pdf`tir; `kaynak_uzantisi` her gelişin kendi metadata'sıdır, DB
+kaydında ilk gelişinki kalır. Yol dizin
 taramasıyla ya da "SHA ile başlayan dosya" aramasıyla değil doğrudan özetten
 hesaplanır. Veritabanına tam yerel yol yazılmaz; `arsiv_dosyasi.goreli_yol`
 arşiv köküne göre POSIX yoldur ve `belge_dizini + goreli_yol` çalışma
 zamanında kurulur.
 
 **Arşive atomik yazma (`dosyayi_arsivle`).** Gelen dosya doğrulanır → kaynak
-akışla okunur, ilk parçadan MIME belirlenir (boş dosya ve tür uyuşmazlığı
-geçici dosya açılmadan reddedilir) → `<arşiv>/gecici/<rastgele>.tmp` adına
+akışla okunur, ilk parçadan MIME belirlenir (boş dosya geçici dosya
+açılmadan reddedilir) → `<arşiv>/gecici/<rastgele>.tmp` adına
 yazılırken SHA-256 ve boyut hesaplanır → `flush` + `fsync` → hedef yol
 özetten üretilir, üst dizin oluşturulur → `os.replace` ile aynı dosya sistemi
 üzerinde atomik taşınır (POSIX'te dizin girdisi de eşlenir) → geçici dosya
@@ -618,16 +622,31 @@ bile kısmi satır bırakmaz, dış işlem kullanılabilir kalır.
   saklanmaz. Sıra: gelen dosya doğrulanır → içerik güvenli biçimde arşive
   yazılır → SHA-256 kesinleşir → kısa `Veritabani.islem` işleminde
   `belge_tanimla`. Sınırı dardır: başka hiçbir servis kendi işlemini açmaz.
-* `belge_tanimla(oturum, arsivlenen, arsiv_dizini)` — yazmadan önce fiziksel
-  dosyanın yerinde ve beklenen boyutta olduğunu bir daha denetler
-  (invariant: veritabanındaki belge hiçbir zaman arşive güvenli biçimde
-  yazılmamış dosyaya dayanmaz). Aynı SHA-256 varsa mevcut belgeyi
+* `belge_tanimla(oturum, arsivlenen, arsiv_dizini)` — hiçbir satır yazmadan
+  önce fiziksel dosyanın yerinde, sıradan dosya, beklenen boyutta **ve
+  beklenen SHA-256'da** olduğunu baştan sona bir daha doğrular (inceleme
+  düzeltmesi 2026-09-19: aynı boyutta bozuk dosya DB'ye bağlanamaz;
+  invariant: veritabanındaki belge hiçbir zaman arşive güvenli biçimde
+  yazılmamış ya da bozuk dosyaya dayanmaz). Aynı SHA-256 varsa mevcut belgeyi
   `zaten_vardi=True` ile döndürür: ikinci `arsiv_dosyasi`, ikinci fiziksel
   dosya, ikinci `belge` oluşmaz; ilk gelen dosyanın adı / uzantısı metadata
   olarak kalır. Sonuç ayrıca `dosya_zaten_vardi` (fiziksel dosya arşivde
   zaten vardı) bilgisini taşır. Bu **belge seviyesinde SHA-256 duplicate
   algılamasıdır**; işlem anahtarı (işlem seviyesi, madde 23) ve mükerrer
   nesne (nesne seviyesi) ayrı mekanizmalardır ve bu aşamada kurulmadı.
+  **Eşzamanlı aynı belge:** iki bağımsız işlem (ayrı süreç ya da iş
+  parçacığı, ayrı bağlantı) aynı SHA-256'yı aynı anda `belge_al` ile
+  verirse ikisi de "satır yok" görüp yazmaya kalkabilir. Veritabanı
+  benzersizliği son savunmadır: ikinci yazımı `IntegrityError` ya da SQLite
+  WAL anlık görüntü çakışması (`database is locked`; SQLite açık okuma
+  işlemi olan bağlantıyı yazmaya yükseltirken beklemez) durdurur. `belge_al`
+  bu iki hatayı yakalar, işlemi geri alır, kısa ve sınırlı bekler
+  (`YENIDEN_DENEME_BEKLEMELERI`: 20 ms, 100 ms, 500 ms) ve DB adımını yeni
+  işlemde en çok `BELGE_YAZMA_DENEMESI` (4) kez yeniden dener; yeni işlem
+  commit edilmiş satırı görür ve normal duplicate sonucu döner. Global kilit
+  yok, sonsuz retry yok; denemeler tükenirse `BelgeYazmaCakismasi`,
+  çakışma olmayan veritabanı hatası olduğu gibi yükselir. Sonuç her zaman
+  tek fiziksel dosya, tek `arsiv_dosyasi`, tek `belge`dir.
 * `okuma_baslat(oturum, belge_id, arsiv_dizini)` — önce arşiv dosyasının
   var, sıradan dosya, beklenen boyutta ve beklenen SHA-256'da olduğu
   doğrulanır (DB satırına kör güvenilmez; eksikse `ArsivDosyasiEksik`,
@@ -643,7 +662,12 @@ bile kısmi satır bırakmaz, dış işlem kullanılabilir kalır.
   durumdur (`basladi`, `tamamlandi`); TASLAK / BEKLIYOR / paket / kullanıcı
   kararı buraya girmez. İçerik domain bağımsızdır: çekirdek hesap numarası,
   tarih, tutar gibi alanları bilmez. `okuma_icerigi` JSON'u çözüp döndürür.
-* `kaynak_olustur(oturum, okuma_id, konum=None)` — `belge_id` okumadan
+* `kaynak_olustur(oturum, okuma_id, konum=None)` — yalnız `tamamlandi`
+  okumadan üretilir (karar 2026-09-19): kaynak "bu veri hangi okumanın
+  neresinden geldi?" sorusunun cevabıdır, içeriği henüz oluşmamış `basladi`
+  okuma kararlı kaynak olamaz; `basladi` okuma için `OkumaDurumuGecersiz`,
+  konumsuz kaynak da aynı kurala tabidir. Bu servis invariantıdır;
+  veritabanında tetikleyici yoktur. `belge_id` okumadan
   alınır, çağıran veremez (servis düzeyinde uyuşmazlık imkânsız; ham SQL'de
   bileşik dış anahtar reddeder). Konum isteğe bağlı, küçük, genel bir JSON
   nesnesidir (sayfa, satır, hücre, görsel bölge gibi yalnız yer bilgisi;
@@ -674,12 +698,14 @@ tamamlanır.
 
 **Hata modeli.** Dosya katmanı `arsiv.ArsivHatasi` altında:
 `GelenDosyaGecersiz` (yol kuralları, boş dosya), `DosyaOkunamadi`,
-`DosyaCokBuyuk`, `DosyaTuruUyusmuyor`, `ArsivYazilamadi`, `ArsivDosyasiEksik`,
-`ArsivButunlukHatasi`. Servis katmanı `belge_islemleri.BelgeHatasi` altında:
-`BelgeBulunamadi`, `OkumaBulunamadi`, `KaynakBulunamadi`,
-`OkumaDurumuGecersiz`, `OkumaIcerigiGecersiz`, `KaynakKonumuGecersiz`. Ham
-`OSError`, `IntegrityError` ve SQLite hata metni doğrulama yollarında
-sözleşme değildir. Mesajlarda belge içeriği ve tam yerel yol yoktur.
+`DosyaCokBuyuk`, `ArsivYazilamadi`, `ArsivDosyasiEksik`,
+`ArsivButunlukHatasi` (`DosyaTuruUyusmuyor` 2026-09-19 kararıyla kaldırıldı).
+Servis katmanı `belge_islemleri.BelgeHatasi` altında: `BelgeBulunamadi`,
+`OkumaBulunamadi`, `KaynakBulunamadi`, `OkumaDurumuGecersiz`,
+`OkumaIcerigiGecersiz`, `KaynakKonumuGecersiz`, `BelgeYazmaCakismasi`. Ham
+`OSError`, `IntegrityError`, `database is locked` ve SQLite hata metni
+doğrulama ve eşzamanlılık yollarında sözleşme değildir. Mesajlarda belge
+içeriği ve tam yerel yol yoktur.
 
 **Teknik log ≠ iş denetim izi.** Bu aşamanın modülleri hiçbir şeyi günlüğe
 yazmaz; belge baytları, okuma içeriği, kaynak konumu ve tam yerel dosya yolu
@@ -698,23 +724,34 @@ dokunulmaması, hata mesajının yol taşımaması. Arşiv: içerik adresli
 uzantısız yol, boş dosya, 50 MiB sabiti, tam sınırda kabul / bir bayt fazlası
 red (küçük sınırla ve gerçek 50 MiB ile), akış sırasında büyüyen dosya,
 parçalı okuma ve özet, PDF / PNG / JPEG imza algılama ve `octet-stream`
-fallback, imza / uzantı uyuşmazlığı (geçici dosya açılmaz), uzantı metadata
-kuralı, aynı baytlar farklı ad / dizin / uzantısız / bilinmeyen uzantı → tek
-fiziksel dosya, geçici yazma hatası ve taşıma hatasında artık kalmaması,
+fallback, imza / uzantı uyuşmazlığının red sebebi olmaması (MIME imzadan,
+uzantı metadata), uzantı metadata kuralı, aynı PDF / PNG / JPEG baytları
+doğru uzantı / yanlış uzantı / başka imzanın uzantısı / uzantısız / bilinmeyen
+uzantı → tek fiziksel dosya ve tek MIME, geçici yazma hatası ve taşıma
+hatasında artık kalmaması,
 Windows tarzı taşıma reddi, bozuk mevcut hedef (aynı ve farklı boyut)
 duplicate sayılmaz, sekiz iş parçacığı aynı içerik → tek geçerli dosya,
 yol hesabı ve bütünlük doğrulama, tarama sınıflaması. Belge: ilk dosya yeni
 belge, aynı SHA mevcut belge (ikinci satır / dosya yok, ilk metadata kalır),
 farklı içerik farklı belge, tam yerel yol DB'de yok, benzersizlik ve kontrol
-kısıtları ham SQL ile, dosyasız arşiv sonucuyla belge yazılmaz, yalnız arşiv
-satırı varken belge tamamlanır, servis hata atomikliği. Okuma: başlatma,
+kısıtları ham SQL ile, dosyasız arşiv sonucuyla belge yazılmaz, aynı boyutta
+bozuk dosyayla `belge_tanimla` `ArsivButunlukHatasi` verir ve hiçbir satır
+oluşmaz (dış işlem kullanılabilir kalır), yalnız arşiv satırı varken belge
+tamamlanır, servis hata atomikliği, aynı PDF baytları beş adla tek belge,
+eşzamanlı aynı belge (iki iş parçacığı, ayrı bağlantı, bariyerle zorlanan
+yarış) tek dosya / tek satır / tek belgeye uzlaşır ve biri yeni diğeri
+mevcut belgedir, her denemede çakışma üretilince sınırlı denemeden sonra
+`BelgeYazmaCakismasi` ve her deneme geri alınmış olur, çakışma olmayan DB
+hatası yeniden denenmez. Okuma: başlatma,
 çoklu sürüm, tamamlama ve kanonik JSON, tamamlananın değiştirilememesi, yeni
 sürüm, geçersiz içerik (liste / metin / `NaN` / sonsuz / `Decimal` / `bytes` /
 küme / karışık anahtar), aşırı içerik, arşiv eksik / bozukken başlamama,
 yazma hatasında yarım satır kalmaması, kısıtlar ham SQL ile. Kaynak: zincir,
 konumsuz kaynak, genel JSON konum, geçersiz / aşırı konum, başka belgeyle
 kaynak yazılamaması (bileşik dış anahtar ham SQL ile), deterministik geri
-gidiş, hata atomikliği. Dosya/DB hata senaryoları (sentetik enjeksiyon):
+gidiş, hata atomikliği, `basladi` okumadan kaynak (konumlu ve konumsuz)
+reddedilir ve satır kalmaz, tamamlandıktan sonra aynı konumla üretilir, red
+dış işlemi bozmaz. Dosya/DB hata senaryoları (sentetik enjeksiyon):
 kaynak okunurken hata, geçici dosya yazılırken hata, atomik taşıma hatası
 (DB'de hiçbir şey yok, artık yok); arşiv başarılı + DB hatası (dosya kalır,
 belge kaydı yok, uzlaştırma sahipsiz sayar) ve aynı dosyanın yeniden
@@ -729,9 +766,10 @@ TASLAK ve BEKLIYOR durumları, kullanıcı onayı, şüphe, mükerrer nesne
 protokolü, kesin kaydetme, geri alma, projection, kural motoru, finans tanım
 paketi ve belge türleri, tutar / bakiye / mutabakat, kayıt-kaynak bağı, genel
 işlem anahtarı sistemi, iş denetim izi, MCP belge araçları (`belge_al` aracı
-Aşama 4.11), GUI; okuma için "vazgeçildi" gibi ek durum (yalnız iki teknik
-durum var); kaynağın okumanın hangi durumunda üretilebileceğine dair kısıt
-(karar verilmedi, açık bırakıldı); tamamlanan okuma ve kaynak satırı için
+Aşama 4.11), GUI; okuma için "vazgeçildi" / "iptal" / "hata" gibi ek durum
+(yaşam döngüsü yalnız `basladi → tamamlandi`; yarım kalmış `basladi` okuma
+bu aşamada veri bütünlüğü kusuru değildir, gerekirse sonraki aşamalarda ele
+alınır); tamamlanan okuma ve kaynak satırı için
 veritabanı düzeyi değişmezlik (yalnız uygulama düzeyi; SQLite'ta
 tetikleyicisiz ifade edilemez); sahipsiz / yarım / bozuk dosyaların otomatik
 temizliği ya da onarımı.

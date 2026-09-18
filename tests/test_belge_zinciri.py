@@ -16,7 +16,9 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -124,6 +126,13 @@ def _okuma(o: Ortam, belge_id: int) -> int:
 def _tamamla(o: Ortam, okuma_id: int, icerik: dict[str, Any] | None = None) -> None:
     with o.veritabani.islem() as oturum:
         bi.okuma_tamamla(oturum, okuma_id, ICERIK if icerik is None else icerik)
+
+
+def _tamam_okuma(o: Ortam, belge_id: int) -> int:
+    """Başlatılıp tamamlanmış okuma (kaynak yalnız tamamlanmış okumadan)."""
+    okuma_id = _okuma(o, belge_id)
+    _tamamla(o, okuma_id)
+    return okuma_id
 
 
 def _ham_arsiv_dosyasi(
@@ -604,7 +613,7 @@ def test_olmayan_okuma_bulunamaz(ortam: Ortam) -> None:
 
 def test_kaynak_belge_okuma_ve_konum_zincirini_tasir(ortam: Ortam) -> None:
     sonuc = _belge_al(ortam, "a.pdf")
-    okuma_id = _okuma(ortam, sonuc.belge.id)
+    okuma_id = _tamam_okuma(ortam, sonuc.belge.id)
 
     with ortam.veritabani.islem() as oturum:
         kaynak = bi.kaynak_olustur(oturum, okuma_id, KONUM)
@@ -623,7 +632,7 @@ def test_kaynak_belge_okuma_ve_konum_zincirini_tasir(ortam: Ortam) -> None:
 
 
 def test_konumsuz_kaynak_desteklenir(ortam: Ortam) -> None:
-    okuma_id = _okuma(ortam, _belge_al(ortam, "a.pdf").belge.id)
+    okuma_id = _tamam_okuma(ortam, _belge_al(ortam, "a.pdf").belge.id)
     with ortam.veritabani.islem() as oturum:
         kaynak = bi.kaynak_olustur(oturum, okuma_id)
     assert kaynak.konum is None
@@ -632,7 +641,7 @@ def test_konumsuz_kaynak_desteklenir(ortam: Ortam) -> None:
 
 
 def test_genel_json_konum_saklanir(ortam: Ortam) -> None:
-    okuma_id = _okuma(ortam, _belge_al(ortam, "a.png", PNG).belge.id)
+    okuma_id = _tamam_okuma(ortam, _belge_al(ortam, "a.png", PNG).belge.id)
     konum: dict[str, Any] = {
         "sayfa": 2,
         "bolge": {"x": 10.5, "y": 20, "w": 100, "h": 12},
@@ -650,7 +659,7 @@ def test_genel_json_konum_saklanir(ortam: Ortam) -> None:
     [["sayfa", 1], "sayfa 1", 3, {"x": float("nan")}, {"x": Decimal(1)}, {"x": b""}],
 )
 def test_gecersiz_konum_reddedilir(ortam: Ortam, konum: object) -> None:
-    okuma_id = _okuma(ortam, _belge_al(ortam, "a.pdf").belge.id)
+    okuma_id = _tamam_okuma(ortam, _belge_al(ortam, "a.pdf").belge.id)
     with pytest.raises(bi.KaynakKonumuGecersiz):
         with ortam.veritabani.islem() as oturum:
             bi.kaynak_olustur(oturum, okuma_id, konum)  # type: ignore[arg-type]
@@ -658,7 +667,7 @@ def test_gecersiz_konum_reddedilir(ortam: Ortam, konum: object) -> None:
 
 
 def test_boyut_asan_konum_reddedilir(ortam: Ortam) -> None:
-    okuma_id = _okuma(ortam, _belge_al(ortam, "a.pdf").belge.id)
+    okuma_id = _tamam_okuma(ortam, _belge_al(ortam, "a.pdf").belge.id)
     buyuk = {"metin": "x" * (bi.AZAMI_KAYNAK_KONUMU_BOYUTU + 1)}
     with pytest.raises(bi.KaynakKonumuGecersiz, match="sınırını aşıyor") as hata:
         with ortam.veritabani.islem() as oturum:
@@ -671,7 +680,7 @@ def test_okumanin_ait_olmadigi_belgeyle_kaynak_yazilamaz(ortam: Ortam) -> None:
     """Servis ``belge_id`` almaz; ham SQL'de bileşik dış anahtar reddeder."""
     a = _belge_al(ortam, "a.pdf", PDF).belge.id
     b = _belge_al(ortam, "b.txt", METIN).belge.id
-    okuma_a = _okuma(ortam, a)
+    okuma_a = _tamam_okuma(ortam, a)
     ekle = text(
         "INSERT INTO kaynak (belge_id, okuma_id, konum, olusturma_zamani) "
         "VALUES (:b, :o, :k, '2026-09-19 00:00:00')"
@@ -696,7 +705,7 @@ def test_kaynak_uzerinden_deterministik_geri_gidilir(ortam: Ortam) -> None:
     kaynaklar: list[tuple[int, int, int]] = []
     for sonuc in belgeler:
         for _ in range(2):
-            okuma_id = _okuma(ortam, sonuc.belge.id)
+            okuma_id = _tamam_okuma(ortam, sonuc.belge.id)
             with ortam.veritabani.islem() as oturum:
                 k = bi.kaynak_olustur(oturum, okuma_id, {"okuma": okuma_id})
             kaynaklar.append((k.id, okuma_id, sonuc.belge.id))
@@ -714,7 +723,7 @@ def test_kaynak_uzerinden_deterministik_geri_gidilir(ortam: Ortam) -> None:
 
 
 def test_kaynak_hata_atomikligi(ortam: Ortam, monkeypatch: pytest.MonkeyPatch) -> None:
-    okuma_id = _okuma(ortam, _belge_al(ortam, "a.pdf").belge.id)
+    okuma_id = _tamam_okuma(ortam, _belge_al(ortam, "a.pdf").belge.id)
 
     def patla() -> Any:
         raise RuntimeError("sentetik")
@@ -903,3 +912,201 @@ def test_uzlastirma_temiz_arsiv(ortam: Ortam) -> None:
     assert rapor.temiz == tuple(d.arsiv_dosyasi.id for d in dosyalar)
     with ortam.veritabani.islem() as oturum:
         assert bi.arsivi_uzlastir(oturum, ortam.kok / "olmayan").eksik == rapor.temiz
+
+
+# --- inceleme düzeltmeleri (2026-09-19) -----------------------------------------------
+
+
+def _arsivlenen(ortam: Ortam, ad: str, icerik: bytes) -> arsiv.ArsivlenenDosya:
+    return arsiv.dosyayi_arsivle(
+        _yaz(ortam.gelen / ad, icerik),
+        gelen_dizini=ortam.gelen,
+        arsiv_dizini=ortam.arsiv,
+    )
+
+
+def test_belge_tanimla_ayni_boyutta_bozuk_dosyayi_baglamaz(ortam: Ortam) -> None:
+    """DB yazılmadan önce SHA-256 de doğrulanır: aynı boyutta bozuk fiziksel dosya
+    belgeye bağlanamaz; hiçbir satır oluşmaz."""
+    arsivlenen = _arsivlenen(ortam, "a.pdf", PDF)
+    hedef = ortam.arsiv / arsivlenen.goreli_yol
+    hedef.write_bytes(PDF[:-1] + b"X")  # aynı boyut, farklı içerik
+
+    with pytest.raises(arsiv.ArsivButunlukHatasi, match="özeti"):
+        with ortam.veritabani.islem() as oturum:
+            bi.belge_tanimla(oturum, arsivlenen, ortam.arsiv)
+
+    assert _sayilar(ortam) == (0, 0, 0, 0)
+    assert hedef.read_bytes() == PDF[:-1] + b"X"  # sessiz onarım yok
+
+
+def test_belge_tanimla_bozuk_dosya_hatasi_dis_islemi_bozmaz(ortam: Ortam) -> None:
+    bozuk = _arsivlenen(ortam, "a.pdf", PDF)
+    (ortam.arsiv / bozuk.goreli_yol).write_bytes(PDF[:-1] + b"X")
+    saglam = _arsivlenen(ortam, "b.txt", METIN)
+
+    with ortam.veritabani.islem() as oturum:
+        with pytest.raises(arsiv.ArsivButunlukHatasi):
+            bi.belge_tanimla(oturum, bozuk, ortam.arsiv)
+        assert (
+            oturum.execute(text("SELECT count(*) FROM arsiv_dosyasi")).scalar_one() == 0
+        )
+        sonuc = bi.belge_tanimla(oturum, saglam, ortam.arsiv)
+
+    assert _sayilar(ortam) == (1, 1, 0, 0)
+    with ortam.veritabani.islem() as oturum:
+        assert bi.arsiv_dosyasi_getir(oturum, sonuc.arsiv_dosyasi.id).sha256 == _sha(
+            METIN
+        )
+
+
+def test_uzanti_uyusmazligi_belge_almaya_engel_degil(ortam: Ortam) -> None:
+    """Aynı PDF baytları beş farklı adla: tek fiziksel dosya, tek arşiv satırı,
+    tek belge, MIME imzadan; ilk gelişin uzantısı metadata olarak kalır."""
+    adlar = ("a.pdf", "a.bin", "a.png", "a", "herhangi.xyz")
+    sonuclar = [_belge_al(ortam, ad, PDF) for ad in adlar]
+
+    assert [s.zaten_vardi for s in sonuclar] == [False, True, True, True, True]
+    assert {s.belge.id for s in sonuclar} == {sonuclar[0].belge.id}
+    assert sonuclar[0].arsiv_dosyasi.mime == "application/pdf"
+    assert sonuclar[0].arsiv_dosyasi.kaynak_uzantisi == ".pdf"
+    assert _sayilar(ortam) == (1, 1, 0, 0)
+    assert _dosyalar(ortam.arsiv) == {_yol(PDF)}
+    imzasiz = _belge_al(ortam, "imzasiz.pdf", METIN)  # .pdf adlı imzasız dosya
+    assert imzasiz.arsiv_dosyasi.mime == arsiv.VARSAYILAN_MIME
+    assert imzasiz.arsiv_dosyasi.kaynak_uzantisi == ".pdf"
+
+
+def test_basladi_okumadan_kaynak_uretilemez(ortam: Ortam) -> None:
+    belge_id = _belge_al(ortam, "a.pdf").belge.id
+    okuma_id = _okuma(ortam, belge_id)
+
+    for konum in (KONUM, None):
+        with pytest.raises(bi.OkumaDurumuGecersiz, match="tamamlandi okumadan"):
+            with ortam.veritabani.islem() as oturum:
+                bi.kaynak_olustur(oturum, okuma_id, konum)
+    assert _sayi(ortam, "kaynak") == 0
+
+    _tamamla(ortam, okuma_id)
+    with ortam.veritabani.islem() as oturum:
+        kaynak = bi.kaynak_olustur(oturum, okuma_id, KONUM)
+        konumsuz = bi.kaynak_olustur(oturum, okuma_id)
+    with ortam.veritabani.islem() as oturum:
+        assert bi.kaynak_konumu(oturum, kaynak.id) == KONUM
+        assert bi.kaynak_konumu(oturum, konumsuz.id) is None
+        assert [k.id for k in bi.kaynaklari_listele(oturum, okuma_id)] == [
+            kaynak.id,
+            konumsuz.id,
+        ]
+
+
+def test_basladi_okuma_kaynak_reddi_dis_islemi_bozmaz(ortam: Ortam) -> None:
+    belge_id = _belge_al(ortam, "a.pdf").belge.id
+    basladi = _okuma(ortam, belge_id)
+    tamam = _tamam_okuma(ortam, belge_id)
+
+    with ortam.veritabani.islem() as oturum:
+        with pytest.raises(bi.OkumaDurumuGecersiz):
+            bi.kaynak_olustur(oturum, basladi, KONUM)
+        kaynak = bi.kaynak_olustur(oturum, tamam, KONUM)  # aynı işlemde geçerli iş
+
+    assert _sayi(ortam, "kaynak") == 1
+    with ortam.veritabani.islem() as oturum:
+        assert bi.kaynak_zinciri(oturum, kaynak.id).okuma.id == tamam
+
+
+def test_eszamanli_ayni_belge_tek_belgeye_uzlasir(
+    ortam: Ortam, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """İki bağımsız işlem (ayrı iş parçacığı, ayrı bağlantı) aynı SHA-256'yı aynı
+    anda ``belge_al`` ile verir. Yarış zorlanır: ikisi de "satır yok" görüp
+    yazmaya kalkar (bariyer). Sonuç tek dosya, tek arşiv satırı, tek belge;
+    biri yeni, diğeri mevcut belge; ham ``IntegrityError`` / ``database is
+    locked`` dışarı çıkmaz."""
+    kaynaklar = [_yaz(ortam.gelen / f"k{i}.pdf", PDF) for i in range(2)]
+    bariyer = threading.Barrier(2, timeout=10)
+    gercek_yaz = bi._arsiv_dosyasi_yaz  # pyright: ignore[reportPrivateUsage]
+    bariyerden_gecenler: set[int] = set()
+    kilit = threading.Lock()
+
+    def bekleyip_yaz(oturum: Session, a: arsiv.ArsivlenenDosya) -> bt.ArsivDosyasi:
+        with kilit:
+            ilk = threading.get_ident() not in bariyerden_gecenler
+            bariyerden_gecenler.add(threading.get_ident())
+        if ilk:
+            bariyer.wait()  # ikisi de SELECT'i geçti, ikisi de satır görmedi
+        return gercek_yaz(oturum, a)  # yeniden denemede bariyer yok
+
+    monkeypatch.setattr(bi, "_arsiv_dosyasi_yaz", bekleyip_yaz)
+
+    def isle(yol: Path) -> bi.BelgeSonucu:
+        v = vt.Veritabani(ortam.veritabani.yol)  # bağımsız bağlantı
+        try:
+            return bi.belge_al(
+                v, yol, gelen_dizini=ortam.gelen, arsiv_dizini=ortam.arsiv
+            )
+        finally:
+            v.kapat()
+
+    with ThreadPoolExecutor(max_workers=2) as havuz:
+        sonuclar = list(havuz.map(isle, kaynaklar))
+
+    assert sorted(s.zaten_vardi for s in sonuclar) == [False, True]
+    assert {s.belge.id for s in sonuclar} == {sonuclar[0].belge.id}
+    assert {s.arsiv_dosyasi.sha256 for s in sonuclar} == {_sha(PDF)}
+    assert _sayilar(ortam) == (1, 1, 0, 0)
+    assert _dosyalar(ortam.arsiv) == {_yol(PDF)}
+    with ortam.veritabani.islem() as oturum:
+        assert bi.arsivi_uzlastir(oturum, ortam.arsiv).temiz_mi
+
+
+def test_cakisma_denemeleri_tukenince_acik_hata(
+    ortam: Ortam, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Her denemede benzersizlik ihlali üretilirse sınırlı denemeden sonra
+    ``BelgeYazmaCakismasi``; ham IntegrityError sızmaz; sonsuz döngü yok."""
+    sayac = {"n": 0}
+
+    def hep_cakis(oturum: Session, a: arsiv.ArsivlenenDosya) -> bt.ArsivDosyasi:
+        sayac["n"] += 1
+        oturum.execute(
+            text(
+                "INSERT INTO arsiv_dosyasi (sha256, boyut, mime, kaynak_uzantisi, "
+                "kaynak_adi, goreli_yol, olusturma_zamani) VALUES (:s, 1, 'x', '', "
+                "'a', :y, '2026-09-19 00:00:00')"
+            ),
+            {"s": "b" * 64, "y": "bb/" + "b" * 64},
+        )
+        oturum.execute(  # aynı satır ikinci kez → UNIQUE
+            text(
+                "INSERT INTO arsiv_dosyasi (sha256, boyut, mime, kaynak_uzantisi, "
+                "kaynak_adi, goreli_yol, olusturma_zamani) VALUES (:s, 1, 'x', '', "
+                "'a', :y, '2026-09-19 00:00:00')"
+            ),
+            {"s": "b" * 64, "y": "bb/" + "b" * 64},
+        )
+        raise AssertionError("erişilmez")
+
+    monkeypatch.setattr(bi, "_arsiv_dosyasi_yaz", hep_cakis)
+    with pytest.raises(bi.BelgeYazmaCakismasi, match="uzlaştırılamadı"):
+        _belge_al(ortam, "a.pdf")
+
+    assert sayac["n"] == bi.BELGE_YAZMA_DENEMESI
+    assert _sayilar(ortam) == (0, 0, 0, 0)  # her deneme geri alındı
+    assert _dosyalar(ortam.arsiv) == {_yol(PDF)}  # dosya arşivde kaldı
+
+
+def test_cakisma_olmayan_veritabani_hatasi_yeniden_denenmez(
+    ortam: Ortam, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sayac = {"n": 0}
+
+    def baska_hata(oturum: Session, a: arsiv.ArsivlenenDosya) -> bt.ArsivDosyasi:
+        sayac["n"] += 1
+        oturum.execute(text("INSERT INTO olmayan_tablo VALUES (1)"))
+        raise AssertionError("erişilmez")
+
+    monkeypatch.setattr(bi, "_arsiv_dosyasi_yaz", baska_hata)
+    with pytest.raises(OperationalError):
+        _belge_al(ortam, "a.pdf")
+    assert sayac["n"] == 1
