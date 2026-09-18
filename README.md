@@ -8,9 +8,12 @@ DEFTERIKI'ye yazılır; uygulama kayıtları tutar, denetler ve gösterir.
 Aşama 2 (proje temeli) ve Aşama 3 (gerçek Cowork MCP denemesi) tamamlandı;
 Aşama 3'ün dört teslimi ve ölçümleri "Cowork entegrasyonu" bölümünde, geçici
 deneme araçları kaldırıldı. Aşama 4.0 (2026-09-18): çekirdek / finans mimari
-sınırı kuruldu ve testle korunuyor ("Mimari sınır" bölümü); bu hat
-(`yeniden-insa`) Aşama 3 kapısından yeniden başlar, önceki Aşama 4-6 hattı
-`main` üzerinde yedek olarak durur. Aşama 4.1 sırada. Bitenler:
+sınırı kuruldu ve testle korunuyor ("Mimari sınır" bölümü). Bu hat
+(`yeniden-insa`, depo [alatifkose/Defter3](https://github.com/alatifkose/Defter3))
+Aşama 3 kapısından yeniden başlar; önceki Aşama 4-6 geliştirme hattı
+[alatifkose/DefterIki](https://github.com/alatifkose/DefterIki) deposunun
+`main` dalında yedek olarak durur, oraya yazılmaz. Aşama 4.1 (veritabanı)
+henüz başlamadı. Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
 * Merkezi ayar yönetimi (`src/defteriki/ayarlar.py`)
@@ -26,6 +29,11 @@ sınırı kuruldu ve testle korunuyor ("Mimari sınır" bölümü); bu hat
 * Mimari sınır: `src/defteriki/cekirdek/` ve `src/defteriki/finans/`
   paketleri (henüz boş) ve bağımlılık yönünü koruyan AST testi
   (`tests/test_mimari_sinir.py`)
+* İnceleme düzeltmeleri (2026-09-18): SDK günlüğü gizlilik kuralına bağlandı
+  ("Teknik hata günlüğü"), mimari sınır denetimi genişletildi, başlangıç
+  testleri gelen dizini değişkenini temizler, test ortamı yol sınırı fiziksel
+  karşılığa bakar ("Ayarlar"), Defter3 yerel verisi eski hattan ayrıldı
+  ("Defter3 yerel kurulumu")
 
 Henüz yok: veritabanı, veri modeli, GUI, ürün verisi yazan MCP aracı.
 
@@ -270,6 +278,29 @@ Kurallar:
   kaçış, simgesel bağlantıyla kaçış (Windows'ta yetki yoksa atlanır), junction
   ile kaçış (yalnız Windows), kök içini gösteren bağlantı.
 * Tekil yol değişkenleri diğer ortamlarda ortam ayrımını geçersiz kılabilir.
+
+### Defter3 yerel kurulumu (2026-09-18)
+
+Bu hattın yerel verisi eski hattan ayrıdır. Claude masaüstü
+`claude_desktop_config.json` içindeki `mcpServers.defteriki` girdisi bu
+depoyu (`uv run --directory C:\dev\DefterIki defteriki-mcp`) şu ortam
+değişkenleriyle çalıştırır:
+
+| Değişken | Değer |
+|---|---|
+| `DEFTERIKI_VERI_KOKU` | `C:\dev\Defter3-veri` |
+| `DEFTERIKI_GELEN_DIZINI` | `C:\dev\Defter3-gelen` |
+
+Türetilen yollar: `C:\dev\Defter3-veri\gelistirme\defteriki.sqlite3`,
+`...\belgeler`, `...\logs`; gelen dizini `C:\dev\Defter3-gelen`. Eski hattın
+kökü `C:\dev\DefterIki-veri` (şema 0002 veritabanı, arşiv, günlükler) ve gelen
+dizini `C:\dev\DefterIki-gelen` olduğu gibi durur; taşınmaz, kopyalanmaz,
+silinmez. Bu dosya Git'e girmez; kurulum yalnız bu makinede geçerlidir. Paket
+ve komut adları (`defteriki`, `defteriki-mcp`) değişmedi; ayrım yalnız veri
+kökündedir. Dikkat: kullanıcı düzeyinde `setx` ile tanımlı
+`DEFTERIKI_VERI_KOKU` hâlâ eski kökü gösteriyorsa, terminalden doğrudan
+`uv run defteriki` eski kökü kullanır; MCP girdisindeki `env` bunu yalnız
+Cowork'un başlattığı sunucu için geçersiz kılar.
 
 ## Dizin düzeni
 
