@@ -7,7 +7,10 @@ DEFTERIKI'ye yazılır; uygulama kayıtları tutar, denetler ve gösterir.
 
 Aşama 2 (proje temeli) ve Aşama 3 (gerçek Cowork MCP denemesi) tamamlandı;
 Aşama 3'ün dört teslimi ve ölçümleri "Cowork entegrasyonu" bölümünde, geçici
-deneme araçları kaldırıldı. Aşama 4 sırada. Bitenler:
+deneme araçları kaldırıldı. Aşama 4.0 (2026-09-18): çekirdek / finans mimari
+sınırı kuruldu ve testle korunuyor ("Mimari sınır" bölümü); bu hat
+(`yeniden-insa`) Aşama 3 kapısından yeniden başlar, önceki Aşama 4-6 hattı
+`main` üzerinde yedek olarak durur. Aşama 4.1 sırada. Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
 * Merkezi ayar yönetimi (`src/defteriki/ayarlar.py`)
@@ -20,8 +23,46 @@ deneme araçları kaldırıldı. Aşama 4 sırada. Bitenler:
 * MCP kapısı iskeleti: `uv run defteriki-mcp`, tek araç `sistem_durumu`
   (`src/defteriki/mcp_kapisi.py`); Cowork ile bağlantı, dosya erişimi ve
   çok adımlı protokol gerçek istemciyle ölçüldü
+* Mimari sınır: `src/defteriki/cekirdek/` ve `src/defteriki/finans/`
+  paketleri (henüz boş) ve bağımlılık yönünü koruyan AST testi
+  (`tests/test_mimari_sinir.py`)
 
 Henüz yok: veritabanı, veri modeli, GUI, ürün verisi yazan MCP aracı.
+
+## Mimari sınır: çekirdek ve finans
+
+Karar (2026-09-18, Abdüllatif). Önceki geliştirme hattında genel mekanik ile
+finansal domain birbirine karıştı: para birimi, kuruş, eksen (VARLIK / BORC /
+GIDER), yön (ARTTIR / AZALT), HESAP_HAREKETI, bakiye ve ekstre mutabakatı
+ortak katmana girdi. Yeniden inşada finans bilgisi yok edilmez; yeri
+belirlenir.
+
+* DEFTERIKI iki kavramsal katmana ayrılır: genel **çekirdek**
+  (`defteriki.cekirdek`) ve finansal **domain** (`defteriki.finans`).
+* `finans → çekirdek` bağımlılığına izin vardır: finans çekirdeği kullanabilir.
+* `çekirdek → finans` bağımlılığı yasaktır: çekirdek `defteriki.finans`
+  paketini ve alt modüllerini hiçbir import biçimiyle kullanamaz.
+* Çekirdek finansal anlam taşımaz: finansal tip, enum, iş kuralı çekirdekte
+  bulunmaz.
+* Finansal kavramlar finans paketinin sorumluluğudur.
+* İsim değiştirmek domain bağımsızlığı sayılmaz; aynı finansal varsayım başka
+  adla da çekirdeğe taşınamaz.
+* Bu sınır otomatik testle korunur.
+
+Test (`tests/test_mimari_sinir.py`) `src/defteriki/cekirdek/**/*.py`
+dosyalarını Python AST ile okur ve `defteriki.finans` bağımlılığı bulursa
+dosya ve satırla düşer: `import defteriki.finans[.x]`, `from
+defteriki.finans[.x] import y`, göreli import (`from .. import finans`,
+`from ..finans import x`), `importlib.import_module` ve `__import__` metin
+hedefleri. Test kelime aramaz; `TRY`, `TL` gibi sözcükler denetim konusu
+değildir, korunan şey bağımlılık yönüdür. Denetleyicinin her yasak biçimi
+yakaladığı ve izinli biçimlere dokunmadığı sentetik ağaçta ayrıca sınanır;
+çekirdek boşken yeşil kalması tek başına kanıt sayılmaz. Semantik sızıntı
+(finansal varsayımın adsız biçimde çekirdeğe girmesi) sonraki aşamalarda ayrı
+denetlenir.
+
+Bu aşamada iki paket de boştur (`__init__.py` yalnız docstring taşır);
+mevcut modüller taşınmamış, yeni model ya da soyutlama yazılmamıştır.
 
 ## Kurulum
 
@@ -200,7 +241,9 @@ src/defteriki/    uygulama paketi
   baslangic.py    uv run defteriki giriş noktası; ortak hazırlık (ortami_hazirla)
   gunluk.py       teknik hata günlüğü
   mcp_kapisi.py   uv run defteriki-mcp; MCP sunucusu ve araçları
-tests/            pytest testleri
+  cekirdek/       genel çekirdek; finansı tanımaz (henüz boş)
+  finans/         finansal domain; çekirdeği kullanabilir (henüz boş)
+tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı)
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
 kavramlar_sozlugu.md   ortak kavram tanımları; ekleme ve değişiklik yalnız Abdüllatif'in onayıyla
