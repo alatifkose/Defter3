@@ -139,8 +139,8 @@ hedefler; eski dosya bu zincirde olmayan `0002` sürümünü taşıdığından A
 öncesi `DEFTERIKI_VERI_KOKU=C:\dev\Defter3-veri` açıkça verilmelidir. Defter3
 verisi için ilk göç 2026-09-18'de bu şekilde uygulandı:
 `C:\dev\Defter3-veri\gelistirme\defteriki.sqlite3`, sürüm `0001`; göç `0002` aynı
-gün aynı komutla uygulandı, dosya `0002` sürümünde. Göç `0003` bu dosyaya
-henüz uygulanmadı; aynı komutla uygulanır.
+gün aynı komutla uygulandı, göç `0003` de aynı gün
+aynı komutla uygulandı, dosya `0003` sürümünde.
 
 **Testler** (`tests/test_cekirdek_veritabani.py`, `tests/test_gocler.py`):
 gerçek SQLite dosyalarıyla, `test` ortamı ve `tmp_path` altında kök;
