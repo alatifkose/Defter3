@@ -9,7 +9,7 @@ sınırında yükselir; işlem bağlamı rollback ile her şeyi geri alır.
 Hata modeli (hepsi ``TanimHatasi`` altında; domain bağımsız):
 
 * ``GecersizTanim`` — kod ``KOD_BICIMI``'ne uymuyor, gösterim adı boş, sürüm
-  numarası pozitif değil.
+  numarası pozitif tam sayı değil (``bool``, ``float``, metin de reddedilir).
 * ``TanimBulunamadi`` — verilen paket, sürüm, nesne türü ya da kayıt türü
   kimliği yok. Olmayan üst kayda bağlanmak sessizce geçmez; listeleme de
   olmayan üst kayıt için boş liste yerine bu hatayı verir.
@@ -91,6 +91,19 @@ def _gosterim_adini_dogrula(gosterim_adi: str, ne: str) -> str:
     return gosterim_adi
 
 
+def _surum_noyu_dogrula(surum_no: object) -> int:
+    """Yalnız gerçek pozitif ``int``: tip ipucu çalışma zamanında denetlemez;
+    ``1.5``, ``"1"`` ve ``True`` sürüm numarası değildir (``bool`` ``int``
+    alt sınıfı olduğundan ayrıca dışlanır)."""
+    if type(surum_no) is not int:
+        raise GecersizTanim(
+            f"sürüm numarası tam sayı olmalı: {surum_no!r} ({type(surum_no).__name__})"
+        )
+    if surum_no <= 0:
+        raise GecersizTanim(f"sürüm numarası pozitif olmalı: {surum_no}")
+    return surum_no
+
+
 def _mukerrer_denetle(oturum: Session, sorgu: Select[tuple[int]], mesaj: str) -> None:
     if oturum.execute(sorgu).first() is not None:
         raise MukerrerTanim(mesaj)
@@ -155,9 +168,9 @@ def surum_tanimla(
     surum_no: int,
     aciklama: str | None = None,
 ) -> TanimSurumu:
-    """Paketin yeni sürümü; ``surum_no`` pozitif ve paket içinde benzersiz."""
-    if surum_no <= 0:
-        raise GecersizTanim(f"sürüm numarası pozitif olmalı: {surum_no}")
+    """Paketin yeni sürümü; ``surum_no`` pozitif tam sayı (``int``; ``bool``,
+    ``float`` ve metin reddedilir) ve paket içinde benzersiz."""
+    _surum_noyu_dogrula(surum_no)
     paket = _paket_getir(oturum, tanim_paketi_id)
     _mukerrer_denetle(
         oturum,

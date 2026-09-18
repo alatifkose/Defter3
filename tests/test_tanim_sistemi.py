@@ -12,6 +12,7 @@ veritabanı kısıtları (ham SQL ile aynı ihlal ``IntegrityError`` verir).
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import text
@@ -210,16 +211,41 @@ def test_farkli_paketler_ayni_surum_noyu_kullanabilir(
     assert _sayi(veritabani, tt.TANIM_SURUMU) == 2
 
 
-@pytest.mark.parametrize("surum_no", [0, -1])
-def test_pozitif_olmayan_surum_no_reddedilir(
-    veritabani: vt.Veritabani, surum_no: int
+SURUM_NO_SOZLESMESI: tuple[tuple[Any, str | None], ...] = (
+    (1, None),
+    (7, None),
+    (0, "pozitif olmalı"),
+    (-1, "pozitif olmalı"),
+    (1.5, "tam sayı olmalı"),
+    (1.0, "tam sayı olmalı"),  # float, değeri tam olsa da
+    (True, "tam sayı olmalı"),  # bool int alt sınıfı; sürüm numarası değil
+    (False, "tam sayı olmalı"),
+    ("1", "tam sayı olmalı"),
+    ("abc", "tam sayı olmalı"),
+)
+"""``surum_tanimla`` sözleşmesi: (değer, beklenen hata parçası ya da kabul)."""
+
+
+@pytest.mark.parametrize(("deger", "hata"), SURUM_NO_SOZLESMESI)
+def test_surum_no_yalniz_pozitif_tam_sayi(
+    veritabani: vt.Veritabani, deger: Any, hata: str | None
 ) -> None:
+    """Tip ipucu çalışma zamanında denetlemez; sözleşme burada sabitlenir.
+    Reddedilen değerler ham ``TypeError`` değil ``GecersizTanim`` verir."""
     with veritabani.islem() as oturum:
         paket = ti.paket_tanimla(oturum, "DEMO", "Demo")
 
-    with pytest.raises(ti.GecersizTanim, match="pozitif"):
+    if hata is None:
         with veritabani.islem() as oturum:
-            ti.surum_tanimla(oturum, paket.id, surum_no)
+            surum = ti.surum_tanimla(oturum, paket.id, deger)
+        assert type(surum.surum_no) is int and surum.surum_no == deger
+        assert _sayi(veritabani, tt.TANIM_SURUMU) == 1
+        return
+
+    with pytest.raises(ti.GecersizTanim, match=hata):
+        with veritabani.islem() as oturum:
+            ti.surum_tanimla(oturum, paket.id, deger)
+    assert _sayi(veritabani, tt.TANIM_SURUMU) == 0
 
 
 def test_surum_kisitlari_veritabaninda_da_calisir(veritabani: vt.Veritabani) -> None:
@@ -234,6 +260,16 @@ def test_surum_kisitlari_veritabaninda_da_calisir(veritabani: vt.Veritabani) -> 
     with pytest.raises(IntegrityError, match="CHECK constraint failed"):
         with veritabani.islem() as oturum:
             oturum.execute(text(ekle), {"paket": paket.id, "no": 0})
+    with pytest.raises(
+        IntegrityError, match="ck_tanim_surumu_surum_no_pozitif_tamsayi"
+    ):
+        with veritabani.islem() as oturum:
+            oturum.execute(text(ekle), {"paket": paket.id, "no": 1.5})  # REAL
+    with pytest.raises(
+        IntegrityError, match="ck_tanim_surumu_surum_no_pozitif_tamsayi"
+    ):
+        with veritabani.islem() as oturum:
+            oturum.execute(text(ekle), {"paket": paket.id, "no": "abc"})  # TEXT
     with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
         with veritabani.islem() as oturum:
             oturum.execute(text(ekle), {"paket": paket.id, "no": 1})
@@ -242,6 +278,34 @@ def test_surum_kisitlari_veritabaninda_da_calisir(veritabani: vt.Veritabani) -> 
             oturum.execute(text(ekle), {"paket": paket.id + 100, "no": 2})
 
     assert _sayi(veritabani, tt.TANIM_SURUMU) == 1
+
+
+def test_surum_no_veritabaninda_integer_depolama_sinifiyla_saklanir(
+    veritabani: vt.Veritabani,
+) -> None:
+    """SQLite INTEGER sütunu katı değildir; kontrol kısıtı depolama sınıfını
+    zorlar. Kayıpsız dönüşen değerler (``2.0``, ``'3'``) SQLite tür yakınlığıyla
+    kısıttan önce tam sayıya çevrilir ve tam sayı olarak saklanır; bu SQLite
+    davranışıdır, uygulama katmanı bu türleri zaten reddeder."""
+    with veritabani.islem() as oturum:
+        paket = ti.paket_tanimla(oturum, "DEMO", "Demo")
+        oturum.execute(
+            text(
+                "INSERT INTO tanim_surumu "
+                "(tanim_paketi_id, surum_no, olusturma_zamani) "
+                "VALUES (:paket, 2.0, '2026-09-18 00:00:00'), "
+                "(:paket, '3', '2026-09-18 00:00:00')"
+            ),
+            {"paket": paket.id},
+        )
+
+    with veritabani.islem() as oturum:
+        satirlar = oturum.execute(
+            text(
+                "SELECT surum_no, typeof(surum_no) FROM tanim_surumu ORDER BY surum_no"
+            )
+        ).all()
+    assert [tuple(s) for s in satirlar] == [(2, "integer"), (3, "integer")]
 
 
 def test_olmayan_pakete_surum_eklenemez(veritabani: vt.Veritabani) -> None:

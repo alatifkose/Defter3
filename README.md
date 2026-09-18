@@ -89,7 +89,23 @@ yöneticisidir. `kapat()` havuzu boşaltır (Windows'ta dosya kilidi için).
 Şema sürümünü Alembic'in kendi `alembic_version` tablosu tutar; ayrı sürüm
 tablosu yoktur. Göçler `alembic/versions/` altında; `0001_genel_altyapi`
 zincirin başıdır ve tablo oluşturmaz, `0002_tanim_sistemi` yedi tanım
-tablosunu ekler (zincirin başı bugün `0002`). `alembic/env.py` tanım tablo
+tablosunu ekler, `0003_surum_no_tamsayi` `tanim_surumu` kontrol kısıtını
+depolama sınıfını da denetleyen biçimiyle değiştirir (zincirin başı bugün
+`0003`). `0003` tabloyu açık SQL adımlarıyla yeniden kurar, Alembic `batch`
+kipiyle değil: göçler `foreign_keys=ON` bağlantıda ve tek transaction içinde
+çalıştığından (`PRAGMA foreign_keys` transaction içinde etkisizdir) `batch`
+ana tabloyu çocuk satırlar dururken düşürünce `FOREIGN KEY constraint
+failed` verir; bu 2026-09-18 incelemesinde çocuk satırlı testle görüldü.
+Kullanılan sıra: `PRAGMA defer_foreign_keys=ON` (transaction içinde izinli),
+satırlar kısıtsız taşıma tablosuna, yeni tablo aynı kısıt adlarıyla ve sabit
+sırayla kurulur, eski tablo düşürülür, yeni tablo eski adı alır, satırlar
+geri yazılır (ana tabloya giren her satır ertelenmiş ihlal sayacını
+düşürür), taşıma tablosu düşürülür, `PRAGMA foreign_key_check` boş değilse
+göç hata verir. Bir adım düşerse transaction tamamen geri alınır. Açık
+karar: `env.py`'deki `render_as_batch=True` bu politikayla ana tablolarda
+kullanılamaz; ileride ya göç bağlantısı FK kapalı açılır (Alembic'in
+SQLite önerisi) ya da her kısıt değişikliği bu açık kalıpla yazılır.
+`alembic/env.py` tanım tablo
 modülünü import eder ki `TabloTabani.metadata` dolu olsun (autogenerate ve
 şema karşılaştırması için). `alembic.ini` veritabanı adresi taşımaz;
 `alembic/env.py` yolu merkezi ayarlardan (ortam değişkenleri) alır, komut
@@ -109,8 +125,8 @@ politikası) ayrı bir karardır, bugün yoktur. Atomiklik kanıtı
 şablonla kurulmuş ayrı bir sentetik göç dizininde birinci göç tablo
 oluşturup satır yazar, ikincisi tablo oluşturup bilinçli düşer; `upgrade
 head` hata verir, iki tablo da kalmaz, `alembic_version` yazılmamıştır
-(sürüm ilerlememiştir), ardından gerçek zincir aynı dosyada `0001`e çıkar ve
-`integrity_check` temizdir. Gerçek `0001_genel_altyapi` göçüne dokunulmaz.
+(sürüm ilerlememiştir), ardından gerçek zincir aynı dosyada zincirin başına
+(bugün `0003`) çıkar ve `integrity_check` temizdir. Gerçek `0001_genel_altyapi` göçüne dokunulmaz.
 Aynı senaryo eski `sqlite3` kipinde denendiğinde birinci göçün tablosu
 (`sentetik_bir`) ve boş bir `alembic_version` tablosu geride kalıyordu;
 kanıt bu farktır.
@@ -123,7 +139,8 @@ hedefler; eski dosya bu zincirde olmayan `0002` sürümünü taşıdığından A
 öncesi `DEFTERIKI_VERI_KOKU=C:\dev\Defter3-veri` açıkça verilmelidir. Defter3
 verisi için ilk göç 2026-09-18'de bu şekilde uygulandı:
 `C:\dev\Defter3-veri\gelistirme\defteriki.sqlite3`, sürüm `0001`; göç `0002` aynı
-gün aynı komutla uygulandı, dosya `0002` sürümünde.
+gün aynı komutla uygulandı, dosya `0002` sürümünde. Göç `0003` bu dosyaya
+henüz uygulanmadı; aynı komutla uygulanır.
 
 **Testler** (`tests/test_cekirdek_veritabani.py`, `tests/test_gocler.py`):
 gerçek SQLite dosyalarıyla, `test` ortamı ve `tmp_path` altında kök;
@@ -137,11 +154,19 @@ kabul edilir; başarılı işlem commit olur, hata alan işlem tamamen rollback
 olur ve hata yükselir, oturum kapanır; işlem içindeki DDL de geri alınır
 (`CREATE TABLE` + hata → tablo yok); test veritabanı ve WAL dosyası yalnız
 test kökünde oluşur; sıfır
-veritabanından `upgrade head` `0002`ye çıkar ve tablolar `alembic_version` +
+veritabanından `upgrade head` `0003`e çıkar ve tablolar `alembic_version` +
 yedi tanım tablosudur; iki sıfır veritabanı aynı şemayı üretir; tekrar
 `upgrade` şemayı değiştirmez; `head → 0001 → head` döngüsünde tanım tabloları
 ve indeksleri gider, geri gelir ve `sqlite_master` birebir aynıdır,
-`integrity_check` temizdir; elle yazılan `0002` göçünün ürettiği şema ORM
+`integrity_check` temizdir; adım adım `0001 → 0002 → 0003 → 0002 → 0001 →
+head` zincirinde her adımda `tanim_surumu` kontrol kısıtı beklenen addadır,
+`0002`de yazılan sürüm satırı ve ona bağlı çocuk satırlar (nesne türü, kayıt
+türü, ilişki) `0003`ün tablo yeniden kurmasından ve geri alınmasından sağ
+çıkar, `foreign_key_check` boş kalır, geçici tablo kalmaz, diğer kısıt adları
+korunur, `0002`de kabul edilen REAL sürüm numarası `0003`te reddedilir;
+`0002` şemasında REAL sürüm numarası varken `0003` uygulanamaz ve tamamen
+geri alınır (sürüm `0002`de kalır, satır dönüştürülmez, geçici tablo kalmaz);
+elle yazılan `0002` ve `0003` göçlerinin ürettiği şema ORM
 metadata'sıyla Alembic karşılaştırmasında farksızdır; her tanım tablosunun
 birincil anahtar, dış anahtar (`RESTRICT`), benzersizlik, kontrol ve indeks
 adları `KISIT_ADLANDIRMA` kalıbındadır ve beklenen listeyle birebirdir;
@@ -168,7 +193,7 @@ kısıtlar isimlidir (`pk_`, `fk_`, `uq_`, `ck_`, `ix_` kalıbı).
 | Tablo | Ne tutar | Benzersizlik |
 |---|---|---|
 | `tanim_paketi` | bir domain'in tanımlarını gruplayan paket | `kod` |
-| `tanim_surumu` | paketin sürümü; `surum_no > 0` (kontrol kısıtı) | `(tanim_paketi_id, surum_no)` |
+| `tanim_surumu` | paketin sürümü; `typeof(surum_no) = 'integer' AND surum_no > 0` (kontrol kısıtı, göç `0003`) | `(tanim_paketi_id, surum_no)` |
 | `nesne_turu` | sürümdeki nesne türü | `(tanim_surumu_id, kod)`; ayrıca `(id, tanim_surumu_id)` bileşik dış anahtar hedefi |
 | `ozellik_tanimi` | nesne türünün özelliği | `(nesne_turu_id, kod)` |
 | `iliski_tanimi` | iki nesne türü arasında yönlü ilişki (kaynak → hedef) | `(tanim_surumu_id, kod)`; kaynak ve hedef için `ix_` indeksleri |
@@ -193,7 +218,15 @@ taşır.
 rakam ve alt çizgi ile sürer; büyük-küçük harf ayrımı vardır, kod verildiği
 gibi saklanır ve karşılaştırılır (`Demo` ile `DEMO` iki ayrı koddur). Gösterim
 adı boş olamaz. Sürüm numarası çağıranın verdiği pozitif tam sayıdır; sistem
-türetmez, sıralama zorunluluğu yoktur.
+türetmez, sıralama zorunluluğu yoktur. "Tam sayı" gerçek `int` demektir:
+tip ipucu çalışma zamanında denetlemediğinden `surum_tanimla` `float`
+(`1.5`, `1.0`), `bool` (`True`, `False`) ve metin (`"1"`, `"abc"`) değerleri
+`GecersizTanim` ile reddeder, ham `TypeError` sızmaz (2026-09-18
+incelemesi). Veritabanında da SQLite INTEGER sütunu katı tür olmadığından
+kontrol kısıtı depolama sınıfını denetler: `1.5` (REAL) ve `'abc'` (TEXT)
+ham SQL ile de reddedilir. Kayıpsız dönüşen `2.0` ya da `'3'` SQLite tür
+yakınlığıyla kısıttan önce tam sayıya çevrilir ve tam sayı olarak saklanır;
+bu SQLite davranışıdır, uygulama katmanı bu türleri zaten kabul etmez.
 
 **İşlevler (`src/defteriki/cekirdek/tanim_islemleri.py`).** Tanım tablolarına
 tek giriş noktası; her işlev açık bir `Session` alır ve
@@ -208,7 +241,7 @@ olmayan listeleme boş liste değil hata verir; boş liste ile "üst kayıt yok"
 karışmaz. Silme ve güncelleme işlevi bu aşamada yoktur.
 
 **Hata modeli.** Hepsi `TanimHatasi` altında, domain bağımsız:
-`GecersizTanim` (kod biçimi, boş gösterim adı, pozitif olmayan sürüm no;
+`GecersizTanim` (kod biçimi, boş gösterim adı, pozitif tam sayı olmayan sürüm no;
 `ValueError`), `TanimBulunamadi` (verilen paket/sürüm/tür kimliği yok;
 `LookupError`), `MukerrerTanim` (aynı kapsamda aynı kod ya da sürüm no),
 `TanimSurumuUyusmuyor` (ilişkinin kaynak/hedef türü başka sürümde). Bu
@@ -223,8 +256,10 @@ uygulama hem veritabanı düzeyinde reddedilir; büyük-küçük harf ayrımı;
 geçersiz kod biçimleri (boş, boşluklu, rakamla ya da alt çizgiyle başlayan,
 Türkçe harfli, noktalama) ve boş gösterim adı reddedilir; sürüm tanımlanır ve
 numaraya göre listelenir, aynı pakette aynı numara reddedilir, farklı
-paketlerde serbesttir, `0`/`-1` reddedilir, kontrol/benzersizlik/dış anahtar
-kısıtları ham SQL ile de çalışır; nesne türü tanımlanır, aynı sürümde aynı
+paketlerde serbesttir, sürüm numarası sözleşmesi on değerle sabittir (`1`,
+`7` kabul; `0`, `-1`, `1.5`, `1.0`, `True`, `False`, `"1"`, `"abc"`
+`GecersizTanim`), kontrol/benzersizlik/dış anahtar kısıtları ham SQL ile de
+çalışır ve REAL/TEXT sürüm numarası veritabanında reddedilir; nesne türü tanımlanır, aynı sürümde aynı
 kod reddedilir, aynı kod başka sürümde ayrı satırdır, olmayan sürüme
 eklenemez, dış anahtar veritabanında çalışır; özellik türe bağlanır ve
 tanımlanma sırasıyla listelenir, aynı türde aynı kod reddedilir, farklı türde
@@ -384,7 +419,7 @@ kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çık�
 Bu sürümde tek araç var: `sistem_durumu`. Uygulama sürümü, ortam adı, şema
 sürümü ve yetenek listesini döndürür; yol, anahtar ya da ortam değişkeni
 içermez. Şema sürümü gerçektir (Aşama 4.1): veritabanı dosyası varsa
-Alembic'in `alembic_version` tablosundaki sürüm (bugün `0002`; zincirin
+Alembic'in `alembic_version` tablosundaki sürüm (bugün `0003`; zincirin
 başı neyse o), dosya yoksa ya da göç uygulanmamışsa `yok`. Dosya yokken
 bağlantı açılmaz, boş SQLite dosyası oluşmaz; araç göç çalıştırmaz. Testler
 dosya yok, dosya var ama göçsüz ve göç uygulanmış senaryolarını süreç içinde
@@ -580,7 +615,7 @@ src/defteriki/    uygulama paketi
     tanim_islemleri.py  tanım yazma ve okuma işlevleri, tanım hata modeli
   finans/         finansal domain; çekirdeği kullanabilir (henüz boş)
 alembic.ini       Alembic yapılandırması (veritabanı adresi yok)
-alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları)
+alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı)
 tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi)
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır

@@ -103,13 +103,20 @@ class TanimSurumu(TabloTabani):
         Integer, ForeignKey(f"{TANIM_PAKETI}.id", ondelete="RESTRICT"), nullable=False
     )
     surum_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    """Paket içinde artan, pozitif tam sayı; çağıran verir, sistem türetmez."""
+    """Paket içinde benzersiz pozitif tam sayı; çağıran verir, sistem türetmez.
+    Kontrol kısıtı depolama sınıfını da zorlar (``typeof = 'integer'``)."""
     aciklama: Mapped[str | None] = mapped_column(Text)
     olusturma_zamani: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("tanim_paketi_id", "surum_no"),
-        CheckConstraint("surum_no > 0", name="surum_no_pozitif"),
+        # SQLite INTEGER sütunu katı değildir (1.5 REAL olarak saklanır);
+        # depolama sınıfı da kontrol edilir. Göç 0003 (0002'deki ``surum_no > 0``
+        # kısıtının yerine).
+        CheckConstraint(
+            "typeof(surum_no) = 'integer' AND surum_no > 0",
+            name="surum_no_pozitif_tamsayi",
+        ),
     )
 
 
