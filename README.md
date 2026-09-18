@@ -14,8 +14,9 @@ Aşama 3 kapısından yeniden başlar; önceki Aşama 4-6 geliştirme hattı
 [alatifkose/DefterIki](https://github.com/alatifkose/DefterIki) deposunun
 `main` dalında yedek olarak durur, oraya yazılmaz. Aşama 4.1 (genel
 veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de, Aşama 4.3
-(nesne motoru) ve Aşama 4.4 (belge, arşiv, okuma ve kaynak) 2026-09-19'da
-bitti; Aşama 4.5 (işlem paketi ve taslak durumu) sırada.
+(nesne motoru), Aşama 4.4 (belge, arşiv, okuma ve kaynak) ve Aşama 4.5
+(işlem paketi ve taslak durumu) 2026-09-19'da bitti; Aşama 4.6 (onay ve
+mükerrerlik) sırada.
 Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
@@ -55,18 +56,27 @@ Bitenler:
   uzlaştırma (göç `0006`); `defteriki.cekirdek.arsiv`,
   `defteriki.cekirdek.belge_tablolari`, `defteriki.cekirdek.belge_islemleri`
   ("Belge zinciri" bölümü)
+* İşlem paketi ve taslak (Aşama 4.5): "yazmak ≠ kaydetmek"; tamamlanmış
+  okumadan doğan işlem paketi (`calisiyor / bekliyor / iptal`), kesin nesne
+  tablolarından fiziksel olarak ayrı aday nesne / özellik / ilişki / kayıt
+  tabloları ve aday kayıt ↔ aday nesne bağı (göç `0007`);
+  `defteriki.cekirdek.taslak_tablolari`, `defteriki.cekirdek.taslak_islemleri`,
+  ortak değer kodlaması `defteriki.cekirdek.deger_kodlama` ("İşlem paketi ve
+  taslak" bölümü)
 
-Henüz yok: kayıt (hareket) verisi (Aşama 4.7), işlem paketi ve taslak (4.5),
-onay ve mükerrerlik (4.6), finans tanım paketi (`finans/` boş, 4.10), GUI,
-ürün verisi yazan MCP aracı (belge alan MCP aracı dahil; 4.11).
+Henüz yok: kullanıcı karar talebi, onay, mükerrerlik ve denetim izi (Aşama
+4.6), kesin kayıt (hareket) verisi (4.7), kesin kaydetme / paketi
+kesinleştirme (4.8), finans tanım paketi (`finans/` boş, 4.10), GUI, ürün
+verisi yazan MCP aracı (belge alan ve işlem paketi araçları dahil; 4.11).
 
 ## Veritabanı
 
 Aşama 4.1 (2026-09-18; Yeniden İnşa Teknik Planı madde 26). Güvenilir
 persistence temeli. Uygulama tabloları bugün Aşama 4.2'nin sekiz tanım
 tablosu ("Tanım sistemi" bölümü), Aşama 4.3'ün üç nesne tablosu ("Nesne
-motoru" bölümü) ve Aşama 4.4'ün dört belge zinciri tablosudur ("Belge
-zinciri" bölümü). Finansal tablo yoktur, `finans/` boştur.
+motoru" bölümü), Aşama 4.4'ün dört belge zinciri tablosu ("Belge zinciri"
+bölümü) ve Aşama 4.5'in altı taslak tablosudur ("İşlem paketi ve taslak"
+bölümü). Finansal tablo yoktur, `finans/` boştur.
 
 **Bağlantı (`src/defteriki/cekirdek/veritabani.py`).** SQLite dosyasının yolu
 tek kaynaktan gelir: `Ayarlar.veritabani_yolu`. Çekirdek bu yolu çağırandan
@@ -111,8 +121,15 @@ kısıtını kaldırır (tablo açık SQL ile aynı kısıt adlarıyla yeniden k
 geri alma kendine dönen satır varsa kısıt hatasıyla düşer, veri silinmez),
 `0006_belge_zinciri` dört belge zinciri tablosunu ekler (var olan tablolara
 dokunmaz; geri alma dört tabloyu düşürür ama herhangi birinde satır varsa
-uygulanmaz ve hata verir, veri sessizce silinmez) (zincirin başı bugün
-`0006`; ayrıntı "Nesne motoru" ve "Belge zinciri" bölümlerinde). `0003`
+uygulanmaz ve hata verir, veri sessizce silinmez), `0007_islem_paketi_taslak`
+işlem paketi ve beş aday tablosunu ekler ve `kaynak` üzerine `(id, okuma_id)`
+benzersiz indeksini koyar (var olan tablolar yeniden kurulmaz; geri alma aynı
+politikayla, satır varken uygulanmaz) (zincirin başı bugün `0007`; ayrıntı
+"Nesne motoru", "Belge zinciri" ve "İşlem paketi ve taslak" bölümlerinde).
+**Kalıcı geliştirme veritabanı** (`C:\dev\Defter3-veri\gelistirme\
+defteriki.sqlite3`) bilinçli olarak hâlâ `0003` sürümündedir; `0004`–`0007`
+ona uygulanmamıştır ve yalnız Abdüllatif'in açık talimatıyla uygulanır. Göç
+testleri yalnız `tmp_path` altındaki geçici veritabanlarında çalışır. `0003`
 tabloyu açık SQL adımlarıyla yeniden kurar,
 Alembic `batch`
 kipiyle değil: göçler `foreign_keys=ON` bağlantıda ve tek transaction içinde
@@ -193,8 +210,9 @@ kabul edilir; başarılı işlem commit olur, hata alan işlem tamamen rollback
 olur ve hata yükselir, oturum kapanır; işlem içindeki DDL de geri alınır
 (`CREATE TABLE` + hata → tablo yok); test veritabanı ve WAL dosyası yalnız
 test kökünde oluşur; sıfır
-veritabanından `upgrade head` `0006`ya çıkar ve tablolar `alembic_version` +
-sekiz tanım tablosu + üç nesne tablosu + dört belge zinciri tablosudur; iki
+veritabanından `upgrade head` `0007`ye çıkar ve tablolar `alembic_version` +
+sekiz tanım tablosu + üç nesne tablosu + dört belge zinciri tablosu + altı
+taslak tablosudur; iki
 sıfır veritabanı aynı şemayı
 üretir; tekrar
 `upgrade` şemayı değiştirmez; `head → 0001 → head` döngüsünde tanım tabloları
@@ -203,9 +221,10 @@ ve indeksleri gider, geri gelir ve `sqlite_master` birebir aynıdır,
 head` zincirinde her adımda `tanim_surumu` kontrol kısıtı beklenen addadır,
 `0002`de yazılan sürüm satırı ve ona bağlı çocuk satırlar (nesne türü, kayıt
 türü, ilişki) `0003`ün tablo yeniden kurmasından ve geri alınmasından sağ
-çıkar, zincir `0004`, `0005` ve `0006`ya kadar sürer ve her adımda
+çıkar, zincir `0004`, `0005`, `0006` ve `0007`ye kadar sürer ve her adımda
 `nesne_iliskisi` kontrol kısıtı beklenen durumdadır, belge zinciri tabloları
-yalnız `0006`da vardır, `foreign_key_check` boş kalır, geçici tablo kalmaz,
+`0006`dan, taslak tabloları `0007`den itibaren vardır, `foreign_key_check`
+boş kalır, geçici tablo kalmaz,
 diğer kısıt adları
 korunur, `0002`de kabul edilen REAL sürüm numarası `0003`te reddedilir;
 `0002` şemasında REAL sürüm numarası varken `0003` uygulanamaz ve tamamen
@@ -217,8 +236,13 @@ ve kısıt döner, tekrar `head` sıfırdan kurulanla aynı şemayı verir;
 `0005`te yazılmış tanım / nesne / özellik / ilişki / hiyerarşi satırları
 `0006`ya olduğu gibi taşınır, belge zinciri tabloları boş gelir, belge
 zinciri satırı varken `0006 → 0005` düşer ve uygulanmaz, satırlar silinince
-geri alınır ve tablolar gider, tekrar `head` sıfırdan kurulanla aynı şemayı
-verir; elle yazılan göçlerin ürettiği şema ORM
+geri alınır ve tablolar gider, tekrar `0006` aynı şemayı ve `head` sıfırdan
+kurulanla aynı şemayı verir; `0006`da yazılmış tanım / nesne / belge / okuma /
+kaynak satırları `0007`ye olduğu gibi taşınır, taslak tabloları boş gelir,
+`kaynak (id, okuma_id)` benzersiz indeksi eklenir, taslak satırı varken `0007
+→ 0006` düşer ve uygulanmaz, satırlar silinince geri alınır, tablolar ve
+indeks gider, eski veri yerinde kalır, tekrar `head` sıfırdan kurulanla aynı
+şemayı verir; elle yazılan göçlerin ürettiği şema ORM
 metadata'sıyla Alembic karşılaştırmasında farksızdır; her uygulama tablosunun
 birincil anahtar, dış anahtar (`RESTRICT`), benzersizlik, kontrol ve indeks
 adları `KISIT_ADLANDIRMA` kalıbındadır ve beklenen listeyle birebirdir;
@@ -389,7 +413,10 @@ dört teknik, domain bağımsız türden biridir (`DegerTuru`): `metin` (`str`),
 yoktur). Değer tanımın türüne göre doğrulanır ve kanonik metin olarak
 saklanır (metin olduğu gibi, `str(int)`, `"1"`/`"0"`, `str(Decimal)` —
 `12.50` `12.50` olarak kalır); `ozellikleri_oku` aynı kuralla Python değerine
-döner. Yanlış tür `OzellikTuruUyusmuyor`, tanımsız ya da başka türün
+döner. Kodlama kuralı Aşama 4.5'ten itibaren
+`src/defteriki/cekirdek/deger_kodlama.py` içindedir ve aday özellikle
+(`taslak_islemleri`) ortaktır; nesne motoru hatayı kendi modeline
+(`OzellikTuruUyusmuyor`) sarar, davranışı değişmedi. Yanlış tür `OzellikTuruUyusmuyor`, tanımsız ya da başka türün
 özelliği `GecersizOzellik`, eksik zorunlu özellik `ZorunluOzellikEksik` verir.
 `ozellik_yaz` var olan değeri günceller (aynı özellik iki satır olmaz),
 `ozellik_sil` isteğe bağlı özelliği kaldırır, zorunluyu kaldırmaz. IBAN, kart
@@ -609,7 +636,7 @@ kısıtlar isimlidir; dış anahtarlar `ON DELETE RESTRICT`.
 | `arsiv_dosyasi` | `sha256`, `boyut`, `mime`, `kaynak_uzantisi`, `kaynak_adi`, `goreli_yol`, `olusturma_zamani` | `sha256` benzersiz; `goreli_yol` benzersiz; `sha256` 64 karakter küçük harf onaltılık (`length = 64 AND NOT GLOB '*[^0-9a-f]*'`); `goreli_yol = substr(sha256, 1, 2) \|\| '/' \|\| sha256` (yol yalnız içerikten türer); `typeof(boyut) = 'integer' AND boyut > 0` |
 | `belge` | `arsiv_dosyasi_id`, `olusturma_zamani` | `arsiv_dosyasi_id` benzersiz (bir arşiv dosyasından ikinci belge yok) ve dış anahtar |
 | `okuma` | `belge_id`, `surum_no`, `durum`, `icerik` (JSON metni), `olusturma_zamani`, `tamamlanma_zamani` | `(belge_id, surum_no)` benzersiz; `(id, belge_id)` benzersiz (kaynağın bileşik dış anahtar hedefi); `typeof(surum_no) = 'integer' AND surum_no > 0`; durum ile içerik / tamamlanma zamanı tutarlılığı (`basladi` ⇒ ikisi NULL, `tamamlandi` ⇒ ikisi dolu; başka durum değeri yok); `icerik IS NULL OR json_valid(icerik)` |
-| `kaynak` | `belge_id`, `okuma_id`, `konum` (JSON metni, isteğe bağlı), `olusturma_zamani` | `(okuma_id, belge_id)` bileşik dış anahtarla `okuma (id, belge_id)`: okumanın gerçekten o belgeye ait olduğu zorlanır, iki bağımsız dış anahtar yoktur; `konum IS NULL OR json_valid(konum)`; belge ve okuma indeksleri |
+| `kaynak` | `belge_id`, `okuma_id`, `konum` (JSON metni, isteğe bağlı), `olusturma_zamani` | `(okuma_id, belge_id)` bileşik dış anahtarla `okuma (id, belge_id)`: okumanın gerçekten o belgeye ait olduğu zorlanır, iki bağımsız dış anahtar yoktur; `konum IS NULL OR json_valid(konum)`; belge ve okuma indeksleri; `(id, okuma_id)` benzersiz indeksi (göç `0007`; aday nesne / aday kayıt provenance bileşik dış anahtarının hedefi) |
 
 **Servisler (`src/defteriki/cekirdek/belge_islemleri.py`).** Her servis açık
 `Session` alır; çağıran `Veritabani.islem` işleminin sahibidir. Servis hata
@@ -773,6 +800,226 @@ alınır); tamamlanan okuma ve kaynak satırı için
 veritabanı düzeyi değişmezlik (yalnız uygulama düzeyi; SQLite'ta
 tetikleyicisiz ifade edilemez); sahipsiz / yarım / bozuk dosyaların otomatik
 temizliği ya da onarımı.
+
+## İşlem paketi ve taslak
+
+Aşama 4.5 (2026-09-19; Yeniden İnşa Teknik Planı madde 9, 11, 12, 13, 20, 23,
+24 ve 30). **Yazmak ≠ kaydetmek.** Cowork'un (dış okuyucunun) belgeyi okuyup
+sisteme bilgi yazması kesin kayıt değildir; bu bilgi bir **işlem paketi**
+altında **taslak** (aday) olarak yaşar. Zincirin bu aşamada kurulan kısmı:
+
+```
+OKUMA / KAYNAK → İŞLEM PAKETİ → ADAY NESNE / ÖZELLİK / İLİŞKİ / KAYIT
+```
+
+Kesin kaydetme (paketi kesinleştirme, tamlık kapısı, atomik finalizasyon,
+belgeyi kayıtlı duruma geçirme) Aşama 4.8'in işidir ve **henüz yoktur**:
+4.5 sonunda hiçbir aday veri kesinleşmemiştir. Çekirdek burada da finansı
+bilmez; testler nötr `ENVANTER` dünyasıyla (`DEPO`, `RAF`, `URUN`; kayıt
+türleri `SAYIM`, `DENETIM`) çalışır, `finans/` boştur. Finans paketini silip
+başka bir alan tanımı yüklemek `cekirdek/` kodunda değişiklik gerektirmez.
+
+**Taslak ile kesin fiziksel olarak ayrıdır.** Aday veri kesin nesne
+tablolarına (`nesne`, `nesne_ozelligi`, `nesne_iliskisi`) yazılmaz; "önce
+`nesne` satırı oluştur, sonra taslak diye işaretle" yolu yoktur. Aday satırlar
+kendi tablolarındadır; kesin sorgular (`nesneleri_listele`, `ozellikleri_oku`,
+`iliskileri_listele`) taslak tabloları hiç görmez. Ayrım şemadan gelir,
+`WHERE durum != 'taslak'` gibi unutulabilir bir sorgu filtresine dayanmaz.
+Hiçbir taslak tablo kesin nesne tablolarına dış anahtar taşımaz ve tersi de
+yoktur; kaynak kodunda `taslak_*` modülleri nesne tablolarını ve nesne
+motorunu, `nesne_*` modülleri taslak modüllerini import etmez, taslak
+servisleri ham SQL kullanmaz (`tests/test_mimari_sinir.py`, üçüncü denetim).
+Aday nesne `nesne.id` üretmez; aday kimliği kesin nesne kimliği değildir.
+Aday nesne oluşturmak tanım sürümünü kilitlemez.
+
+**Tablolar (`src/defteriki/cekirdek/taslak_tablolari.py`, göç `0007`).**
+Bütün kısıtlar isimlidir; dış anahtarlar `ON DELETE RESTRICT`.
+
+| Tablo | Ne tutar | Veritabanı düzeyinde korunan |
+|---|---|---|
+| `islem_paketi` | `okuma_id`, `durum`, `olusturma_zamani`, `durum_zamani` | `okuma_id → okuma` (paketin okuması var); `durum IN ('calisiyor', 'bekliyor', 'iptal')`; `(id, okuma_id)` benzersiz (aday tabloların provenance bileşik dış anahtar hedefi); okuma ve durum indeksleri. Ayrı `belge_id` yoktur: belge `okuma → belge` zincirinden bulunur |
+| `aday_nesne` | `islem_paketi_id`, `okuma_id` (paketten kopya), `nesne_turu_id`, `tanim_surumu_id`, `kaynak_id` (isteğe bağlı), `olusturma_zamani` | `(islem_paketi_id, okuma_id) → islem_paketi (id, okuma_id)`; `(nesne_turu_id, tanim_surumu_id) → nesne_turu (id, tanim_surumu_id)` (4.3 kalıbı: tür gerçekten o sürümde); `(kaynak_id, okuma_id) → kaynak (id, okuma_id)`: başka okumanın kaynağı bağlanamaz (kaynak NULL ise denetim yok); `(id, paket)`, `(id, tür)`, `(id, paket, tür, sürüm)` benzersiz (alt tabloların hedefleri) |
+| `aday_nesne_ozelligi` | `aday_nesne_id`, `nesne_turu_id`, `ozellik_tanimi_id`, `deger` (kanonik metin) | iki bileşik dış anahtar aynı `nesne_turu_id` üzerinden: `(aday_nesne_id, nesne_turu_id) → aday_nesne` ve `(ozellik_tanimi_id, nesne_turu_id) → ozellik_tanimi`; başka türün özelliği yazılamaz; `(aday_nesne_id, ozellik_tanimi_id)` benzersiz |
+| `aday_nesne_iliskisi` | `islem_paketi_id`, `iliski_tanimi_id`, `tanim_surumu_id`, kaynak/hedef tür ve aday nesne kimlikleri | dörtlü bileşik dış anahtar `iliski_tanimi (id, sürüm, kaynak tür, hedef tür)`; iki dörtlü bileşik dış anahtar `aday_nesne (id, paket, tür, sürüm)` kaynak ve hedef için: iki aday **aynı pakette**, türleri tanımın kaynak / hedef türü, üçü aynı sürümde; `(iliski_tanimi_id, kaynak_aday_nesne_id, hedef_aday_nesne_id)` benzersiz |
+| `aday_kayit` | `islem_paketi_id`, `okuma_id`, `kayit_turu_id`, `kaynak_id` (isteğe bağlı), `icerik` (JSON metni), `olusturma_zamani` | `(islem_paketi_id, okuma_id) → islem_paketi`; `kayit_turu_id → kayit_turu` (genel tanım; finansal tür yok); `(kaynak_id, okuma_id) → kaynak (id, okuma_id)`; `json_valid(icerik) AND json_type(icerik) = 'object'`; `(id, islem_paketi_id)` benzersiz |
+| `aday_kayit_nesne` | `islem_paketi_id`, `aday_kayit_id`, `aday_nesne_id` | `(aday_kayit_id, islem_paketi_id) → aday_kayit` ve `(aday_nesne_id, islem_paketi_id) → aday_nesne`: iki taraf aynı pakette; `(aday_kayit_id, aday_nesne_id)` benzersiz; rol sütunu yok |
+
+Tanım ve nesne tablolarına dokunulmaz; `kaynak` yalnız `(id, okuma_id)`
+benzersiz indeksini alır. Aday özellik ve aday ilişki bu aşamada ayrı kaynak
+taşımaz; provenance nesne / kayıt düzeyinde ve en azından paket (okuma)
+düzeyindedir.
+
+**İşlem paketi.** `paket_olustur(oturum, okuma_id)` yalnız `tamamlandi`
+okumadan paket açar (`basladi` okuma `OkumaDurumuGecersiz`, olmayan okuma
+`OkumaBulunamadi`); yeni paket `calisiyor` doğar. Aynı okumadan birden çok
+paket açılabilir. Normal çekirdek servisidir: açık `Session` alır, kendi
+işlemini açmaz (4.4'teki `belge_al` istisnası burada yoktur).
+
+**Yaşam döngüsü (`PaketDurumu`).**
+
+```
+calisiyor → bekliyor → calisiyor      paketi_beklet / paketi_devam_et
+calisiyor → iptal,  bekliyor → iptal  paketi_iptal_et (terminal)
+```
+
+* `calisiyor`: taslak yazılır / değiştirilir.
+* `bekliyor`: paket korunur; sorgulanır, içeriği okunur, devam ettirilir ya da
+  iptal edilir, ama aday veri değiştirilmez. Aşama 4.6'nın kullanıcı karar
+  mekanizması paketi bu duruma alacaktır; 4.5'te karar talebi yoktur.
+* `iptal`: terminaldir; sorgulanır ve okunur, değiştirilemez, devam
+  ettirilemez. **İptal fiziksel silme değildir:** hiçbir aday nesne / özellik
+  / ilişki / kayıt / bağ, kaynak, okuma, belge ya da arşiv dosyası silinmez;
+  paket ve taslak içeriği sorgulanabilir kalır. İptal edilen paket kesin
+  dünyayı zaten hiç değiştirmediği için başka geri alma gerekmez.
+* `kaydedildi` / `kesinleşti` / `tamamlandi` gibi kesin kayıt durumu yoktur
+  (4.8).
+
+Yeniden devam edildiğinde aynı paket aynı taslaklarla sürer; yeni paket
+açılıp içerik kopyalanmaz. Paket durumu yazma yetkisini belirler: aday veriyi
+değiştiren bütün servisler tek merkezi denetimden geçer (`_yazilabilir_paket`);
+her servise ayrı durum mantığı yoktur. Durum geçişi koşullu güncellemedir
+(`UPDATE … WHERE durum = eski`): eşzamanlı ikinci geçiş satır etkilemez ve
+`PaketDurumuGecersiz` verir; büyük bir kilit çerçevesi yoktur, benzersizlik
+kısıtları yarışlarda son savunmadır.
+
+**Aday nesne, özellik, ilişki.** `aday_nesne_ekle(oturum, paket_id,
+nesne_turu_id, ozellikler=None, kaynak_id=None)`; `aday_ozellik_yaz`
+(var olan değeri günceller, aynı özellik iki satır olmaz), `aday_ozellik_sil`
+(zorunlu olsa da silinebilir), `aday_ozellikleri_oku`; `aday_iliski_ekle(oturum,
+iliski_tanimi_id, kaynak_aday_nesne_id, hedef_aday_nesne_id)`,
+`aday_iliski_kaldir`; `aday_nesne_sil`. Özellik değeri kesin özellikle aynı
+kuralla doğrulanır ve aynı kanonik metne kodlanır (`deger_kodlama`: metin,
+tam sayı — `bool` reddedilir, mantıksal `"1"`/`"0"`, sonlu `Decimal` — `float`
+reddedilir); aynı değer iki tabloda aynı metindir. Aday ilişkide kaynak /
+hedef türü ve sürüm tanıma uymalıdır; hiyerarşi sayımı ve çevrim aranmaz.
+
+**Taslak eksik olabilir, yapısal olarak anlamsız olamaz.** Çalışma alanında
+geçici olarak mümkün olanlar: zorunlu özelliği eksik aday nesne (Cowork önce
+nesneyi fark edip aday açar, özelliği sonra ekler), zorunlu üst bağlantısı
+henüz kurulmamış aday nesne (`RAFTA` en az bir üst istese de aday ürün üstsüz
+durur), içeriği tamamlanmamış (`{}` dahil) aday kayıt, henüz bağlanmamış
+kayıt-nesne bağı. Buna karşılık yine reddedilenler: olmayan tanıma referans
+(`TanimBulunamadi`), başka türün özelliği ya da yanlış veri tipi
+(`GecersizAdayOzellik`), ilişki tanımına uymayan kaynak / hedef türü ya da
+sürüm (`GecersizAdayIliski`), başka paketin adayını bağlamak ve başka
+okumanın kaynağını bağlamak (`PaketUyusmazligi`), mükerrer aday ilişki ya da
+bağ (`MukerrerAday`); aynı ihlaller ham SQL'e karşı bileşik dış anahtar ve
+benzersizlik kısıtlarıyla da reddedilir. Bütün zorunlu özellikler tamam mı,
+hiyerarşi tamam mı, mükerrer var mı, kesin kayda dönüşebilir mi gibi nihai
+kapı 4.8'in işidir; `paket_kaydedilebilir_mi` benzeri yarım bir motor yoktur.
+
+**Aday kayıt ve aday kayıt ↔ aday nesne.** Kesin `kayit` tablosu, kayıt alanı
+motoru ve kayıt durumu Aşama 4.7'dedir ve yoktur (testle doğrulanır).
+`aday_kayit_ekle(oturum, paket_id, kayit_turu_id, icerik, kaynak_id=None)`
+genel `kayit_turu` tanımına bağlı aday kayıt açar; içerik domain bağımsız
+JSON **nesnesidir** (`{}` dahil), 4.4 kuralıyla kodlanır (yalnız nesne, `NaN` /
+sonsuz / `Decimal` / `bytes` reddedilir, kanonik metin, 64 KiB
+`AZAMI_ADAY_KAYIT_ICERIGI_BOYUTU`), loga ve hata mesajına yazılmaz.
+`aday_kayit_icerigini_degistir`, `aday_kayit_icerigi`, `aday_kayit_sil`.
+Aday kayıt bir ya da daha fazla aday nesneye bağlanır
+(`aday_kayit_nesne_bagla`, `aday_kayit_nesne_coz`; çoktan çoğa, rolsüz —
+asıl / borç / ödeme gibi rol semantiği icat edilmez); iki taraf aynı pakette
+olmalıdır.
+
+**Kaynak / provenance.** Paket düzeyinde `okuma_id` zorunludur; belge
+`paket_belgesi` ile `okuma → belge` zincirinden deterministik bulunur. Aday
+nesne ve aday kayıt isteğe bağlı bir `kaynak` satırına gerçek dış anahtarla
+bağlanır (kaynak kimliği JSON içinde saklanmaz); kaynak paketin okumasına ait
+olmak zorundadır, servis `PaketUyusmazligi` verir ve veritabanı `(kaynak_id,
+okuma_id)` bileşik dış anahtarıyla başka okumanın kaynağını reddeder.
+Kaynaksız aday öğe geçerlidir; en azından okuma düzeyinde provenance vardır.
+Çok-kaynak altyapısı kurulmadı (gereksinim yok).
+
+**Taslak silme.** Çalışan pakette aday nesne, ilişki, kayıt ve bağ
+kaldırılabilir. Aday nesnenin kendi özellikleri onun parçasıdır, nesneyle
+birlikte silinir; aday nesne bir aday ilişkide ya da kayıt-nesne bağında
+kullanılıyorsa silme açıkça reddedilir (`AdayKullanimda`), sessiz cascade
+yoktur ve ham `DELETE` de dış anahtarla düşer. Aday kaydın kendi kayıt-nesne
+bağları kaydın ekidir, kayıtla birlikte silinir, bağlı aday nesneler kalır.
+
+**Sorgulama.** `paket_getir`, `paketleri_listele(oturum, durum=None)`,
+`paket_belgesi`, `paket_ayrinti` (bütün çalışma alanı tek `PaketAyrintisi`
+içinde: paket, aday nesneler, özellikler, ilişkiler, kayıtlar, bağlar; her
+liste kimlik sırasıyla, deterministik; `durum`, `aday_nesne_sayisi`,
+`aday_kayit_sayisi` mekanik bilgiler), `aday_nesne_getir`, `aday_kayit_getir`,
+`aday_ozellikleri_oku`, `aday_kayit_icerigi`. Sorgular durumdan bağımsızdır
+(bekleyen ve iptal paket dahil). Listeler veritabanının tesadüfi satır
+sırasına bırakılmaz; ileride Cowork'un "pakette şu anda ne var?" sorusuna
+kararlı yanıt bunun içindir. MCP aracı ve GUI bu aşamada yoktur.
+
+**Servis hata atomikliği ve işlem sınırı.** 4.1 / 4.3 kuralı sürer: her
+servis açık `Session` alır, çağıran `Veritabani.islem()` sahibidir, `commit`
+/ dış `rollback` yoktur; doğrulama yazmadan önce, yazma kendi SAVEPOINT'inde
+(`begin_nested`). Başarısız çağrı aynı dış işlemde yakalansa bile kısmi satır
+bırakmaz (aday nesne yazıldıktan sonra özellik yazımında hata → ikisi de
+yok), dış işlem kullanılabilir kalır ve sonraki geçerli iş commit edilir.
+
+**Hata modeli (`IslemPaketiHatasi` altında):** `PaketBulunamadi`,
+`AdayBulunamadi` (`LookupError`); `PaketDurumuGecersiz`; `PaketUyusmazligi`;
+`GecersizAdayOzellik`, `GecersizAdayIliski`, `GecersizTaslakIcerik`
+(`ValueError`); `MukerrerAday`; `AdayKullanimda`. `TanimBulunamadi`,
+`OkumaBulunamadi`, `OkumaDurumuGecersiz`, `KaynakBulunamadi` kendi
+modüllerinden olduğu gibi gelir. Ham `IntegrityError` sözleşme değildir. Genel
+`islem_anahtari` (idempotency) sistemi ve denetim olay sistemi bu aşamada
+kurulmadı (4.11 ve 4.6); satırlar yalnız mekanik zaman damgası taşır.
+
+**Testler** (`tests/test_islem_paketi.py`; `tests/test_gocler.py` göç `0007`
+için; `tests/test_mimari_sinir.py` taslak / kesin ayrımı için). Paket:
+tamamlanmış okumadan oluşturma, `basladi` ve olmayan okumadan red (ham SQL
+ile de), aynı okumadan çoklu paket, bütün izinli ve izinsiz geçişler,
+`iptal` terminal, durum değeri kontrol kısıtı, eşzamanlı durum değişiminde
+koşullu güncelleme reddi. Yazma yetkisi: on bir yazma servisi bekleyen ve
+iptal pakette reddedilir, içerik sorgulanabilir kalır; devam edilen pakette
+aynı taslaklarla hepsi çalışır, yeni paket açılmaz. Aday nesne: kesin `nesne`
+satırı oluşmaz, `nesneleri_listele` boş, aday kimliği nesne kimliği değil,
+sürüm kilitlenmez; zorunlu özellik eksikken oluşur ve sonradan tamamlanır
+(kesin nesne aynı eksikliği reddeder); olmayan tür, tanımsız özellik, tür /
+sürüm uyuşmazlığı (ham SQL), yanlış veri tipi (dört tür; `bool` / `int`,
+`float`, `NaN`, sonsuz), başka türün özelliği (servis ve iki bileşik dış
+anahtar), güncelleme çift satır üretmez (benzersizlik ham SQL ile), zorunlu
+özellik taslakta silinebilir, aday ile kesin özellik aynı kanonik metni verir,
+silme kuralları (`AdayKullanimda`, ham `DELETE` dış anahtarla düşer,
+özellikler nesneyle gider). Aday ilişki: doğru türler ve kendine dönen
+genel ilişki, yanlış kaynak / hedef türü (servis ve dış anahtar), farklı
+paketin adayı (servis ve dış anahtar, iki paket kimliğiyle de), mükerrer
+(servis ve benzersizlik), zorunlu hiyerarşi eksikken taslak var olur ve
+bağlantı kaldırılabilir. Aday kayıt: genel kayıt türü, kanonik JSON, `{}`,
+kesin `kayit` tablosunun yokluğu, bozuk / desteklenmeyen içerik (dokuz
+biçim), aşırı içerik ve sınırın hemen altı, içerik kısıtları ham SQL ile
+(`json_type = 'object'`), içerik değiştirme ve silme (bağlar gider, nesne
+kalır). Bağ: çoklu nesneye bağ, çözme, başka paketin adayı (servis ve dış
+anahtar), mükerrer bağ. Kaynak: paketin okumasındaki kaynağa bağlanma,
+kaynaksız aday, başka okumanın kaynağı (servis ve bileşik dış anahtar, iki
+okuma kimliğiyle de). **Ana kabul testi** `test_yazmak_kaydetmek_degildir`:
+önceden var olan kesin nesne yanında paket açılır; iki aday nesne, dört
+özellik, bir aday ilişki, bir aday kayıt ve iki bağ yazılır; `nesne`,
+`nesne_ozelligi`, `nesne_iliskisi` sayıları ve tablo listesi değişmez, kesin
+sorgular adayları görmez, paket sorgusu bütün taslakları görür; `bekliyor`da
+taslak korunur ve yazma durur; `calisiyor`a dönünce aynı taslaklardan devam
+edilir; `iptal`de kesin dünya yine değişmemiştir, paket ve taslak içeriği
+(satır sayıları dahil) sorgulanabilir, hiçbir yazma ve devam mümkün değildir,
+`integrity_check` ve `foreign_key_check` temizdir. Şema ayrımı: hiçbir taslak
+tablo kesin nesne tablolarına, hiçbir kesin tablo taslak tablolara dış
+anahtar taşımaz. Atomiklik: aday nesne yazma ortasında sentetik hata, aday
+özellik yazımında ham SQL ile çakıştırılmış kısıt hatası, aynı dış işlemde
+yakalanan yedi farklı hata (tür, paket, JSON, `NaN`, bağ, tip, geçiş)
+sonrası geçerli işlerin commit'i, durum değişimi ve paket oluşturma yazma
+hatası. Mimari sınır: taslak modülleri kesin nesne modüllerine, kesin nesne
+modülleri taslak modüllerine doğrudan / dolaylı ulaşmaz (denetleyicinin
+kendisi sentetik ağaçta sınanır), taslak modülleri ham SQL kullanmaz;
+finansal ad denetimi ve çekirdek → finans yasağı yeni modülleri ve `0007`yi
+kapsar.
+
+**Bilinçli kapsam dışı (Aşama 4.5'te yok):** kullanıcı karar talebi, onay
+tablosu, seçim seçenekleri, mükerrerlik şartları / arama, nesne birleştirme,
+ilişkileri taşıma, denetim izi (4.6); kesin kayıt tablosu, kayıt alanı
+motoru, kesin kayıt ↔ nesne ve kayıt ↔ kaynak bağı (4.7); `kaydet`, paketi
+kesinleştirme, tamlık kapısı, atomik finalizasyon, belgeyi kayıtlı duruma
+geçirme (4.8); projection, kural motoru, finans tanım paketi, MCP işlem paketi
+araçları, GUI, kesin kayıt geri alma (sonraki aşamalar); aday özellik ve aday
+ilişki için ayrı kaynak bağı, çok-kaynak; hiyerarşi çevrimi ve sayım
+denetiminin taslak dünyasında çalıştırılması; genel işlem anahtarı; iyimser
+kilit çerçevesi.
 
 ## Mimari sınır: çekirdek ve finans
 
@@ -1122,10 +1369,13 @@ src/defteriki/    uygulama paketi
     arsiv.py            gelen dizini sınırı, akışla SHA-256, içerik adresli atomik arşiv, bütünlük, tarama
     belge_tablolari.py  arşiv dosyası, belge, okuma, kaynak tabloları
     belge_islemleri.py  belge alma, okuma sürümleri, kaynak izi, dosya/DB uzlaştırma
+    deger_kodlama.py    özellik değeri kanonik metin kodlaması (kesin ve aday özellik ortak)
+    taslak_tablolari.py işlem paketi, aday nesne / özellik / ilişki / kayıt, kayıt-nesne bağı tabloları
+    taslak_islemleri.py işlem paketi yaşam döngüsü, taslak yazma / silme / sorgulama
   finans/         finansal domain; çekirdeği kullanabilir (henüz boş)
 alembic.ini       Alembic yapılandırması (veritabanı adresi yok)
-alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı, 0004 nesne motoru, 0005 kendine dönüş serbest, 0006 belge zinciri)
-tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi; test_nesne_motoru.py: ENVANTER dünyası; test_arsiv.py ve test_belge_zinciri.py: belge zinciri)
+alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı, 0004 nesne motoru, 0005 kendine dönüş serbest, 0006 belge zinciri, 0007 işlem paketi ve taslak)
+tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı, finansal ad denetimi, taslak / kesin ayrımı; test_nesne_motoru.py: ENVANTER dünyası; test_arsiv.py ve test_belge_zinciri.py: belge zinciri; test_islem_paketi.py: işlem paketi ve taslak)
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
 kavramlar_sozlugu.md   ortak kavram tanımları; ekleme ve değişiklik yalnız Abdüllatif'in onayıyla

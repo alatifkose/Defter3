@@ -13,6 +13,12 @@ yaşam durumu, tanım sürümü kilidi). Aşama 4.4: ``arsiv`` (gelen dizini
 sınırı, akışla SHA-256, içerik adresli atomik arşiv, bütünlük doğrulama),
 ``belge_tablolari`` (arşiv dosyası, belge, okuma, kaynak tabloları) ve
 ``belge_islemleri`` (belge alma, okuma sürümleri, kaynak izi, dosya/DB
-uzlaştırma). Tanımlar veridir; çekirdek hangi türlerin var olacağını, ne
-anlama geldiğini ve bir belgenin ne belgesi olduğunu bilmez.
+uzlaştırma). Aşama 4.5: ``deger_kodlama`` (özellik değeri kanonik metin
+kodlaması; kesin ve aday özellik ortak), ``taslak_tablolari`` (işlem paketi,
+aday nesne / özellik / ilişki / kayıt, kayıt-nesne bağı; kesin nesne
+tablolarından fiziksel olarak ayrı) ve ``taslak_islemleri`` (paket yaşam
+döngüsü calisiyor / bekliyor / iptal, taslak yazma, silme, sorgulama;
+"yazmak ≠ kaydetmek", kesin kaydetme yok). Tanımlar veridir; çekirdek hangi
+türlerin var olacağını, ne anlama geldiğini ve bir belgenin ne belgesi
+olduğunu bilmez.
 """

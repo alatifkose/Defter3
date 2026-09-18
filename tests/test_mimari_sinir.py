@@ -34,6 +34,12 @@ statik denetimle çözülemez; kod incelemesinin konusudur.
 taşıyamaz. Tanımlayıcılar ve metin sabitleri parçalara ayrılır, yasak ad tam
 parça olarak aranır (``YASAK_FINANS_ADLARI``); docstring ve yorum denetim
 dışıdır. Ayrıntı dosyanın sonundaki bölümde.
+
+Üçüncü denetim (Aşama 4.5): taslak (aday) dünyası ile kesin nesne dünyası
+kaynak kodunda da ayrıdır. ``taslak_islemleri`` / ``taslak_tablolari`` kesin
+nesne tablolarını ve nesne motorunu import etmez (taslak veri kesin tablolara
+yazılamaz); ``nesne_islemleri`` / ``nesne_tablolari`` taslak modüllerini
+import etmez (kesin sorgular taslakları göremez). Ayrıntı dosyanın sonunda.
 """
 
 import ast
@@ -736,3 +742,124 @@ def test_ad_parcalama_kurali() -> None:
     assert yasak_finans_adi("hesap_kodu") == "HESAP"
     assert yasak_finans_adi("para birimi listesi") == "PARA_BIRIMI"
     assert yasak_finans_adi("para ve birim") is None  # ardışık değil
+
+
+# --- taslak / kesin ayrımı (Aşama 4.5) ------------------------------------------------
+# "Yazmak ≠ kaydetmek" şemada fiziksel tablo ayrımıyla korunur
+# (``tests/test_islem_paketi.py``); burada aynı ayrımın kaynak kodunda da
+# durduğu sınanır: taslak servisleri kesin nesne tablolarına ve nesne motoruna
+# hiçbir import biçimiyle ulaşmaz, kesin nesne modülleri taslak modüllerine
+# ulaşmaz. Denetim aynı AST bağımlılık çözümleyicisiyle (``bagimliliklar``)
+# yapılır; dolaylı zincir de aranır.
+
+TASLAK_MODULLERI = (
+    "defteriki.cekirdek.taslak_tablolari",
+    "defteriki.cekirdek.taslak_islemleri",
+)
+KESIN_NESNE_MODULLERI = (
+    "defteriki.cekirdek.nesne_tablolari",
+    "defteriki.cekirdek.nesne_islemleri",
+)
+
+
+def _modul_zinciri(
+    baslangic: str, yasak: tuple[str, ...], kaynak_koku: Path
+) -> list[str] | None:
+    """``baslangic``tan ``yasak`` modüllerden birine giden en kısa statik import
+    zinciri (üst paket ``__init__``leri dahil); yoksa ``None``."""
+    dosyalar = _modul_dosyalari(kaynak_koku)
+    kuyruk: deque[tuple[str, list[str]]] = deque()
+    gorulen: set[str] = set()
+
+    def ekle(hedef: str, yol: list[str]) -> None:
+        for modul, etiket in _yukleme_adimlari(hedef):
+            if modul in gorulen or modul not in dosyalar:
+                continue
+            gorulen.add(modul)
+            kuyruk.append((modul, [*yol, etiket] if modul != baslangic else yol))
+
+    ekle(baslangic, [baslangic])
+    while kuyruk:
+        modul, yol = kuyruk.popleft()
+        for b in bagimliliklar(dosyalar[modul], kaynak_koku):
+            if b.hedef in yasak or any(b.hedef.startswith(y + ".") for y in yasak):
+                return [*yol, b.hedef]
+            if _uygulama_ici_mi(b.hedef):
+                ekle(b.hedef, yol)
+    return None
+
+
+def test_taslak_modulleri_kesin_nesne_dunyasina_ulasmaz() -> None:
+    """Taslak veri kesin nesne tablolarına yazılamaz: taslak modülleri
+    ``Nesne`` / ``NesneOzelligi`` / ``NesneIliskisi`` tablolarını ve nesne
+    motorunu doğrudan ya da dolaylı import etmez."""
+    ihlaller = {
+        modul: zincir
+        for modul in TASLAK_MODULLERI
+        if (zincir := _modul_zinciri(modul, KESIN_NESNE_MODULLERI, KAYNAK_KOKU))
+    }
+    assert ihlaller == {}, (
+        "taslak modülü kesin nesne dünyasına ulaşıyor (Aşama 4.5 ayrımı):\n"
+        + "\n".join(f"{m}: {' → '.join(z)}" for m, z in ihlaller.items())
+    )
+
+
+def test_kesin_nesne_modulleri_taslak_dunyasina_ulasmaz() -> None:
+    """Kesin sorgular taslak veriyi göremez: nesne motoru ve nesne tabloları
+    taslak modüllerini doğrudan ya da dolaylı import etmez."""
+    ihlaller = {
+        modul: zincir
+        for modul in KESIN_NESNE_MODULLERI
+        if (zincir := _modul_zinciri(modul, TASLAK_MODULLERI, KAYNAK_KOKU))
+    }
+    assert ihlaller == {}, (
+        "kesin nesne modülü taslak dünyasına ulaşıyor (Aşama 4.5 ayrımı):\n"
+        + "\n".join(f"{m}: {' → '.join(z)}" for m, z in ihlaller.items())
+    )
+
+
+def test_taslak_ayrimi_denetleyicisi_ihlali_yakalar(tmp_path: Path) -> None:
+    kok = _sentetik_agac(
+        tmp_path,
+        "from defteriki.cekirdek import yardimci\n",
+        "cekirdek/taslak_islemleri.py",
+        ek_dosyalar={
+            "cekirdek/yardimci.py": (
+                "from defteriki.cekirdek.nesne_tablolari import Nesne\n"
+            ),
+            "cekirdek/nesne_tablolari.py": "Nesne = 1\n",
+        },
+    )
+    assert _modul_zinciri(
+        "defteriki.cekirdek.taslak_islemleri", KESIN_NESNE_MODULLERI, kok
+    ) == [
+        "defteriki.cekirdek.taslak_islemleri",
+        "defteriki.cekirdek.yardimci",
+        "defteriki.cekirdek.nesne_tablolari",
+    ]
+    assert (
+        _modul_zinciri("defteriki.cekirdek.nesne_tablolari", TASLAK_MODULLERI, kok)
+        is None
+    )
+
+
+def test_taslak_modulleri_ham_sql_kullanmaz() -> None:
+    """Import olmadan da kesin tabloya yazılamaz: taslak modülleri ham SQL
+    (``sqlalchemy.text``) içermez; veritabanına yalnız kendi ORM tablolarıyla
+    ulaşır, kesin nesne tablolarının ORM sınıfları ise import edilmez."""
+    bulgular: list[str] = []
+    for modul in TASLAK_MODULLERI:
+        dosya = KAYNAK_KOKU / Path(*modul.split(".")).with_suffix(".py")
+        agac = ast.parse(dosya.read_text(encoding="utf-8"), filename=str(dosya))
+        for dugum in ast.walk(agac):
+            if isinstance(dugum, ast.ImportFrom) and dugum.module == "sqlalchemy":
+                for ad in dugum.names:
+                    if ad.name == "text":
+                        bulgular.append(f"{modul}:{dugum.lineno}: import text")
+            elif (
+                isinstance(dugum, ast.Call)
+                and isinstance(dugum.func, ast.Attribute)
+                and dugum.func.attr == "text"
+            ):
+                bulgular.append(f"{modul}:{dugum.lineno}: .text(...) çağrısı")
+    assert bulgular == [], "; ".join(bulgular)

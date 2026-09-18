@@ -201,9 +201,10 @@ class UzlastirmaRaporu:
 # --- JSON -----------------------------------------------------------------------------
 
 
-def _json_kodla(veri: object, azami: int, hata: type[BelgeHatasi], ne: str) -> str:
+def json_kodla(veri: object, azami: int, hata: type[Exception], ne: str) -> str:
     """JSON nesnesini kanonik metne çevirir; nesne değilse, çevrilemiyorsa
-    (``NaN`` / sonsuz dahil) ya da sınırı aşıyorsa ``hata`` yükselir."""
+    (``NaN`` / sonsuz dahil) ya da sınırı aşıyorsa ``hata`` yükselir. Kural
+    genel: 4.5'te aday kayıt içeriği de aynı işlevle kodlanır."""
     if not isinstance(veri, Mapping):
         raise hata(f"{ne} JSON nesnesi (anahtar → değer) olmalı.")
     try:
@@ -222,7 +223,7 @@ def _json_kodla(veri: object, azami: int, hata: type[BelgeHatasi], ne: str) -> s
     return metin
 
 
-def _json_coz(metin: str) -> dict[str, Any]:
+def json_coz(metin: str) -> dict[str, Any]:
     veri: Any = json.loads(metin)
     if not isinstance(veri, dict):
         raise ValueError("saklanan JSON nesne değil.")
@@ -281,7 +282,7 @@ def okuma_icerigi(oturum: Session, okuma_id: int) -> dict[str, Any] | None:
     okuma = okuma_getir(oturum, okuma_id)
     if okuma.icerik is None:
         return None
-    return _json_coz(okuma.icerik)
+    return json_coz(okuma.icerik)
 
 
 def kaynak_getir(oturum: Session, kaynak_id: int) -> Kaynak:
@@ -306,7 +307,7 @@ def kaynak_konumu(oturum: Session, kaynak_id: int) -> dict[str, Any] | None:
     kaynak = kaynak_getir(oturum, kaynak_id)
     if kaynak.konum is None:
         return None
-    return _json_coz(kaynak.konum)
+    return json_coz(kaynak.konum)
 
 
 def kaynak_zinciri(oturum: Session, kaynak_id: int) -> KaynakZinciri:
@@ -449,7 +450,7 @@ def okuma_tamamla(oturum: Session, okuma_id: int, icerik: Mapping[str, Any]) -> 
             f"{OkumaDurumu.BASLADI.value} okuma tamamlanır, tamamlanan okuma "
             "değiştirilmez (yeni sürüm açın)."
         )
-    metin = _json_kodla(
+    metin = json_kodla(
         icerik, AZAMI_OKUMA_ICERIGI_BOYUTU, OkumaIcerigiGecersiz, "okuma içeriği"
     )
     with oturum.begin_nested():
@@ -478,7 +479,7 @@ def kaynak_olustur(
     metin = (
         None
         if konum is None
-        else _json_kodla(
+        else json_kodla(
             konum, AZAMI_KAYNAK_KONUMU_BOYUTU, KaynakKonumuGecersiz, "kaynak konumu"
         )
     )

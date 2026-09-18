@@ -24,7 +24,8 @@ Sözleşmeler:
   içinde ``kilitli`` yapılır; işlem rollback olursa kilit de kalkar. Kilitli
   sürüme ``tanim_islemleri`` yeni tanım eklemez.
 * **Özellik değeri** tanımın ``deger_turu``'ne göre doğrulanır ve kanonik
-  metin olarak saklanır: metin olduğu gibi; tam sayı ``str(int)`` (``bool``
+  metin olarak saklanır (kural ``deger_kodlama`` modülünde, 4.5'te aday
+  özellikle ortak): metin olduğu gibi; tam sayı ``str(int)`` (``bool``
   reddedilir); mantıksal ``"1"`` / ``"0"``; ondalık ``str(Decimal)`` (sonlu
   ``Decimal``; ``float`` reddedilir, ölçek varsayımı yoktur). Okuma aynı
   kuralla Python değerine döner. Nesneye yalnız kendi türünün özellikleri
@@ -71,11 +72,15 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from defteriki.cekirdek.deger_kodlama import (
+    DegerKodlamaHatasi,
+    degeri_coz,
+    degeri_kodla,
+)
 from defteriki.cekirdek.nesne_tablolari import Nesne, NesneIliskisi, NesneOzelligi
 from defteriki.cekirdek.tanim_islemleri import (
     TanimBulunamadi,
@@ -83,7 +88,6 @@ from defteriki.cekirdek.tanim_islemleri import (
     nesne_turu_getir,
 )
 from defteriki.cekirdek.tanim_tablolari import (
-    DegerTuru,
     HiyerarsiKurali,
     IliskiTanimi,
     OzellikTanimi,
@@ -141,38 +145,12 @@ class UstBaglanti:
 
 
 def _degeri_kodla(tanim: OzellikTanimi, deger: object) -> str:
-    """Python değerini tanımın türüne göre doğrular, kanonik metne çevirir."""
-    tur = DegerTuru(tanim.deger_turu)
-    hata = OzellikTuruUyusmuyor(
-        f"özellik {tanim.kod!r} {tur.value} bekler, {type(deger).__name__} verildi."
-    )
-    if tur is DegerTuru.METIN:
-        if not isinstance(deger, str):
-            raise hata
-        return deger
-    if tur is DegerTuru.TAM_SAYI:
-        if type(deger) is not int:
-            raise hata
-        return str(deger)
-    if tur is DegerTuru.MANTIKSAL:
-        if type(deger) is not bool:
-            raise hata
-        return "1" if deger else "0"
-    if not isinstance(deger, Decimal) or not deger.is_finite():
-        raise hata
-    return str(deger)
-
-
-def _degeri_coz(deger_turu: str, metin: str) -> object:
-    """Saklanan kanonik metni Python değerine çevirir."""
-    tur = DegerTuru(deger_turu)
-    if tur is DegerTuru.METIN:
-        return metin
-    if tur is DegerTuru.TAM_SAYI:
-        return int(metin)
-    if tur is DegerTuru.MANTIKSAL:
-        return metin == "1"
-    return Decimal(metin)
+    """Python değerini tanımın türüne göre doğrular, kanonik metne çevirir
+    (ortak kural ``deger_kodlama``; hata bu modülün hata modeline sarılır)."""
+    try:
+        return degeri_kodla(tanim.deger_turu, tanim.kod, deger)
+    except DegerKodlamaHatasi as hata:
+        raise OzellikTuruUyusmuyor(str(hata)) from None
 
 
 # --- getirme --------------------------------------------------------------------------
@@ -611,7 +589,7 @@ def ozellikleri_oku(oturum: Session, nesne_id: int) -> dict[str, object]:
         .where(NesneOzelligi.nesne_id == nesne.id)
         .order_by(OzellikTanimi.id)
     ).all()
-    return {kod: _degeri_coz(deger_turu, deger) for kod, deger_turu, deger in satirlar}
+    return {kod: degeri_coz(deger_turu, deger) for kod, deger_turu, deger in satirlar}
 
 
 # --- ilişki ---------------------------------------------------------------------------

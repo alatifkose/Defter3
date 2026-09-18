@@ -29,6 +29,9 @@ sütunda yer almaz.
   olduğu veritabanında zorlanır. ``konum`` isteğe bağlı, küçük, genel bir JSON
   yapıdır (sayfa, satır, bölge gibi yalnız yer bilgisi); belge içeriğinin
   ikinci kopyası değildir. Kaynak satırı değişmez; yanlışsa yenisi üretilir.
+  ``(id, okuma_id)`` benzersiz indeksi (göç 0007) aday nesne / aday kayıt
+  satırlarının bileşik dış anahtar hedefidir: bir aday öğe yalnız kendi
+  paketinin okumasına ait kaynağa bağlanabilir (``taslak_tablolari``).
 
 Zaman damgaları UTC'dir, saat dilimi bilgisi olmadan saklanır
 (``tanim_tablolari.simdi_utc``). Bu modül yalnız şemadır: satır yazmaz,
@@ -174,4 +177,7 @@ class Kaynak(TabloTabani):
         CheckConstraint(KONUM_JSON_KOSULU, name="konum_json"),
         Index(None, "belge_id"),
         Index(None, "okuma_id"),
+        # Aday nesne / aday kayıt provenance bileşik dış anahtarı için (göç
+        # 0007): kaynak satırı okumasıyla birlikte hedef olur.
+        Index(None, "id", "okuma_id", unique=True),
     )
