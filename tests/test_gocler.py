@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from alembic import command
 from sqlalchemy import text
 
 from defteriki import ayarlar as ay
@@ -109,6 +110,87 @@ def test_tekrar_upgrade_semayi_degistirmez(
         once = _sema(v)
         assert gocler.semayi_yukselt(v) == "0001"
         assert _sema(v) == once
+    finally:
+        v.kapat()
+
+
+SENTETIK_GOC_BIR = '''"""sentetik: tablo oluşturur"""
+revision = "s1"
+down_revision = None
+branch_labels = None
+depends_on = None
+
+import sqlalchemy as sa
+from alembic import op
+
+
+def upgrade() -> None:
+    op.create_table("sentetik_bir", sa.Column("id", sa.Integer(), primary_key=True))
+    op.execute("INSERT INTO sentetik_bir (id) VALUES (1)")
+
+
+def downgrade() -> None:
+    op.drop_table("sentetik_bir")
+'''
+
+SENTETIK_GOC_IKI = '''"""sentetik: tablo oluşturur, sonra bilinçli düşer"""
+revision = "s2"
+down_revision = "s1"
+branch_labels = None
+depends_on = None
+
+import sqlalchemy as sa
+from alembic import op
+
+
+def upgrade() -> None:
+    op.create_table("sentetik_iki", sa.Column("id", sa.Integer(), primary_key=True))
+    raise RuntimeError("sentetik göç hatası")
+
+
+def downgrade() -> None:
+    op.drop_table("sentetik_iki")
+'''
+
+
+def _sentetik_goc_dizini(tmp_path: Path) -> Path:
+    """Gerçek ``env.py`` ve şablonla, iki sentetik göçlü ayrı bir göç dizini.
+
+    Gerçek ``0001_genel_altyapi`` zincirine dokunulmaz.
+    """
+    dizin = tmp_path / "sentetik_goc"
+    (dizin / "versions").mkdir(parents=True)
+    for ad in ("env.py", "script.py.mako"):
+        (dizin / ad).write_bytes((gocler.GOC_DIZINI / ad).read_bytes())
+    (dizin / "versions" / "s1_sentetik.py").write_text(SENTETIK_GOC_BIR, "utf-8")
+    (dizin / "versions" / "s2_sentetik.py").write_text(SENTETIK_GOC_IKI, "utf-8")
+    return dizin
+
+
+def test_dusen_goc_adimi_ddl_dahil_tamamen_geri_alinir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """İkinci sentetik göç düşünce birinci göçün tablosu da kalmaz, sürüm ilerlemez,
+    veritabanı kullanılabilir kalır."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    sentetik = gocler.alembic_ayari()
+    sentetik.set_main_option("script_location", str(_sentetik_goc_dizini(tmp_path)))
+    try:
+        with pytest.raises(RuntimeError, match="sentetik göç hatası"):
+            with v.motor.begin() as baglanti:
+                sentetik.attributes["connection"] = baglanti
+                command.upgrade(sentetik, "head")
+
+        tablolar = [ad for tur, ad, _ in _sema(v) if tur == "table"]
+        assert "sentetik_bir" not in tablolar  # s1'in DDL'i de geri alındı
+        assert "sentetik_iki" not in tablolar
+        assert gocler.sema_surumu(v) is None  # sürüm ilerlemedi
+        assert tablolar == []  # alembic_version bile yazılmadı
+
+        assert gocler.semayi_yukselt(v) == "0001"  # veritabanı kullanılabilir
+        with v.islem() as oturum:
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
     finally:
         v.kapat()
 

@@ -116,10 +116,30 @@ def test_motor_calisma_dizininden_bagimsiz(
 
 
 def test_foreign_keys_ve_wal_her_baglantida_acik(veritabani: vt.Veritabani) -> None:
-    for _ in range(2):  # havuzdan gelen ikinci bağlantıda da
-        with veritabani.islem() as oturum:
-            assert oturum.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
-            assert oturum.execute(text("PRAGMA journal_mode")).scalar_one() == "wal"
+    """İki ayrı fiziksel DBAPI bağlantısı aynı anda açık; ikisinde de politika."""
+    with veritabani.motor.connect() as birinci, veritabani.motor.connect() as ikinci:
+        ham_birinci = birinci.connection.dbapi_connection
+        ham_ikinci = ikinci.connection.dbapi_connection
+        assert ham_birinci is not None and ham_ikinci is not None
+        assert ham_birinci is not ham_ikinci  # havuzdan aynı bağlantı değil
+        for baglanti in (birinci, ikinci):
+            assert baglanti.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+            assert baglanti.execute(text("PRAGMA journal_mode")).scalar_one() == "wal"
+
+    veritabani.kapat()  # havuz boşaldı; sonraki bağlantı yeniden kurulur
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+        assert oturum.execute(text("PRAGMA journal_mode")).scalar_one() == "wal"
+
+
+def test_baglanti_modern_transaction_kipinde(veritabani: vt.Veritabani) -> None:
+    """``autocommit=False``: bağlantı transaction içinde gelir (DDL de geri alınır)."""
+    with veritabani.motor.connect() as baglanti:
+        ham = baglanti.connection.dbapi_connection
+        assert ham is not None
+        assert ham.autocommit is False
+        baglanti.execute(text("SELECT 1"))
+        assert baglanti.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
 
 
 def test_hatali_dis_anahtar_yazimi_gercekten_reddedilir(
@@ -174,6 +194,23 @@ def test_hata_alan_islem_tamamen_rollback_olur_ve_hata_yukselir(
     assert _alt_sayisi(veritabani) == 0
     with veritabani.islem() as oturum:
         assert oturum.execute(text("SELECT count(*) FROM ust")).scalar_one() == 0
+
+
+def test_ddl_de_islem_icinde_geri_alinir(veritabani: vt.Veritabani) -> None:
+    """CREATE TABLE transaction içindedir: hata olunca tablo kalmaz."""
+    with pytest.raises(RuntimeError, match="sentetik"):
+        with veritabani.islem() as oturum:
+            oturum.execute(text("CREATE TABLE gecici (id INTEGER PRIMARY KEY)"))
+            oturum.execute(text("INSERT INTO gecici (id) VALUES (1)"))
+            raise RuntimeError("sentetik hata")
+
+    with veritabani.islem() as oturum:
+        tablolar = (
+            oturum.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+            .scalars()
+            .all()
+        )
+    assert "gecici" not in tablolar
 
 
 def test_islem_bittiginde_oturum_kapalidir(veritabani: vt.Veritabani) -> None:

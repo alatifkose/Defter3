@@ -11,6 +11,15 @@ Bu modül hiçbir domain'i bilmez ve hiçbir tablo tanımlamaz. Sağladıkları:
   kurulmak diske dokunmaz, dosya ilk bağlantıda oluşur.
 * SQLite bağlantı politikası tek yerde: her bağlantıda ``foreign_keys=ON`` ve
   ``journal_mode=WAL`` (``BAGLANTI_PRAGMALARI``).
+* Transaction kontrolü: ``sqlite3`` modülünün Python 3.12+ ``autocommit=False``
+  kipi (PEP 249). Eski kipte ``sqlite3`` yalnız DML öncesi örtük ``BEGIN``
+  açar, DDL (``CREATE TABLE``) transaction dışında kalır ve geri alınamaz;
+  yeni kipte bağlantı açılır açılmaz ve her ``commit``/``rollback`` sonrası
+  ertelenmiş bir transaction başlar, DDL dahil her şey içinde kalır. Bu
+  yüzden göç adımı düşerse DDL de geri alınır (``gocler.semayi_yukselt``).
+  PRAGMA'lar transaction içinde çalışmaz (``journal_mode`` değiştirilemez,
+  ``foreign_keys`` sessizce yok sayılır); bağlantı olayında ``autocommit``
+  geçici olarak açılıp PRAGMA'lar uygulanır, sonra kapatılır.
 * ``Veritabani.islem``: işlem sınırı. Bir iş = bir kısa ömürlü oturum = bir
   transaction. Normal çıkışta ``commit``, istisnada ``rollback`` ve istisna
   yeniden yükselir, her durumda oturum kapanır. Model ya da ileride gelecek
@@ -47,6 +56,9 @@ BAGLANTI_PRAGMALARI: tuple[tuple[str, str], ...] = (
 """Her yeni bağlantıda sırayla uygulanır; ``journal_mode`` dosyada kalıcıdır,
 ``foreign_keys`` bağlantı başınadır ve her seferinde açılmalıdır."""
 
+BAGLANTI_ARGUMANLARI: dict[str, object] = {"autocommit": False}
+"""``sqlite3.connect`` argümanları: modern transaction kontrolü (DDL dahil)."""
+
 
 class TabloTabani(DeclarativeBase):
     """Bütün tabloların ortak tabanı; tek ``metadata`` buradadır."""
@@ -63,7 +75,7 @@ def veritabani_url(yol: Path) -> URL:
 
 def motor_olustur(yol: Path) -> Engine:
     """Engine kurar; diske dokunmaz. Bağlantı politikası her bağlantıda uygulanır."""
-    motor = create_engine(veritabani_url(yol))
+    motor = create_engine(veritabani_url(yol), connect_args=BAGLANTI_ARGUMANLARI)
     event.listen(motor, "connect", _baglantiyi_ayarla)
     return motor
 
@@ -71,12 +83,23 @@ def motor_olustur(yol: Path) -> Engine:
 def _baglantiyi_ayarla(
     dbapi_baglantisi: DBAPIConnection, _kayit: ConnectionPoolEntry
 ) -> None:
-    imlec = dbapi_baglantisi.cursor()
+    """Yeni DBAPI bağlantısında PRAGMA'ları transaction dışında uygular.
+
+    ``autocommit=False`` kipinde bağlantı açık bir (ertelenmiş) transaction ile
+    gelir; PRAGMA'lar orada etkisiz kalır. ``autocommit`` geçici olarak açılır
+    (boş transaction biter), PRAGMA'lar çalışır, sonra kapatılır (yeni
+    ertelenmiş transaction başlar).
+    """
+    dbapi_baglantisi.autocommit = True
     try:
-        for ad, deger in BAGLANTI_PRAGMALARI:
-            imlec.execute(f"PRAGMA {ad}={deger}")
+        imlec = dbapi_baglantisi.cursor()
+        try:
+            for ad, deger in BAGLANTI_PRAGMALARI:
+                imlec.execute(f"PRAGMA {ad}={deger}")
+        finally:
+            imlec.close()
     finally:
-        imlec.close()
+        dbapi_baglantisi.autocommit = False
 
 
 class Veritabani:

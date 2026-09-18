@@ -3,8 +3,10 @@
 Cowork'un DEFTERIKI'ye ulaştığı tek kapı. ``uv run defteriki-mcp`` bu modülün
 ``main`` fonksiyonunu çalıştırır; sunucu stdio taşımasıyla konuşur.
 
-Aşama 3 kapsamı: tek araç ``sistem_durumu``. Ürün verisi yazılmaz, veritabanı
-açılmaz.
+Kapsam: tek araç ``sistem_durumu``. Ürün verisi yazılmaz; göç çalıştırılmaz.
+``sistem_durumu`` var olan veritabanı dosyasının Alembic şema sürümünü okur
+(``gocler.sema_surumu``); dosya yoksa bağlantı açmaz, dosya oluşturmaz, ``yok``
+döner.
 
 Kurallar:
 
@@ -24,6 +26,7 @@ import json
 import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Any
 
 from mcp.server.mcpserver import Context, MCPServer
@@ -36,6 +39,8 @@ from defteriki.baslangic import (
     BaslangicHatasi,
     ortami_hazirla,
 )
+from defteriki.cekirdek import gocler
+from defteriki.cekirdek.veritabani import Veritabani
 
 SUNUCU_ADI = "defteriki"
 PAKET_ADI = "defteriki"
@@ -73,7 +78,8 @@ class SistemDurumu:
     uygulama_surumu: str
     ortam: str
     sema_surumu: str
-    """Veritabanı şema sürümü; henüz veritabanı olmadığından ``yok``."""
+    """Veritabanındaki Alembic şema sürümü (``0001`` ...); veritabanı dosyası
+    yoksa ya da göç uygulanmamışsa ``yok``."""
     yetenekler: list[str]
     """Bu sunucunun sunduğu araç adları."""
 
@@ -86,12 +92,27 @@ def uygulama_surumu() -> str:
         return SURUM_BILINMIYOR
 
 
+def sema_surumu_oku(veritabani_yolu: Path) -> str:
+    """Gerçek şema sürümü; dosya yoksa bağlantı açılmaz, dosya oluşmaz.
+
+    Dosya var ama göç uygulanmamışsa da ``yok`` döner. Bağlantı okuma sonrası
+    kapatılır; yanıtta yol yoktur.
+    """
+    if not veritabani_yolu.is_file():
+        return SEMA_SURUMU_YOK
+    veritabani = Veritabani(veritabani_yolu)
+    try:
+        return gocler.sema_surumu(veritabani) or SEMA_SURUMU_YOK
+    finally:
+        veritabani.kapat()
+
+
 def sistem_durumu(ayarlar: Ayarlar) -> SistemDurumu:
     """Uygulamanın durumunu döndürür; yol ya da sır içermez."""
     return SistemDurumu(
         uygulama_surumu=uygulama_surumu(),
         ortam=ayarlar.ortam.value,
-        sema_surumu=SEMA_SURUMU_YOK,
+        sema_surumu=sema_surumu_oku(ayarlar.veritabani_yolu),
         yetenekler=[ARAC_SISTEM_DURUMU],
     )
 

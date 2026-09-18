@@ -59,6 +59,18 @@ zorunlu) ve `PRAGMA journal_mode=WAL`. `TabloTabani` bütün tabloların ortak
 tabanıdır; tek `metadata`, isimli kısıt kalıbı (SQLite'ta Alembic `batch`
 kipi için gerekir).
 
+**Transaction kontrolü.** Bağlantılar `sqlite3` modülünün Python 3.12+
+`autocommit=False` kipiyle açılır (`connect_args`). Eski kipte `sqlite3`
+yalnız DML öncesi örtük `BEGIN` açar; `CREATE TABLE` gibi DDL transaction
+dışında kalır ve geri alınamaz (Alembic de SQLite için `transactional_ddl`
+saymaz). Yeni kipte bağlantı ertelenmiş bir transaction ile gelir ve her
+`commit`/`rollback` sonrası yenisi başlar; DDL dahil her şey içinde kalır.
+PRAGMA'lar transaction içinde çalışmadığından (`journal_mode` değiştirilemez,
+`foreign_keys` sessizce yok sayılır) bağlantı olayında `autocommit` geçici
+olarak açılır, PRAGMA'lar uygulanır, sonra kapatılır. Bu düzenleme 2026-09-18
+incelemesinde eklendi; önceki metin göçlerin tek transaction olduğunu
+kanıtsız söylüyordu.
+
 **İşlem sınırı.** `Veritabani(yol).islem()` bağlam yöneticisi: bir iş = bir
 kısa ömürlü oturum = bir transaction. Normal çıkışta `commit`, istisnada
 `rollback` ve istisna yeniden yükselir, her durumda oturum kapanır. Model ya
@@ -81,7 +93,16 @@ uv run alembic upgrade head
 Süreç içinde aynı iş `gocler.semayi_yukselt(veritabani)` ile yapılır (tek
 transaction, aynı `env.py`); `gocler.sema_surumu` sürümü okur,
 `gocler.beklenen_sema_surumu` zincirin başını verir. Otomatik göç (dağıtım
-politikası) ayrı bir karardır, bugün yoktur.
+politikası) ayrı bir karardır, bugün yoktur. Atomiklik kanıtı
+(`test_dusen_goc_adimi_ddl_dahil_tamamen_geri_alinir`): gerçek `env.py` ve
+şablonla kurulmuş ayrı bir sentetik göç dizininde birinci göç tablo
+oluşturup satır yazar, ikincisi tablo oluşturup bilinçli düşer; `upgrade
+head` hata verir, iki tablo da kalmaz, `alembic_version` yazılmamıştır
+(sürüm ilerlememiştir), ardından gerçek zincir aynı dosyada `0001`e çıkar ve
+`integrity_check` temizdir. Gerçek `0001_genel_altyapi` göçüne dokunulmaz.
+Aynı senaryo eski `sqlite3` kipinde denendiğinde birinci göçün tablosu
+(`sentetik_bir`) ve boş bir `alembic_version` tablosu geride kalıyordu;
+kanıt bu farktır.
 
 Dikkat: komut hangi veritabanına gideceğini ortam değişkenlerinden okur.
 Kullanıcı düzeyi `setx DEFTERIKI_VERI_KOKU` hâlâ eski hattın kökünü
@@ -96,10 +117,14 @@ verisi için ilk göç 2026-09-18'de bu şekilde uygulandı:
 gerçek SQLite dosyalarıyla, `test` ortamı ve `tmp_path` altında kök;
 `:memory:` yok. Kanıtlananlar: import ve engine kurulumu dosya oluşturmaz;
 adres verilen mutlak yoldan üretilir, göreli yol reddedilir, çalışma dizini
-etkisizdir; her bağlantıda `foreign_keys=1` ve `journal_mode=wal`; hatalı dış
-anahtar yazımı gerçekten reddedilir, geçerli olan kabul edilir; başarılı işlem
-commit olur, hata alan işlem tamamen rollback olur ve hata yükselir, oturum
-kapanır; test veritabanı ve WAL dosyası yalnız test kökünde oluşur; sıfır
+etkisizdir; aynı anda açık iki ayrı fiziksel DBAPI bağlantısında (kimlikleri
+farklı) ve havuz boşaltıldıktan sonra kurulan yeni bağlantıda
+`foreign_keys=1` ve `journal_mode=wal`; bağlantı `autocommit=False`
+kipindedir; hatalı dış anahtar yazımı gerçekten reddedilir, geçerli olan
+kabul edilir; başarılı işlem commit olur, hata alan işlem tamamen rollback
+olur ve hata yükselir, oturum kapanır; işlem içindeki DDL de geri alınır
+(`CREATE TABLE` + hata → tablo yok); test veritabanı ve WAL dosyası yalnız
+test kökünde oluşur; sıfır
 veritabanından `upgrade head` `0001`e çıkar ve yalnız `alembic_version`
 tablosu vardır; iki sıfır veritabanı aynı şemayı üretir; tekrar `upgrade`
 şemayı değiştirmez; başlangıç akışı göç çalıştırmaz; `alembic.ini` adres
@@ -217,8 +242,13 @@ kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çık�
 `1` olur; stdout'a hiçbir şey yazılmaz.
 
 Bu sürümde tek araç var: `sistem_durumu`. Uygulama sürümü, ortam adı, şema
-sürümü (`yok`) ve yetenek listesini döndürür; yol, anahtar ya da ortam
-değişkeni içermez. Ürün verisi yazan araç henüz yoktur. Aşama 3'te kullanılan
+sürümü ve yetenek listesini döndürür; yol, anahtar ya da ortam değişkeni
+içermez. Şema sürümü gerçektir (Aşama 4.1): veritabanı dosyası varsa
+Alembic'in `alembic_version` tablosundaki sürüm (`0001`; ileride zincirin
+başı neyse o), dosya yoksa ya da göç uygulanmamışsa `yok`. Dosya yokken
+bağlantı açılmaz, boş SQLite dosyası oluşmaz; araç göç çalıştırmaz. Testler
+dosya yok, dosya var ama göçsüz ve göç uygulanmış senaryolarını süreç içinde
+ve stdio üzerinden ayrı ayrı sınar. Ürün verisi yazan araç henüz yoktur. Aşama 3'te kullanılan
 geçici deneme araçları (`dosya_dene`, `deneme_baslat`, `deneme_durumu`)
 kapı temizliğinde kaldırıldı; ne ölçtükleri "Cowork entegrasyonu"
 bölümünde. Gelen dizini ayarı (`DEFTERIKI_GELEN_DIZINI`) kaldı: Aşama 4'te
