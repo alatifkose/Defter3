@@ -23,9 +23,38 @@ ettirilemez. Devam edildiğinde aynı paket aynı taslaklarla sürer; yeni paket
 açılıp içerik kopyalanmaz. İptal fiziksel silme değildir: hiçbir aday satır,
 kaynak, okuma, belge ya da arşiv dosyası silinmez; paket ve içeriği
 sorgulanabilir kalır. Durum geçişi koşullu güncellemedir (``UPDATE ... WHERE
-durum = eski``): eşzamanlı ikinci geçiş satır etkilemez ve
-``PaketDurumuGecersiz`` verir; benzersizlik kısıtları (aynı aday özellik,
-aynı aday ilişki, aynı kayıt-nesne bağı) yarışlarda son savunmadır.
+durum = eski``): aynı bağlantıda araya giren başka bir değişiklik satır
+etkilemez ve ``PaketDurumuGecersiz`` verir.
+
+**Eşzamanlı yazma sözleşmesi** (2026-09-19 incelemesi; iki bağlantılı gerçek
+yarış testleriyle kanıtlanır). Bu servisler önce okur (SQLite WAL anlık
+görüntüsü), sonra yazar. İki bağımsız bağlantı aynı satırı ya da aynı paketi
+aynı anda değiştirmeye kalkarsa SQLite tam olarak birini yazdırır; diğeri
+yazma anında kilit / anlık görüntü çakışması (``database is locked`` /
+``busy``; ``SQLITE_BUSY_SNAPSHOT`` için busy handler çağrılmaz) ya da
+yarışan ilk yazımda benzersizlik ihlali alır. Bu ham hatalar servis
+sözleşmesi değildir; her yazma tek bir sınırdan geçer (``_yazma_siniri``) ve
+**dar** eşlenir:
+
+* kilit / anlık görüntü çakışması (``OperationalError``, metinde ``locked``
+  ya da ``busy``) → ``TaslakYazmaCakismasi``;
+* işlemin kendi tablosundaki benzersizlik ihlali (``IntegrityError``,
+  ``UNIQUE constraint failed: <tablo>.``) → işlemin anlamına göre: aday
+  ilişki ve kayıt-nesne bağı için ``MukerrerAday`` (satır zaten var), aday
+  özelliğin ilk yazımı için ``TaslakYazmaCakismasi`` (yarışan iki ilk yazım;
+  "son yazan kazanır" icat edilmez);
+* başka her veritabanı hatası (dış anahtar, kontrol kısıtı, başka tablonun
+  benzersizliği, disk / dosya hataları) olduğu gibi yükselir.
+
+``TaslakYazmaCakismasi`` alan çağıranın işlemi artık yazamaz (anlık görüntü
+eskidir): işlemi geri alır ve **yeni işlemde** yeniden dener; yeniden
+denemede ön denetim güncel veriyi görür ve olağan sonucu verir (mükerrer ise
+``MukerrerAday``, paket artık ``calisiyor`` değilse ``PaketDurumuGecersiz``,
+değilse yazma başarılı). Yeniden deneme çağıranındır; serviste retry döngüsü
+yoktur. Paket durum geçişi ile taslak yazımı yarışırsa da tam biri yazar:
+ya taslak önce yazılır sonra durum değişir, ya durum önce değişir ve taslak
+yazımı ``TaslakYazmaCakismasi`` (yeniden denemede ``PaketDurumuGecersiz``)
+alır; yarım satır ve terminal / bekleyen pakete sessiz yazma yoktur.
 
 **Taslak eksik olabilir, yapısal olarak anlamsız olamaz.** Aday nesne zorunlu
 özelliği ya da zorunlu üst bağlantısı olmadan var olabilir; aday kayıt
@@ -76,20 +105,24 @@ Hata modeli (``IslemPaketiHatasi`` altında): ``PaketBulunamadi``,
 ``PaketUyusmazligi`` (başka paketin adayı, başka okumanın kaynağı);
 ``GecersizAdayOzellik``, ``GecersizAdayIliski``, ``GecersizTaslakIcerik``
 (``ValueError``); ``MukerrerAday`` (aynı aday ilişki ya da bağ);
-``AdayKullanimda`` (silme reddi). Tanım hataları (``TanimBulunamadi``) ve
-belge zinciri hataları (``OkumaBulunamadi``, ``OkumaDurumuGecersiz``,
-``KaynakBulunamadi``) kendi modüllerinden olduğu gibi gelir. Ham
-``IntegrityError`` sözleşme değildir. Mesajlarda aday kayıt içeriği yoktur;
-bu modül hiçbir şeyi günlüğe yazmaz.
+``AdayKullanimda`` (silme reddi); ``TaslakYazmaCakismasi`` (eşzamanlı yazma
+çatışması; yeni işlemde yeniden denenir). Tanım hataları
+(``TanimBulunamadi``) ve belge zinciri hataları (``OkumaBulunamadi``,
+``OkumaDurumuGecersiz``, ``KaynakBulunamadi``) kendi modüllerinden olduğu
+gibi gelir. Ham ``IntegrityError`` / ``OperationalError`` yalnız yukarıdaki
+dar eşlemeyle çevrilir, kalanı olduğu gibi yükselir. Mesajlarda aday kayıt
+içeriği yoktur; bu modül hiçbir şeyi günlüğe yazmaz.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from defteriki.cekirdek.belge_islemleri import (
@@ -119,6 +152,9 @@ from defteriki.cekirdek.tanim_tablolari import (
     simdi_utc,
 )
 from defteriki.cekirdek.taslak_tablolari import (
+    ADAY_KAYIT_NESNE,
+    ADAY_NESNE_ILISKISI,
+    ADAY_NESNE_OZELLIGI,
     AdayKayit,
     AdayKayitNesne,
     AdayNesne,
@@ -180,6 +216,13 @@ class MukerrerAday(IslemPaketiHatasi):
 class AdayKullanimda(IslemPaketiHatasi):
     """Aday nesne bir aday ilişkide ya da kayıt-nesne bağında kullanılıyor;
     silme reddedildi."""
+
+
+class TaslakYazmaCakismasi(IslemPaketiHatasi):
+    """Eşzamanlı yazma çatışması: başka bir bağlantı aynı anda yazdı (SQLite
+    kilit / anlık görüntü çakışması ya da yarışan ilk yazımda benzersizlik
+    ihlali). Bu işlem artık yazamaz; çağıran işlemi geri alır ve yeni işlemde
+    yeniden dener."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +339,49 @@ def paket_ayrinti(oturum: Session, paket_id: int) -> PaketAyrintisi:
     return PaketAyrintisi(paket, nesneler, ozellikler, iliskiler, kayitlar, baglar)
 
 
+# --- yazma sınırı (merkezi) ----------------------------------------------------------
+
+
+def kilit_cakismasi_mi(hata: OperationalError) -> bool:
+    """SQLite kilit ya da anlık görüntü çakışması (``database is locked`` /
+    ``busy``); başka ``OperationalError`` (disk, dosya, sözdizimi) değildir."""
+    metin = str(hata.orig).lower()
+    return "locked" in metin or "busy" in metin
+
+
+def benzersizlik_ihlali_mi(hata: IntegrityError, tablo: str) -> bool:
+    """Yalnız ``tablo`` üzerindeki benzersizlik ihlali; dış anahtar, kontrol
+    kısıtı ve başka tabloların benzersizliği değildir."""
+    return str(hata.orig).startswith(f"UNIQUE constraint failed: {tablo}.")
+
+
+@contextmanager
+def _yazma_siniri(
+    oturum: Session,
+    tablo: str | None = None,
+    benzersizlik_hatasi: type[IslemPaketiHatasi] = TaslakYazmaCakismasi,
+    benzersizlik_mesaji: str = "",
+) -> Generator[None, None, None]:
+    """Her yazma işlevinin tek kapısı: SAVEPOINT (``begin_nested``) + dar hata
+    eşleme. Kilit / anlık görüntü çakışması ``TaslakYazmaCakismasi``;
+    ``tablo`` verilmişse o tablonun benzersizlik ihlali ``benzersizlik_hatasi``;
+    başka veritabanı hataları olduğu gibi yükselir."""
+    try:
+        with oturum.begin_nested():
+            yield
+    except IntegrityError as hata:
+        if tablo is not None and benzersizlik_ihlali_mi(hata, tablo):
+            raise benzersizlik_hatasi(benzersizlik_mesaji) from None
+        raise
+    except OperationalError as hata:
+        if kilit_cakismasi_mi(hata):
+            raise TaslakYazmaCakismasi(
+                "eşzamanlı yazma çatışması: başka bir bağlantı aynı anda yazdı; "
+                "işlemi geri alıp yeni işlemde yeniden deneyin."
+            ) from None
+        raise
+
+
 # --- paket durumu (merkezi) -----------------------------------------------------------
 
 
@@ -320,7 +406,7 @@ def _durumu_degistir(oturum: Session, paket_id: int, yeni: PaketDurumu) -> Islem
             f"işlem paketi {paket.id}: {eski.value} → {yeni.value} geçişi izinli "
             f"değil{' (iptal terminaldir)' if eski is PaketDurumu.IPTAL else ''}."
         )
-    with oturum.begin_nested():
+    with _yazma_siniri(oturum):
         guncellenen = oturum.execute(
             update(IslemPaketi)
             .where(IslemPaketi.id == paket.id, IslemPaketi.durum == eski.value)
@@ -349,7 +435,7 @@ def paket_olustur(oturum: Session, okuma_id: int) -> IslemPaketi:
             f"okuma {okuma.id} {okuma.durum} durumunda; işlem paketi yalnız "
             f"{OkumaDurumu.TAMAMLANDI.value} okumadan oluşturulur."
         )
-    with oturum.begin_nested():
+    with _yazma_siniri(oturum):
         simdi = simdi_utc()
         paket = IslemPaketi(
             okuma_id=okuma.id,
@@ -450,7 +536,7 @@ def aday_nesne_ekle(
         kodlanmis[kod] = _degeri_kodla(tur, tanimlar[kod], deger)
     if kaynak_id is not None:
         _kaynagi_dogrula(oturum, paket, kaynak_id)
-    with oturum.begin_nested():
+    with _yazma_siniri(oturum):
         aday = AdayNesne(
             islem_paketi_id=paket.id,
             okuma_id=paket.okuma_id,
@@ -497,7 +583,7 @@ def aday_nesne_sil(oturum: Session, aday_nesne_id: int) -> None:
         raise AdayKullanimda(
             f"aday nesne {aday.id} aday kayda bağlı; önce bağ çözülür."
         )
-    with oturum.begin_nested():
+    with _yazma_siniri(oturum):
         for ozellik in oturum.execute(
             select(AdayNesneOzelligi).where(AdayNesneOzelligi.aday_nesne_id == aday.id)
         ).scalars():
@@ -527,7 +613,13 @@ def aday_ozellik_yaz(
             AdayNesneOzelligi.ozellik_tanimi_id == tanim.id,
         )
     ).scalar_one_or_none()
-    with oturum.begin_nested():
+    with _yazma_siniri(
+        oturum,
+        ADAY_NESNE_OZELLIGI,
+        TaslakYazmaCakismasi,
+        f"aday nesne {aday.id} üzerinde {kod!r} özelliği başka bir bağlantı "
+        "tarafından aynı anda yazıldı; yeni işlemde yeniden deneyin.",
+    ):
         if satir is None:
             satir = AdayNesneOzelligi(
                 aday_nesne_id=aday.id,
@@ -559,7 +651,7 @@ def aday_ozellik_sil(oturum: Session, aday_nesne_id: int, kod: str) -> None:
         raise GecersizAdayOzellik(
             f"aday nesne {aday.id} üzerinde {kod!r} özelliği yazılı değil."
         )
-    with oturum.begin_nested():
+    with _yazma_siniri(oturum):
         oturum.delete(satir)
         oturum.flush()
 
@@ -616,7 +708,12 @@ def aday_iliski_ekle(
         raise MukerrerAday(
             f"aday ilişki {iliski.kod!r} aday nesne {kaynak.id} → {hedef.id} zaten var."
         )
-    with oturum.begin_nested():
+    with _yazma_siniri(
+        oturum,
+        ADAY_NESNE_ILISKISI,
+        MukerrerAday,
+        f"aday ilişki {iliski.kod!r} aday nesne {kaynak.id} → {hedef.id} zaten var.",
+    ):
         satir = AdayNesneIliskisi(
             islem_paketi_id=paket.id,
             iliski_tanimi_id=iliski.id,
@@ -656,7 +753,7 @@ def aday_iliski_kaldir(oturum: Session, aday_iliski_id: int) -> None:
     """Aday ilişkiyi kaldırır; en az üst kuralı aranmaz (taslak eksik olabilir)."""
     satir = _aday_iliski_getir(oturum, aday_iliski_id)
     _yazilabilir_paket(oturum, satir.islem_paketi_id)
-    with oturum.begin_nested():
+    with _yazma_siniri(oturum):
         oturum.delete(satir)
         oturum.flush()
 
@@ -696,7 +793,7 @@ def aday_kayit_ekle(
     metin = _icerigi_kodla(icerik)
     if kaynak_id is not None:
         _kaynagi_dogrula(oturum, paket, kaynak_id)
-    with oturum.begin_nested():
+    with _yazma_siniri(oturum):
         aday = AdayKayit(
             islem_paketi_id=paket.id,
             okuma_id=paket.okuma_id,
@@ -717,7 +814,7 @@ def aday_kayit_icerigini_degistir(
     aday = aday_kayit_getir(oturum, aday_kayit_id)
     _yazilabilir_paket(oturum, aday.islem_paketi_id)
     metin = _icerigi_kodla(icerik)
-    with oturum.begin_nested():
+    with _yazma_siniri(oturum):
         aday.icerik = metin
         oturum.flush()
     return aday
@@ -733,7 +830,7 @@ def aday_kayit_sil(oturum: Session, aday_kayit_id: int) -> None:
     nesneler kalır."""
     aday = aday_kayit_getir(oturum, aday_kayit_id)
     _yazilabilir_paket(oturum, aday.islem_paketi_id)
-    with oturum.begin_nested():
+    with _yazma_siniri(oturum):
         for bag in oturum.execute(
             select(AdayKayitNesne).where(AdayKayitNesne.aday_kayit_id == aday.id)
         ).scalars():
@@ -770,7 +867,12 @@ def aday_kayit_nesne_bagla(
         raise MukerrerAday(
             f"aday kayıt {kayit.id} ↔ aday nesne {nesne.id} bağı zaten var."
         )
-    with oturum.begin_nested():
+    with _yazma_siniri(
+        oturum,
+        ADAY_KAYIT_NESNE,
+        MukerrerAday,
+        f"aday kayıt {kayit.id} ↔ aday nesne {nesne.id} bağı zaten var.",
+    ):
         bag = AdayKayitNesne(
             islem_paketi_id=paket.id, aday_kayit_id=kayit.id, aday_nesne_id=nesne.id
         )
@@ -795,6 +897,6 @@ def aday_kayit_nesne_coz(
         raise AdayBulunamadi(
             f"aday kayıt {kayit.id} ↔ aday nesne {aday_nesne_id} bağı yok."
         )
-    with oturum.begin_nested():
+    with _yazma_siniri(oturum):
         oturum.delete(bag)
         oturum.flush()

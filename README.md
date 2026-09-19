@@ -878,9 +878,36 @@ Yeniden devam edildiğinde aynı paket aynı taslaklarla sürer; yeni paket
 açılıp içerik kopyalanmaz. Paket durumu yazma yetkisini belirler: aday veriyi
 değiştiren bütün servisler tek merkezi denetimden geçer (`_yazilabilir_paket`);
 her servise ayrı durum mantığı yoktur. Durum geçişi koşullu güncellemedir
-(`UPDATE … WHERE durum = eski`): eşzamanlı ikinci geçiş satır etkilemez ve
-`PaketDurumuGecersiz` verir; büyük bir kilit çerçevesi yoktur, benzersizlik
-kısıtları yarışlarda son savunmadır.
+(`UPDATE … WHERE durum = eski`): aynı bağlantıda araya giren bir değişiklik
+satır etkilemez ve `PaketDurumuGecersiz` verir.
+
+**Eşzamanlı yazma sözleşmesi (2026-09-19 incelemesi).** Servisler önce
+okur (SQLite WAL anlık görüntüsü), sonra yazar. İki bağımsız bağlantı aynı
+satırı ya da aynı paketi aynı anda değiştirmeye kalkarsa SQLite tam olarak
+birini yazdırır; diğeri yazma anında kilit / anlık görüntü çakışması alır
+(`database is locked` / `busy`; `SQLITE_BUSY_SNAPSHOT` için busy handler
+çağrılmaz) ya da yarışan ilk yazımda benzersizlik ihlali. Bu ham hatalar
+servis sözleşmesi değildir: her yazma tek sınırdan geçer (`_yazma_siniri`,
+SAVEPOINT + dar eşleme) ve yalnız şunlar çevrilir:
+
+| Veritabanı hatası | Servis sonucu |
+|---|---|
+| `OperationalError`, metinde `locked` ya da `busy` (kilit / anlık görüntü çakışması) | `TaslakYazmaCakismasi` |
+| `IntegrityError`, `UNIQUE constraint failed: aday_nesne_iliskisi.…` (aday ilişki eklerken) | `MukerrerAday` |
+| `IntegrityError`, `UNIQUE constraint failed: aday_kayit_nesne.…` (bağ eklerken) | `MukerrerAday` |
+| `IntegrityError`, `UNIQUE constraint failed: aday_nesne_ozelligi.…` (aday özelliğin ilk yazımında) | `TaslakYazmaCakismasi` (iki ilk yazım yarıştı; "son yazan kazanır" icat edilmez) |
+| başka her veritabanı hatası (dış anahtar, kontrol kısıtı, başka tablonun benzersizliği, disk / dosya) | olduğu gibi yükselir |
+
+`TaslakYazmaCakismasi` alan çağıranın işlemi artık yazamaz (anlık görüntü
+eskidir): işlemi geri alır ve yeni işlemde yeniden dener; yeniden denemede ön
+denetim güncel veriyi görür ve olağan sonucu verir (mükerrerse
+`MukerrerAday`, paket artık `calisiyor` değilse `PaketDurumuGecersiz`, değilse
+yazma başarılı). Yeniden deneme çağıranındır; serviste retry döngüsü, sonsuz
+deneme ya da iyimser kilit çerçevesi yoktur. Kanıt yalnız aşağıdaki iki
+bağlantılı testlerin kapsadığı senaryolardır: aynı aday ilişki, aynı
+kayıt-nesne bağı, aynı yeni aday özellik, aynı paketin durum geçişi, taslak
+yazımı ile durum geçişi. Daha genel bir "sistem eşzamanlılığı destekler"
+iddiası yoktur.
 
 **Aday nesne, özellik, ilişki.** `aday_nesne_ekle(oturum, paket_id,
 nesne_turu_id, ozellikler=None, kaynak_id=None)`; `aday_ozellik_yaz`
@@ -957,9 +984,12 @@ yok), dış işlem kullanılabilir kalır ve sonraki geçerli iş commit edilir.
 **Hata modeli (`IslemPaketiHatasi` altında):** `PaketBulunamadi`,
 `AdayBulunamadi` (`LookupError`); `PaketDurumuGecersiz`; `PaketUyusmazligi`;
 `GecersizAdayOzellik`, `GecersizAdayIliski`, `GecersizTaslakIcerik`
-(`ValueError`); `MukerrerAday`; `AdayKullanimda`. `TanimBulunamadi`,
+(`ValueError`); `MukerrerAday`; `AdayKullanimda`; `TaslakYazmaCakismasi`
+(eşzamanlı yazma çatışması; yeni işlemde yeniden denenir). `TanimBulunamadi`,
 `OkumaBulunamadi`, `OkumaDurumuGecersiz`, `KaynakBulunamadi` kendi
-modüllerinden olduğu gibi gelir. Ham `IntegrityError` sözleşme değildir. Genel
+modüllerinden olduğu gibi gelir. Ham `IntegrityError` / `OperationalError`
+yalnız yukarıdaki tablodaki dar eşlemeyle çevrilir, kalanı olduğu gibi
+yükselir. Genel
 `islem_anahtari` (idempotency) sistemi ve denetim olay sistemi bu aşamada
 kurulmadı (4.11 ve 4.6); satırlar yalnız mekanik zaman damgası taşır.
 
@@ -967,8 +997,9 @@ kurulmadı (4.11 ve 4.6); satırlar yalnız mekanik zaman damgası taşır.
 için; `tests/test_mimari_sinir.py` taslak / kesin ayrımı için). Paket:
 tamamlanmış okumadan oluşturma, `basladi` ve olmayan okumadan red (ham SQL
 ile de), aynı okumadan çoklu paket, bütün izinli ve izinsiz geçişler,
-`iptal` terminal, durum değeri kontrol kısıtı, eşzamanlı durum değişiminde
-koşullu güncelleme reddi. Yazma yetkisi: on bir yazma servisi bekleyen ve
+`iptal` terminal, durum değeri kontrol kısıtı, aynı bağlantıda araya giren
+durum değişikliğinde koşullu güncelleme reddi. Yazma yetkisi: on bir yazma
+servisi bekleyen ve
 iptal pakette reddedilir, içerik sorgulanabilir kalır; devam edilen pakette
 aynı taslaklarla hepsi çalışır, yeni paket açılmaz. Aday nesne: kesin `nesne`
 satırı oluşmaz, `nesneleri_listele` boş, aday kimliği nesne kimliği değil,
@@ -1008,7 +1039,29 @@ hatası. Mimari sınır: taslak modülleri kesin nesne modüllerine, kesin nesne
 modülleri taslak modüllerine doğrudan / dolaylı ulaşmaz (denetleyicinin
 kendisi sentetik ağaçta sınanır), taslak modülleri ham SQL kullanmaz;
 finansal ad denetimi ve çekirdek → finans yasağı yeni modülleri ve `0007`yi
-kapsar.
+kapsar. **Gerçek eşzamanlılık (iki bağımsız `Veritabani`, ayrı bağlantı,
+ayrı iş parçacığı, bariyerle zorlanan yarış; ikisi de kendi anlık
+görüntüsüyle "satır yok / paket calisiyor" görüp yazmaya gider):** aynı aday
+ilişki → tek satır, biri başarılı, diğeri `MukerrerAday` ya da
+`TaslakYazmaCakismasi`, yeniden denemede `MukerrerAday`; aynı kayıt-nesne
+bağı → aynı sözleşme; aynı yeni aday özelliğe iki farklı değer → tek satır,
+değer kazananınki, kaybeden `TaslakYazmaCakismasi`, sessiz üzerine yazma yok;
+aynı `calisiyor` paket aynı anda `bekliyor` ve `iptal`e → tam bir geçiş,
+diğeri `TaslakYazmaCakismasi` / `PaketDurumuGecersiz`, son durum kazananınki,
+kazanan `iptal` ise yeniden deneme `PaketDurumuGecersiz`; aday nesne yazımı
+ile paket iptali (iki varyant) → gecikmesiz koşuda gözlenen sıra "geçiş
+önce": yazım `TaslakYazmaCakismasi` alır, yeniden denemede
+`PaketDurumuGecersiz`, satır yok; geçiş iş parçacığı bariyerden sonra 0,2 s
+beklerse "taslak önce": yazım tamamlanır, geçişin anlık görüntüsü eskidiği
+için geçiş `TaslakYazmaCakismasi` alır ve yeni işlemde tamamlanır; hiçbir
+dalda yarım satır ya da iptal pakete yazılmış satır yok, `integrity_check` /
+`foreign_key_check` temiz. Hiçbir senaryoda
+ham `IntegrityError` / `OperationalError` dışarı çıkmaz. Hata eşlemesi dar:
+yardımcı yüklemler (`kilit_cakismasi_mi`, `benzersizlik_ihlali_mi`) sentetik
+hatalarla, yazma sınırı gerçek veritabanında (aynı tablonun benzersizliği
+domain hatasına döner; başka tablonun benzersizliği, dış anahtar, kontrol
+kısıtı ve tablo verilmeyen çağrı ham `IntegrityError` olarak yükselir, dış
+işlem kullanılabilir kalır).
 
 **Bilinçli kapsam dışı (Aşama 4.5'te yok):** kullanıcı karar talebi, onay
 tablosu, seçim seçenekleri, mükerrerlik şartları / arama, nesne birleştirme,
@@ -1019,7 +1072,9 @@ geçirme (4.8); projection, kural motoru, finans tanım paketi, MCP işlem paket
 araçları, GUI, kesin kayıt geri alma (sonraki aşamalar); aday özellik ve aday
 ilişki için ayrı kaynak bağı, çok-kaynak; hiyerarşi çevrimi ve sayım
 denetiminin taslak dünyasında çalıştırılması; genel işlem anahtarı; iyimser
-kilit çerçevesi.
+kilit çerçevesi ve serviste yeniden deneme (çatışmada yeniden deneme
+çağıranındır); eşzamanlılık iddiası yalnız yukarıdaki beş yarış senaryosuyla
+sınırlıdır.
 
 ## Mimari sınır: çekirdek ve finans
 

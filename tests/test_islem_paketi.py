@@ -16,7 +16,11 @@ biçimde girmez).
 
 from __future__ import annotations
 
+import sqlite3
+import threading
+import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -24,7 +28,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import inspect, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from defteriki import ayarlar as ay
@@ -351,10 +355,13 @@ def test_durum_yalniz_izinli_degerlerden_biri(ortam: Ortam) -> None:
     assert _durum(ortam, paket_id) == CALISIYOR.value
 
 
-def test_esazamanli_durum_degisimi_ikinci_yaziciyi_reddeder(ortam: Ortam) -> None:
-    """Aynı işlemde ham SQL ile durum önceden değişmişse koşullu güncelleme satır
-    etkilemez; servis ham hata değil ``PaketDurumuGecersiz`` verir, dış işlem
-    kullanılabilir kalır."""
+def test_ayni_islemde_araya_giren_durum_degisikligi_reddedilir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Aynı bağlantıda (eşzamanlılık değil) durum ham SQL ile önceden değişmişse
+    koşullu güncelleme satır etkilemez; servis ham hata değil
+    ``PaketDurumuGecersiz`` verir, dış işlem kullanılabilir kalır. Gerçek iki
+    bağlantılı yarışlar dosyanın sonundaki bölümde."""
     paket_id = _paket(ortam)
     with ortam.veritabani.islem() as oturum:
         paket = tsi.paket_getir(oturum, paket_id)  # kimlik haritasına girdi
@@ -366,7 +373,10 @@ def test_esazamanli_durum_degisimi_ikinci_yaziciyi_reddeder(ortam: Ortam) -> Non
         with pytest.raises(tsi.PaketDurumuGecersiz, match="eşzamanlı"):
             tsi.paketi_beklet(oturum, paket_id)
         assert tsi.paket_getir(oturum, paket_id).durum == IPTAL.value
+        oturum.execute(text("UPDATE tanim_paketi SET kod = 'ENVANTER2'"))
     assert _durum(ortam, paket_id) == IPTAL.value
+    with ortam.veritabani.islem() as oturum:
+        assert ti.paket_bul(oturum, "ENVANTER2") is not None  # dış işlem commit etti
 
 
 # --- yazma yetkisi paket durumundan ---------------------------------------------------
@@ -1446,3 +1456,307 @@ def test_paket_olusturma_hatasi_satir_birakmaz(
         assert tsi.paketleri_listele(o) == []
         paket = tsi.paket_olustur(o, okuma_id)
     assert _durum(ortam, paket.id) == CALISIYOR.value
+
+
+# --- gerçek eşzamanlılık: iki bağımsız bağlantı ---------------------------------------
+# Her senaryoda iki iş parçacığı kendi ``Veritabani`` örneğiyle (ayrı engine, ayrı
+# DBAPI bağlantısı) aynı dosyaya bağlanır. İkisi de kendi işleminde önce okur
+# (WAL anlık görüntüsü kurulur), bariyerde buluşur ve servisi çağırır: ikisi de
+# ön denetimde "satır yok / paket calisiyor" görür ve yazmaya kalkar. SQLite tam
+# birini yazdırır; diğeri kilit / anlık görüntü çakışması alır ve bu ham hata
+# servis sınırında ``TaslakYazmaCakismasi``ye çevrilir. Hangi iş parçacığının
+# kazanacağı zamanlamaya bağlıdır; testler sonucu değil sözleşmeyi doğrular:
+# tek başarılı yazma, ham DB hatası yok, yarım satır yok, yeniden denemede
+# olağan domain sonucu.
+
+HAM_DB_HATALARI = (IntegrityError, OperationalError)
+
+
+def _yaris(
+    ortam: Ortam,
+    hazirlik: Callable[[Session], object],
+    islemler: list[Callable[[Session], object]],
+) -> list[object]:
+    """Her işlemi ayrı bağlantı ve ayrı işlemde çalıştırır; sonuç ya dönüş değeri
+    ya da yükselen istisnadır (aynı sırayla)."""
+    bariyer = threading.Barrier(len(islemler), timeout=10)
+
+    def kos(islem: Callable[[Session], object]) -> object:
+        v = vt.Veritabani(ortam.veritabani.yol)  # bağımsız bağlantı
+        try:
+            with v.islem() as o:
+                hazirlik(o)  # anlık görüntü bu okumayla kurulur
+                bariyer.wait()  # ikisi de aynı eski görüntüyle yazmaya gider
+                return islem(o)
+        except Exception as hata:  # noqa: BLE001 - sözleşme testi: türü sınanır
+            return hata
+        finally:
+            v.kapat()
+
+    with ThreadPoolExecutor(max_workers=len(islemler)) as havuz:
+        return list(havuz.map(kos, islemler))
+
+
+def _tek_basari(sonuclar: list[object], tur: type) -> tuple[object, Exception]:
+    """Tam bir başarı (``tur`` örneği) ve bir domain hatası; ham DB hatası yok."""
+    basarilar = [s for s in sonuclar if isinstance(s, tur)]
+    hatalar = [s for s in sonuclar if isinstance(s, Exception)]
+    assert len(basarilar) == 1 and len(hatalar) == 1, sonuclar
+    [hata] = hatalar
+    assert not isinstance(hata, HAM_DB_HATALARI), repr(hata)
+    assert isinstance(hata, tsi.IslemPaketiHatasi), repr(hata)
+    return basarilar[0], hata
+
+
+def _hazirlik(paket_id: int) -> Callable[[Session], object]:
+    return lambda o: tsi.paket_getir(o, paket_id)
+
+
+def test_yaris_a_ayni_aday_iliski_tek_satir(ortam: Ortam, env: Envanter) -> None:
+    paket_id = _paket(ortam)
+    raf = _aday(ortam, paket_id, env.raf_id)
+    depo = _aday(ortam, paket_id, env.depo_id)
+
+    def ekle(o: Session) -> object:
+        return tsi.aday_iliski_ekle(o, env.depoda_id, raf, depo)
+
+    sonuclar = _yaris(ortam, _hazirlik(paket_id), [ekle, ekle])
+
+    _, hata = _tek_basari(sonuclar, tst.AdayNesneIliskisi)
+    assert isinstance(hata, (tsi.MukerrerAday, tsi.TaslakYazmaCakismasi))
+    assert _sayi(ortam, tst.ADAY_NESNE_ILISKISI) == 1
+    with pytest.raises(tsi.MukerrerAday):  # kaybeden yeni işlemde yeniden dener
+        with ortam.veritabani.islem() as o:
+            ekle(o)
+    assert _sayi(ortam, tst.ADAY_NESNE_ILISKISI) == 1
+
+
+def test_yaris_b_ayni_kayit_nesne_bagi_tek_satir(ortam: Ortam, env: Envanter) -> None:
+    paket_id = _paket(ortam)
+    raf = _aday(ortam, paket_id, env.raf_id)
+    with ortam.veritabani.islem() as o:
+        kayit_id = tsi.aday_kayit_ekle(o, paket_id, env.sayim_id, {}).id
+
+    def bagla(o: Session) -> object:
+        return tsi.aday_kayit_nesne_bagla(o, kayit_id, raf)
+
+    sonuclar = _yaris(ortam, _hazirlik(paket_id), [bagla, bagla])
+
+    _, hata = _tek_basari(sonuclar, tst.AdayKayitNesne)
+    assert isinstance(hata, (tsi.MukerrerAday, tsi.TaslakYazmaCakismasi))
+    assert _sayi(ortam, tst.ADAY_KAYIT_NESNE) == 1
+    with pytest.raises(tsi.MukerrerAday):
+        with ortam.veritabani.islem() as o:
+            bagla(o)
+    assert _sayi(ortam, tst.ADAY_KAYIT_NESNE) == 1
+
+
+def test_yaris_c_ayni_yeni_aday_ozellik_farkli_degerler(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """İki bağlantı aynı aday nesnede henüz olmayan aynı özelliğe farklı değer
+    yazar: tek satır, değer kazananınki, kaybeden açık çatışma hatası alır;
+    sessiz "son yazan kazanır" yok."""
+    paket_id = _paket(ortam)
+    raf = _aday(ortam, paket_id, env.raf_id)
+
+    def yaz(deger: int) -> Callable[[Session], object]:
+        return lambda o: tsi.aday_ozellik_yaz(o, raf, "kapasite", deger)
+
+    sonuclar = _yaris(ortam, _hazirlik(paket_id), [yaz(3), yaz(7)])
+
+    kazanan, hata = _tek_basari(sonuclar, tst.AdayNesneOzelligi)
+    assert isinstance(hata, tsi.TaslakYazmaCakismasi)
+    assert isinstance(kazanan, tst.AdayNesneOzelligi)
+    assert _sayi(ortam, tst.ADAY_NESNE_OZELLIGI) == 1
+    with ortam.veritabani.islem() as o:
+        assert tsi.aday_ozellikleri_oku(o, raf) == {"kapasite": int(kazanan.deger)}
+        assert int(kazanan.deger) in (3, 7)
+
+
+def test_yaris_d_paket_durumu_tek_gecis(ortam: Ortam) -> None:
+    """İki bağlantı aynı ``calisiyor`` paketi aynı anda farklı duruma götürür:
+    tam bir geçiş başarılı, diğeri açık domain hatası; ham ``database is
+    locked`` sızmaz."""
+    paket_id = _paket(ortam)
+    sonuclar = _yaris(
+        ortam,
+        _hazirlik(paket_id),
+        [
+            lambda o: tsi.paketi_beklet(o, paket_id),
+            lambda o: tsi.paketi_iptal_et(o, paket_id),
+        ],
+    )
+
+    kazanan, hata = _tek_basari(sonuclar, tst.IslemPaketi)
+    assert isinstance(hata, (tsi.TaslakYazmaCakismasi, tsi.PaketDurumuGecersiz))
+    assert isinstance(kazanan, tst.IslemPaketi)
+    assert kazanan.durum in (BEKLIYOR.value, IPTAL.value)
+    assert _durum(ortam, paket_id) == kazanan.durum
+    if kazanan.durum == IPTAL.value:  # kaybeden yeniden denerse terminal red
+        with pytest.raises(tsi.PaketDurumuGecersiz):
+            with ortam.veritabani.islem() as o:
+                tsi.paketi_beklet(o, paket_id)
+        assert _durum(ortam, paket_id) == IPTAL.value
+
+
+@pytest.mark.parametrize("gecis_gecikmesi", [0.0, 0.2])
+def test_yaris_taslak_yazma_ile_paket_durum_gecisi(
+    ortam: Ortam, env: Envanter, gecis_gecikmesi: float
+) -> None:
+    """Bir bağlantı aday nesne yazarken diğeri paketi iptal eder. Kabul edilen
+    iki sonuç: taslak önce yazılır sonra durum değişir; ya da durum önce
+    değişir ve taslak yazımı çatışma hatası alır, yeniden denemede
+    ``PaketDurumuGecersiz``. Yarım satır ve iptal pakete sessiz yazma yok.
+    Gecikmesiz koşuda gözlenen sıra "geçiş önce"; geçiş iş parçacığı
+    bariyerden sonra kısa beklerse "taslak önce" dalı da gerçekten koşar."""
+    paket_id = _paket(ortam)
+
+    def yaz(o: Session) -> object:
+        return tsi.aday_nesne_ekle(o, paket_id, env.raf_id, {"kod": "A1"})
+
+    def iptal(o: Session) -> object:
+        time.sleep(gecis_gecikmesi)
+        return tsi.paketi_iptal_et(o, paket_id)
+
+    sonuclar = _yaris(ortam, _hazirlik(paket_id), [yaz, iptal])
+    yazma, gecis = sonuclar
+
+    assert not any(isinstance(s, HAM_DB_HATALARI) for s in sonuclar), sonuclar
+    if gecis_gecikmesi:  # yazım bitmiş, geçişin anlık görüntüsü eskimiştir
+        assert isinstance(yazma, tst.AdayNesne), sonuclar
+    if isinstance(yazma, tst.AdayNesne):  # taslak önce yazıldı
+        assert isinstance(gecis, tsi.TaslakYazmaCakismasi)
+        assert _durum(ortam, paket_id) == CALISIYOR.value
+        with ortam.veritabani.islem() as o:  # geçiş yeni işlemde tamamlanır
+            iptal(o)
+        assert _durum(ortam, paket_id) == IPTAL.value
+        assert _sayi(ortam, tst.ADAY_NESNE) == 1
+        assert _sayi(ortam, tst.ADAY_NESNE_OZELLIGI) == 1
+    else:  # durum önce değişti
+        assert isinstance(gecis, tst.IslemPaketi) and gecis.durum == IPTAL.value
+        assert isinstance(yazma, tsi.TaslakYazmaCakismasi)
+        assert _sayi(ortam, tst.ADAY_NESNE) == 0
+        assert _sayi(ortam, tst.ADAY_NESNE_OZELLIGI) == 0
+        with pytest.raises(tsi.PaketDurumuGecersiz, match="iptal"):
+            with ortam.veritabani.islem() as o:
+                yaz(o)
+        assert _sayi(ortam, tst.ADAY_NESNE) == 0
+    with ortam.veritabani.islem() as o:
+        assert o.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+        assert o.execute(text("PRAGMA foreign_key_check")).all() == []
+
+
+# --- hata eşlemesi dar: yalnız çakışma ve kendi tablosunun benzersizliği -------------
+
+
+def _sqlite_hatasi(
+    tur: type[Exception], mesaj: str
+) -> IntegrityError | OperationalError:
+    orijinal = tur(mesaj)
+    if issubclass(tur, sqlite3.IntegrityError):
+        return IntegrityError("stmt", {}, orijinal)
+    return OperationalError("stmt", {}, orijinal)
+
+
+def test_hata_esleme_yardimcilari_dar() -> None:
+    kilit = _sqlite_hatasi(sqlite3.OperationalError, "database is locked")
+    mesgul = _sqlite_hatasi(sqlite3.OperationalError, "database is busy")
+    disk = _sqlite_hatasi(sqlite3.OperationalError, "disk I/O error")
+    tablo = _sqlite_hatasi(sqlite3.OperationalError, "no such table: x")
+    assert isinstance(kilit, OperationalError) and tsi.kilit_cakismasi_mi(kilit)
+    assert isinstance(mesgul, OperationalError) and tsi.kilit_cakismasi_mi(mesgul)
+    assert isinstance(disk, OperationalError) and not tsi.kilit_cakismasi_mi(disk)
+    assert isinstance(tablo, OperationalError) and not tsi.kilit_cakismasi_mi(tablo)
+
+    ayni = _sqlite_hatasi(
+        sqlite3.IntegrityError,
+        "UNIQUE constraint failed: aday_nesne_iliskisi.iliski_tanimi_id, "
+        "aday_nesne_iliskisi.kaynak_aday_nesne_id",
+    )
+    baska = _sqlite_hatasi(
+        sqlite3.IntegrityError, "UNIQUE constraint failed: aday_kayit_nesne.x"
+    )
+    fk = _sqlite_hatasi(sqlite3.IntegrityError, "FOREIGN KEY constraint failed")
+    kontrol = _sqlite_hatasi(
+        sqlite3.IntegrityError, "CHECK constraint failed: ck_aday_kayit_icerik"
+    )
+    assert isinstance(ayni, IntegrityError)
+    assert tsi.benzersizlik_ihlali_mi(ayni, tst.ADAY_NESNE_ILISKISI)
+    for hata in (baska, fk, kontrol):
+        assert isinstance(hata, IntegrityError)
+        assert not tsi.benzersizlik_ihlali_mi(hata, tst.ADAY_NESNE_ILISKISI)
+
+
+def test_yazma_siniri_yalniz_kendi_tablosunun_benzersizligini_esler(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Gerçek veritabanında: aynı tablonun benzersizlik ihlali verilen domain
+    hatasına döner; başka tablonun benzersizliği, dış anahtar ve kontrol
+    kısıtı ham ``IntegrityError`` olarak yükselir; dış işlem kullanılabilir
+    kalır."""
+    paket_id = _paket(ortam)
+    with ortam.veritabani.islem() as o:
+        raf = tsi.aday_nesne_ekle(o, paket_id, env.raf_id)
+        depo = tsi.aday_nesne_ekle(o, paket_id, env.depo_id)
+        tsi.aday_iliski_ekle(o, env.depoda_id, raf.id, depo.id)
+        kayit = tsi.aday_kayit_ekle(o, paket_id, env.sayim_id, {})
+        tsi.aday_kayit_nesne_bagla(o, kayit.id, raf.id)
+        okuma_id = tsi.paket_getir(o, paket_id).okuma_id
+    iliski_kopya = text(
+        "INSERT INTO aday_nesne_iliskisi (islem_paketi_id, iliski_tanimi_id, "
+        "tanim_surumu_id, kaynak_nesne_turu_id, hedef_nesne_turu_id, "
+        "kaynak_aday_nesne_id, hedef_aday_nesne_id) VALUES (:p, :i, :s, :kt, :ht, "
+        ":k, :h)"
+    )
+    iliski_degerleri = {
+        "p": paket_id,
+        "i": env.depoda_id,
+        "s": env.surum_id,
+        "kt": env.raf_id,
+        "ht": env.depo_id,
+        "k": raf.id,
+        "h": depo.id,
+    }
+    bag_kopya = text(
+        "INSERT INTO aday_kayit_nesne (islem_paketi_id, aday_kayit_id, "
+        "aday_nesne_id) VALUES (:p, :k, :n)"
+    )
+    bag_degerleri = {"p": paket_id, "k": kayit.id, "n": raf.id}
+    sinir = tsi._yazma_siniri  # pyright: ignore[reportPrivateUsage]
+
+    with ortam.veritabani.islem() as o:
+        with pytest.raises(tsi.MukerrerAday, match="sentetik"):
+            with sinir(o, tst.ADAY_NESNE_ILISKISI, tsi.MukerrerAday, "sentetik"):
+                o.execute(iliski_kopya, iliski_degerleri)
+        with pytest.raises(IntegrityError, match="UNIQUE"):  # başka tablo
+            with sinir(o, tst.ADAY_NESNE_ILISKISI, tsi.MukerrerAday, "sentetik"):
+                o.execute(bag_kopya, bag_degerleri)
+        with pytest.raises(IntegrityError, match="FOREIGN KEY"):
+            with sinir(o, tst.ADAY_KAYIT, tsi.MukerrerAday, "sentetik"):
+                o.execute(
+                    text(
+                        "INSERT INTO aday_kayit (islem_paketi_id, okuma_id, "
+                        "kayit_turu_id, icerik, olusturma_zamani) "
+                        "VALUES (:p, :o, 999, '{}', '2026-09-19')"
+                    ),
+                    {"p": paket_id, "o": okuma_id},
+                )
+        with pytest.raises(IntegrityError, match="CHECK"):
+            with sinir(o, tst.ADAY_KAYIT, tsi.MukerrerAday, "sentetik"):
+                o.execute(
+                    text(
+                        "INSERT INTO aday_kayit (islem_paketi_id, okuma_id, "
+                        "kayit_turu_id, icerik, olusturma_zamani) "
+                        "VALUES (:p, :o, :t, '[]', '2026-09-19')"
+                    ),
+                    {"p": paket_id, "o": okuma_id, "t": env.sayim_id},
+                )
+        with pytest.raises(IntegrityError, match="UNIQUE"):  # tablo verilmedi
+            with sinir(o):
+                o.execute(iliski_kopya, iliski_degerleri)
+        tsi.aday_ozellik_yaz(o, raf.id, "kod", "A1")  # dış işlem kullanılabilir
+    with ortam.veritabani.islem() as o:
+        assert tsi.aday_ozellikleri_oku(o, raf.id) == {"kod": "A1"}
+    assert _sayi(ortam, tst.ADAY_NESNE_ILISKISI) == 1
+    assert _sayi(ortam, tst.ADAY_KAYIT_NESNE) == 1
