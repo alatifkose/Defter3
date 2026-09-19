@@ -242,7 +242,7 @@ def test_dort_deger_turu_yazilir_ve_ayni_degerle_okunur(
             "not_": "",
         }
         assert type(degerler["kirilgan"]) is bool
-        assert str(degerler["agirlik"]) == "12.50"  # kesinlik ve ölçek korunur
+        assert degerler["agirlik"] == Decimal("12.5")  # değer tam; ölçek korunmaz
         raf_degerleri = ni.ozellikleri_oku(o, raf)
         assert raf_degerleri == {"kod": "A1", "kapasite": 40}
         assert type(raf_degerleri["kapasite"]) is int
@@ -256,7 +256,7 @@ def test_dort_deger_turu_yazilir_ve_ayni_degerle_okunur(
             .scalars()
             .all()
         )
-        assert ham == ["869", "12.50", "0", ""]  # kanonik metin
+        assert ham == ["869", "125e-1", "0", ""]  # kanonik metin
 
 
 def test_baska_turun_ozelligi_reddedilir(

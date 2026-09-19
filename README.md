@@ -411,13 +411,37 @@ dört teknik, domain bağımsız türden biridir (`DegerTuru`): `metin` (`str`),
 `tam_sayi` (`int`; `bool` reddedilir), `mantiksal` (`bool`), `ondalik`
 (`decimal.Decimal`, sonlu; `float` reddedilir, ölçek ya da birim varsayımı
 yoktur). Değer tanımın türüne göre doğrulanır ve kanonik metin olarak
-saklanır (metin olduğu gibi, `str(int)`, `"1"`/`"0"`, `str(Decimal)` —
-`12.50` `12.50` olarak kalır); `ozellikleri_oku` aynı kuralla Python değerine
+saklanır (metin olduğu gibi, `str(int)`, `"1"`/`"0"`, ondalık aşağıdaki
+sayısal kanonik biçimde); `ozellikleri_oku` aynı kuralla Python değerine
 döner. Kodlama kuralı Aşama 4.5'ten itibaren
 `src/defteriki/cekirdek/deger_kodlama.py` içindedir ve aday özellikle
 (`taslak_islemleri`) ortaktır; nesne motoru hatayı kendi modeline
-(`OzellikTuruUyusmuyor`) sarar, davranışı değişmedi. Yanlış tür `OzellikTuruUyusmuyor`, tanımsız ya da başka türün
+(`OzellikTuruUyusmuyor`) sarar. Yanlış tür `OzellikTuruUyusmuyor`, tanımsız ya da başka türün
 özelliği `GecersizOzellik`, eksik zorunlu özellik `ZorunluOzellikEksik` verir.
+
+**Ondalık kanonik biçim (karar 2026-09-19, inceleme bulgusu).** Önceki
+`str(Decimal)` kodlaması sayısal olarak kanonik değildi: `1.0`, `1.00` ve
+`1E+2` gibi eşit değerler farklı metin veriyordu; Aşama 4.6'nın mükerrerlik
+şartı "birebir değer" karşılaştırmasına dayandığından bu sessiz kaçırma
+demekti. Yeni kural: matematiksel olarak eşit iki `Decimal` her zaman aynı
+metni verir, farklı iki değer farklı metin verir. Biçim
+`<işaret><katsayı>e<üs>`: katsayı sondaki sıfırlardan arındırılmış rakam
+dizisi, üs buna göre düzeltilmiş tam sayı; bütün sıfırlar (`-0`, `0.00`) tek
+`0`. Örnek: `1`, `1.0`, `1.00`, `1E+0` → `1e0`; `100`, `1E+2` → `1e2`;
+`12.50` → `125e-1`; `0.0100` → `1e-2`; `-0.00` → `0`. Kodlama
+`Decimal.as_tuple` ile yapılır: `decimal` bağlam hassasiyetinden bağımsızdır
+(`normalize()` bilerek kullanılmaz, bağlamda yuvarlayabilir), basamak
+kaybolmaz, çok büyük / küçük üsler (`1E+999999`) sabit noktalı dev metne
+açılmaz. Çözme `Decimal(metin)` ile tam hassasiyette geri döner; değer
+sayısal olarak aynıdır, **ölçek korunmaz** (`12.50` yazılır, `Decimal("12.5")`
+ile eşit değer okunur). Bu biçim iç depolamadır, ekranda gösterim GUI'nin
+işidir; okunabilirlik bilinçli olarak feda edilmiştir. `float`, `bool`, `NaN`
+ve sonsuz reddi değişmedi. Testler (`tests/test_deger_kodlama.py`): örnek
+kümeleri, bağlam hassasiyeti 5'e düşürülmüşken yuvarlamama, yüksek
+hassasiyet, uç üsler ve Hypothesis özellikleri (`a == b` ⇔ aynı metin;
+`çöz(kodla(a)) == a`; sona sıfır eklenmiş yazım aynı metin; sıfırlar tek
+metin). Kesin ve aday özelliğin aynı metni yazdığı `tests/test_islem_paketi.py`
+içinde ham tablo metniyle sınanır.
 `ozellik_yaz` var olan değeri günceller (aynı özellik iki satır olmaz),
 `ozellik_sil` isteğe bağlı özelliği kaldırır, zorunluyu kaldırmaz. IBAN, kart
 numarası, para birimi gibi domain doğrulamaları yoktur; bunlar ileride tanım
@@ -917,7 +941,8 @@ iliski_tanimi_id, kaynak_aday_nesne_id, hedef_aday_nesne_id)`,
 `aday_iliski_kaldir`; `aday_nesne_sil`. Özellik değeri kesin özellikle aynı
 kuralla doğrulanır ve aynı kanonik metne kodlanır (`deger_kodlama`: metin,
 tam sayı — `bool` reddedilir, mantıksal `"1"`/`"0"`, sonlu `Decimal` — `float`
-reddedilir); aynı değer iki tabloda aynı metindir. Aday ilişkide kaynak /
+reddedilir, sayısal kanonik biçim `125e-1`; "Nesne motoru" bölümündeki
+"Ondalık kanonik biçim"); aynı değer iki tabloda aynı metindir. Aday ilişkide kaynak /
 hedef türü ve sürüm tanıma uymalıdır; hiyerarşi sayımı ve çevrim aranmaz.
 
 **Taslak eksik olabilir, yapısal olarak anlamsız olamaz.** Çalışma alanında

@@ -646,7 +646,7 @@ def test_dort_deger_turu_kesin_ozellikle_ayni_kanonik_biciminde(
             .scalars()
             .all()
         )
-        assert aday_metin == kesin_metin == ["X1", "12.50", "0"]
+        assert aday_metin == kesin_metin == ["X1", "125e-1", "0"]
         assert (
             o.execute(
                 text("SELECT deger FROM aday_nesne_ozelligi WHERE aday_nesne_id = :a"),
@@ -1226,7 +1226,7 @@ def test_yazmak_kaydetmek_degildir(ortam: Ortam, env: Envanter) -> None:
                 (raf.id, "A1"),
                 (raf.id, "12"),
                 (urun.id, "X1"),
-                (urun.id, "0.250"),
+                (urun.id, "25e-2"),
             }
             assert [i.id for i in a.aday_iliskiler] == [rafta.id]
             assert [k.id for k in a.aday_kayitlar] == [kayit.id]
