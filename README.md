@@ -44,9 +44,11 @@ Bitenler:
   içermez ("Veritabanı" bölümü)
 * Tanım sistemi (Aşama 4.2): tanım paketi, sürüm, nesne türü, özellik,
   ilişki, kayıt türü ve kayıt alanı tanımlarını veri olarak tutan yedi tablo
-  (göç `0002`), `defteriki.cekirdek.tanim_tablolari` ve
-  `defteriki.cekirdek.tanim_islemleri`; çekirdek hangi türlerin var olduğunu
-  bilmez, testler nötr sahte paketlerle çalışır ("Tanım sistemi" bölümü)
+  (göç `0002`), `defteriki.cekirdek.tanim_tablolari`,
+  `defteriki.cekirdek.tanim_sorgulari` (okuma; 2026-09-20'de ayrıldı) ve
+  `defteriki.cekirdek.tanim_islemleri` (yazma, ekleme-yalnız kilit); çekirdek
+  hangi türlerin var olduğunu bilmez, testler nötr sahte paketlerle çalışır
+  ("Tanım sistemi" bölümü)
 * Nesne motoru (Aşama 4.3): nesne, nesne özelliği ve nesne ilişkisi
   tabloları, hiyerarşi kuralı, özellik değer türü ve zorunluluğu, tanım
   sürümü kilidi, yaşam durumu (göç `0004`); `defteriki.cekirdek.nesne_tablolari`
@@ -305,9 +307,16 @@ ham SQL ile de reddedilir. Kayıpsız dönüşen `2.0` ya da `'3'` SQLite tür
 yakınlığıyla kısıttan önce tam sayıya çevrilir ve tam sayı olarak saklanır;
 bu SQLite davranışıdır, uygulama katmanı bu türleri zaten kabul etmez.
 
-**İşlevler (`src/defteriki/cekirdek/tanim_islemleri.py`).** Tanım tablolarına
-tek giriş noktası; her işlev açık bir `Session` alır ve
-`Veritabani.islem()` içinde çağrılır, kendi başına commit etmez. Yazma:
+**İşlevler (`tanim_islemleri.py` ve `tanim_sorgulari.py`).** İki modül,
+tek yüzey: yazma işlevleri ve hata modelinin yazma tarafı `tanim_islemleri`
+içindedir; kimlikle getirme ve listeleme ile `TanimHatasi` / `TanimBulunamadi`
+`tanim_sorgulari` içindedir ve `tanim_islemleri` bunları yeniden dışa
+aktarır. Ayrımın nedeni mimari sınırdır (2026-09-20): ekleme-yalnız kilit
+mevcut kesin veriye bakmak için `nesne_tablolari` import eder; taslak
+modülleri kesin nesne dünyasına ulaşamayacağından (`tests/test_mimari_sinir.py`)
+yalnız okuyan modüller (`nesne_islemleri`, `taslak_islemleri`) `tanim_sorgulari`
+kullanır. Her işlev açık bir `Session` alır ve `Veritabani.islem()` içinde
+çağrılır, kendi başına commit etmez. Yazma:
 `paket_tanimla`, `surum_tanimla`, `nesne_turu_tanimla`, `ozellik_tanimla`
 (Aşama 4.3'ten beri `deger_turu: DegerTuru` zorunlu, `zorunlu: bool = False`),
 `iliski_tanimla`, `hiyerarsi_kurali_tanimla` (4.3), `kayit_turu_tanimla`,
@@ -325,7 +334,8 @@ karışmaz. Tanım silme ve güncelleme işlevi yoktur.
 `ValueError`), `TanimBulunamadi` (verilen paket/sürüm/tür kimliği yok;
 `LookupError`), `MukerrerTanim` (aynı kapsamda aynı kod ya da sürüm no),
 `TanimSurumuUyusmuyor` (ilişkinin kaynak/hedef türü başka sürümde),
-`TanimSurumuKilitli` (4.3: sürüm altında nesne üretildi, yeni tanım alamaz).
+`TanimSurumuKilitli` (4.3; 2026-09-19'dan beri ekleme-yalnız: ekleme mevcut
+kesin veriyi bozardı, bkz. "Nesne motoru" bölümünde "Tanım sürümü kilidi").
 Bu denetimler uygulama sözleşmesidir; veritabanı kısıtları son savunmadır ve
 aynı durumları ham `IntegrityError` ile de reddeder (testte iki düzey ayrı
 ayrı sınanır). Herhangi bir hata `islem()` bağlamında yükselir ve aynı
@@ -495,15 +505,44 @@ kuralların çocukları aday durumla, yazmadan önce doğrulanır; ihlal varsa
 durum değişmez. Taslak, bekliyor, onay, şüpheli, mükerrer, reddedildi
 gibi durumlar yoktur; Aşama 4.5 / 4.6'nın işidir.
 
-**Tanım sürümü kilidi.** Sürüm altında ilk nesne üretilirken, aynı işlem
-içinde `tanim_surumu.kilitli` 1 yapılır; işlem rollback olursa kilit de
-kalkar. Kilitli sürüme `nesne_turu_tanimla`, `ozellik_tanimla`,
-`iliski_tanimla`, `hiyerarsi_kurali_tanimla`, `kayit_turu_tanimla`,
-`kayit_alani_tanimla` `TanimSurumuKilitli` verir; yeni sürüm açmak
-(`surum_tanimla`) serbesttir ve yeni sürüm kendi tanımlarını taşır. Böylece
-var olan nesnenin anlamı sonradan eklenen tanımlarla sessizce değişmez.
-Ayrı bir "yayınla" iş akışı yoktur. Kilit yalnız uygulama düzeyindedir
-(tetikleyicisiz SQLite'ta ifade edilemez; bilinçli sınır).
+**Tanım sürümü kilidi: ekleme-yalnız (karar 2026-09-19, inceleme bulgusu).**
+Sürüm altında ilk kesin nesne üretilirken, aynı işlem içinde
+`tanim_surumu.kilitli` 1 yapılır; işlem rollback olursa kilit de kalkar.
+4.3'teki ilk kural kilitli sürümü tamamen kapatıyordu; incelemede şu sonuç
+görüldü: ilişki tanımı, kaynak ve hedef nesne aynı sürümde olmak zorunda ve
+nesnenin sürümü kalıcı olduğundan, tek bir özellik eklemek için açılan yeni
+sürümün nesneleri eski sürümün nesnelerine bağlanamıyor, her ekleme defteri
+bölüyordu. Yeni kural: kilit "hiçbir şey eklenemez" değil, "mevcut kesin
+verinin anlamını ya da geçerliliğini geriye dönük bozan ekleme yapılamaz"
+demektir. Denetim sürüm bayrağına değil **yerel veriye** bakar (bayrak yalnız
+hızlı ön kontroldür; kilitsiz sürümün altında kesin nesne olamaz):
+
+* yeni nesne türü, yeni ilişki, yeni kayıt türü, yeni kayıt alanı her zaman
+  serbest (yeni tanımın altında veri yoktur);
+* yeni isteğe bağlı özellik her zaman serbest (eski nesnede yalnız
+  "yazılmamış" sayılır, `ozellikleri_oku` onu döndürmez);
+* yeni **zorunlu** özellik yalnız o nesne türünün altında kesin nesne (etkin
+  ya da kapalı) yoksa; kilitten sonra eklenen, henüz kullanılmamış tür
+  zorunlu özellik alabilir; kullanılan türe `TanimSurumuKilitli`;
+* hiyerarşi kuralı yalnız o ilişkiyle kurulmuş kesin bağlantı yoksa (mevcut
+  bağlantılar `en_cok_ust` sınırını ya da çevrim yasağını ihlal ediyor
+  olabilir) **ve** `en_az_ust > 0` ise kaynak türün altında kesin nesne yoksa
+  (yalnız "bağlantı yok" yetmez: 50 raf olup hiç bağlantı olmayabilir,
+  `en_az_ust = 1` hepsini bir anda kurala aykırı yapardı);
+* mevcut tanım değiştirilemez ve silinemez (böyle bir işlev yoktur; testle
+  sınanır).
+
+Aday (taslak) nesneler sayılmaz. Çapraz sürüm ilişki yasağı aynen durur ve
+sürümler arası nesne taşıma ilk sürümde desteklenmez; bozan değişiklik
+gerçekten gerekirse yeni sürüm açılır (`surum_tanimla` serbest) ama yeni
+sürümün nesneleri eskilerle bağlanamaz. **Sonuç:** ilk sürüm pratikte tek
+tanım sürümünü ekleme-yalnız büyüterek yaşar. Ayrı bir "yayınla" iş akışı
+yoktur. Kilit yalnız uygulama düzeyindedir (tetikleyicisiz SQLite'ta ifade
+edilemez; bilinçli sınır). Bilinen sınır: yerel sayım veriye baktığından,
+biri zorunlu özellik eklerken diğeri o türden ilk nesneyi yazarsa SQLite
+ikisinden birini kilit / anlık görüntü çakışmasıyla durdurur; tanım tarafı bu
+ham hatayı çevirmez ("İşlem paketi ve taslak" bölümündeki eşzamanlı yazma
+sözleşmesi yalnız taslak modülündedir).
 
 **Hata modeli (`NesneHatasi` altında):** `NesneBulunamadi` (`LookupError`),
 `GecersizOzellik` (`ValueError`) ve alt sınıfları `OzellikTuruUyusmuyor`,
@@ -559,11 +598,16 @@ veritabanı kullanılabilir kalır; servis hata atomikliği: eksik zorunlu
 değişikliği ve çevrim hataları aynı işlem içinde yakalanınca nesne / fazla
 ilişki / durum değişikliği kalmaz ve kilit oluşmaz, hatadan sonra aynı
 işlemde geçerli iş yapılıp commit edilir, servis içi kısıt hatası dış işlemi
-bozmaz; kilit: kullanılmamış sürüme tanım eklenir,
-ilk nesne kilitler (satırda `kilitli = 1`), rollback olan işlemde kilit
-kalmaz, kilitli sürüme nesne türü / özellik / ilişki / hiyerarşi kuralı /
-kayıt türü / kayıt alanı eklenemez, yeni sürüm açılır ve kendi tanımlarını
-taşır, eski nesnenin anlamı yeni sürümle değişmez.
+bozmaz; ekleme-yalnız kilit: kullanılmamış sürüme tanım eklenir, ilk nesne
+kilitler (satırda `kilitli = 1`), rollback olan işlemde kilit kalmaz, kilitli
+sürüme yeni tür ve kullanılmamış türe zorunlu özellik / zorunlu üst şartı
+eklenir ve o türden nesne üretilir, kullanılan türe isteğe bağlı özellik ve
+kayıt türü / alanı eklenir ve eski nesne geçerli kalır (okunur, yeni özellik
+yazılır, durumu değişir), kullanılan türe zorunlu özellik reddedilir (kapalı
+nesne de sayılır), kullanılan kaynak türe `en_az_ust > 0` kuralı reddedilir
+ama `en_az_ust = 0` eklenir, kesin bağlantısı olan ilişkiye kural eklenemez,
+tanım değiştiren / silen işlev yoktur, yeni sürüm açılır ve kendi
+tanımlarını taşır, eski nesnenin anlamı yeni sürümle değişmez.
 
 **Bilinçli kapsam dışı (Aşama 4.3'te yok):** belge ve arşiv, kaynak izi, işlem
 paketi ve taslak nesne, BEKLIYOR protokolü, kullanıcı onayı, mükerrerlik ve
@@ -853,6 +897,9 @@ Hiçbir taslak tablo kesin nesne tablolarına dış anahtar taşımaz ve tersi d
 yoktur; kaynak kodunda `taslak_*` modülleri nesne tablolarını ve nesne
 motorunu, `nesne_*` modülleri taslak modüllerini import etmez, taslak
 servisleri ham SQL kullanmaz (`tests/test_mimari_sinir.py`, üçüncü denetim).
+Taslak servisleri tanım sistemini yalnız okuma yüzeyi `tanim_sorgulari`
+üzerinden kullanır; yazma modülü `tanim_islemleri` ekleme-yalnız kilit için
+kesin nesne tablolarını import ettiğinden taslak onu import etmez.
 Aday nesne `nesne.id` üretmez; aday kimliği kesin nesne kimliği değildir.
 Aday nesne oluşturmak tanım sürümünü kilitlemez.
 
@@ -1443,7 +1490,8 @@ src/defteriki/    uygulama paketi
     veritabani.py   SQLite bağlantı politikası, TabloTabani, işlem sınırı
     gocler.py       Alembic şema sürümü ve süreç içi göç
     tanim_tablolari.py  tanım paketi/sürüm/nesne türü/özellik/ilişki/kayıt türü/kayıt alanı tabloları
-    tanim_islemleri.py  tanım yazma ve okuma işlevleri, tanım hata modeli, sürüm kilidi
+    tanim_sorgulari.py  tanım okuma: kimlikle getirme, listeleme, TanimHatasi / TanimBulunamadi
+    tanim_islemleri.py  tanım yazma, hata modeli, ekleme-yalnız sürüm kilidi (okuma adlarını yeniden dışa aktarır)
     nesne_tablolari.py  nesne, nesne özelliği, nesne ilişkisi tabloları
     nesne_islemleri.py  nesne motoru: oluşturma, özellik doğrulama, ilişki, hiyerarşi, yaşam durumu
     arsiv.py            gelen dizini sınırı, akışla SHA-256, içerik adresli atomik arşiv, bütünlük, tarama

@@ -14,8 +14,10 @@ Yapı (üstten alta, her satır bir üstteki satıra dış anahtarla bağlı):
 * ``TanimSurumu`` — paketin bir sürümü; ``(tanim_paketi_id, surum_no)``
   benzersiz. Tanımlar pakete değil sürüme bağlıdır: paketin yeni sürümü
   eskisinin satırlarını değiştirmez, kendi satırlarını taşır. ``kilitli``
-  (Aşama 4.3): sürüm altında ilk nesne üretilince sürüm kilitlenir ve artık
-  tanım alamaz; böylece var olan nesnelerin anlamı sessizce değişmez.
+  (Aşama 4.3): sürüm altında ilk nesne üretilince sürüm kilitlenir; kilitli
+  sürüme yalnız mevcut kesin veriyi bozmayan tanım eklenir (ekleme-yalnız,
+  ``tanim_islemleri``, karar 2026-09-19); böylece var olan nesnelerin anlamı
+  sessizce değişmez.
 * ``NesneTuru`` — sürüm içinde ``kod`` benzersiz.
 * ``OzellikTanimi`` — bir nesne türünün özelliği; tür içinde ``kod`` benzersiz.
   ``deger_turu`` (``DegerTuru``: metin, tam sayı, mantıksal, ondalık) ve
@@ -156,8 +158,9 @@ class TanimSurumu(TabloTabani):
     kilitli: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("0")
     )
-    """Sürüm altında ilk nesne üretilince ``True`` olur; kilitli sürüme tanım
-    eklenemez (göç 0004)."""
+    """Sürüm altında ilk nesne üretilince ``True`` olur (göç 0004); kilitli
+    sürüme yalnız mevcut kesin veriyi bozmayan tanım eklenir
+    (``tanim_islemleri``)."""
 
     __table_args__ = (
         UniqueConstraint("tanim_paketi_id", "surum_no"),

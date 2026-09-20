@@ -13,7 +13,7 @@ veritabanı kısıtları (servisi atlayan ham SQL ile aynı ihlal ``IntegrityErr
 verir).
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -22,7 +22,6 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 from defteriki import ayarlar as ay
 from defteriki.cekirdek import gocler
@@ -1102,38 +1101,125 @@ def test_rollback_olan_islemde_kilit_kalmaz(
     assert _sayi(veritabani, nt.NESNE) == 0
 
 
-def test_kilitli_surume_tanim_eklenemez(
-    veritabani: vt.Veritabani, env: Envanter
-) -> None:
-    _depo(veritabani, env)
-    denemeler: list[Callable[[Session], object]] = [
-        lambda o: ti.nesne_turu_tanimla(o, env.surum_id, "PALET", "Palet"),
-        lambda o: ti.ozellik_tanimla(o, env.raf_id, "renk", "Renk", DegerTuru.METIN),
-        lambda o: ti.iliski_tanimla(
-            o, env.surum_id, "YANINDA", "Yanında", env.raf_id, env.raf_id
-        ),
-        lambda o: ti.hiyerarsi_kurali_tanimla(o, env.benzer_id, 0, None),
-        lambda o: ti.kayit_turu_tanimla(o, env.surum_id, "SAYIM", "Sayım"),
-    ]
-    for deneme in denemeler:
-        with pytest.raises(ti.TanimSurumuKilitli, match="kilitli"):
-            with veritabani.islem() as o:
-                deneme(o)
-    assert _sayi(veritabani, tt.NESNE_TURU) == 4
-    assert _sayi(veritabani, tt.HIYERARSI_KURALI) == 3
-    assert _sayi(veritabani, tt.KAYIT_TURU) == 0
+# --- ekleme-yalnız kilit (karar 2026-09-19) -------------------------------------------
+# Kilitli sürüm tamamen kapalı değildir; yalnız mevcut kesin veriyi geriye dönük
+# bozan eklemeye kapalıdır. Denetim sürüm bayrağına değil yerel veriye bakar.
 
 
-def test_kilitli_surume_kayit_alani_eklenemez(
+def test_kilitli_surume_yeni_tur_ve_kullanilmamis_ture_zorunlu_tanim_eklenir(
     veritabani: vt.Veritabani, env: Envanter
 ) -> None:
+    depo = _depo(veritabani, env)
     with veritabani.islem() as o:
-        sayim = ti.kayit_turu_tanimla(o, env.surum_id, "SAYIM", "Sayım")
-    _depo(veritabani, env)
-    with pytest.raises(ti.TanimSurumuKilitli):
+        assert ti.surum_kilitli_mi(o, env.surum_id) is True
+        palet = ti.nesne_turu_tanimla(o, env.surum_id, "PALET", "Palet")
+        ti.ozellik_tanimla(o, palet.id, "no", "No", DegerTuru.METIN, zorunlu=True)
+        palette = ti.iliski_tanimla(
+            o, env.surum_id, "PALETTE", "Palette", palet.id, env.depo_id
+        )
+        ti.hiyerarsi_kurali_tanimla(o, palette.id, 1, 1, ETKIN)  # tür kullanılmamış
+    with pytest.raises(ni.ZorunluOzellikEksik):
         with veritabani.islem() as o:
-            ti.kayit_alani_tanimla(o, sayim.id, "adet", "Adet")
-    assert _sayi(veritabani, tt.KAYIT_ALANI_TANIMI) == 0
+            ni.nesne_olustur(o, palet.id, {}, [ni.UstBaglanti(palette.id, depo)])
+    with pytest.raises(ni.HiyerarsiIhlali):
+        with veritabani.islem() as o:
+            ni.nesne_olustur(o, palet.id, {"no": "P1"})
+    with veritabani.islem() as o:
+        yeni = ni.nesne_olustur(
+            o, palet.id, {"no": "P1"}, [ni.UstBaglanti(palette.id, depo)]
+        )
+        assert yeni.tanim_surumu_id == env.surum_id
+        assert ni.ozellikleri_oku(o, depo) == {"ad": "Merkez"}  # eski nesne değişmedi
+    assert _sayi(veritabani, nt.NESNE) == 2
+    assert _sayi(veritabani, tt.HIYERARSI_KURALI) == 4
+
+
+def test_kullanilan_ture_istege_bagli_ozellik_eklenir_eski_nesne_gecerli_kalir(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    depo = _depo(veritabani, env)
+    with veritabani.islem() as o:
+        ti.ozellik_tanimla(o, env.depo_id, "sehir", "Şehir", DegerTuru.METIN)
+        sayim = ti.kayit_turu_tanimla(o, env.surum_id, "SAYIM", "Sayım")
+        ti.kayit_alani_tanimla(o, sayim.id, "adet", "Adet")
+    with veritabani.islem() as o:
+        assert ni.ozellikleri_oku(o, depo) == {"ad": "Merkez"}  # yazılmamış sayılır
+        assert [t.kod for t in ti.ozellik_tanimlarini_listele(o, env.depo_id)] == [
+            "ad",
+            "sehir",
+        ]
+        ni.ozellik_yaz(o, depo, "sehir", "Edirne")
+        ni.yasam_durumunu_degistir(o, depo, KAPALI)
+        ni.yasam_durumunu_degistir(o, depo, ETKIN)
+        ikinci = ni.nesne_olustur(o, env.depo_id, {"ad": "Şube"})  # zorunlu değil
+        assert ni.ozellikleri_oku(o, ikinci.id) == {"ad": "Şube"}
+    with veritabani.islem() as o:
+        assert ni.ozellikleri_oku(o, depo) == {"ad": "Merkez", "sehir": "Edirne"}
+    assert _sayi(veritabani, tt.KAYIT_ALANI_TANIMI) == 1
+
+
+def test_kullanilan_ture_zorunlu_ozellik_eklenemez(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    depo = _depo(veritabani, env)
+    with veritabani.islem() as o:
+        ni.yasam_durumunu_degistir(o, depo, KAPALI)  # kapalı nesne de sayılır
+    with pytest.raises(ti.TanimSurumuKilitli, match="zorunlu özellik 'sehir'"):
+        with veritabani.islem() as o:
+            ti.ozellik_tanimla(
+                o, env.depo_id, "sehir", "Şehir", DegerTuru.METIN, zorunlu=True
+            )
+    with veritabani.islem() as o:
+        assert [t.kod for t in ti.ozellik_tanimlarini_listele(o, env.depo_id)] == ["ad"]
+
+
+def test_kullanilan_kaynak_ture_zorunlu_ust_sarti_eklenemez(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    """Raf nesnesi varken yeni ilişki serbest; kuralı ``en_az_ust=0`` ile serbest,
+    ``en_az_ust=1`` ile reddedilir (üstsüz mevcut raflar aykırı olurdu)."""
+    depo = _depo(veritabani, env)
+    _raf(veritabani, env, depo)
+    with veritabani.islem() as o:
+        yaninda = ti.iliski_tanimla(
+            o, env.surum_id, "YANINDA", "Yanında", env.raf_id, env.raf_id
+        )
+        sorumlu = ti.iliski_tanimla(
+            o, env.surum_id, "SORUMLU", "Sorumlu", env.raf_id, env.depo_id
+        )
+    with pytest.raises(ti.TanimSurumuKilitli, match="kaynak tür altında kesin nesne"):
+        with veritabani.islem() as o:
+            ti.hiyerarsi_kurali_tanimla(o, sorumlu.id, 1, None)
+    with veritabani.islem() as o:
+        ti.hiyerarsi_kurali_tanimla(o, sorumlu.id, 0, 1, ETKIN)  # isteğe bağlı üst
+        ti.hiyerarsi_kurali_tanimla(o, yaninda.id, 0, None)
+    assert _sayi(veritabani, tt.HIYERARSI_KURALI) == 5
+
+
+def test_kesin_baglantisi_olan_iliskiye_hiyerarsi_kurali_eklenemez(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    depo = _depo(veritabani, env)
+    raf = _raf(veritabani, env, depo)
+    u1 = _urun(veritabani, env, [raf], "X1")
+    u2 = _urun(veritabani, env, [raf], "X2")
+    with veritabani.islem() as o:
+        ni.iliski_kur(o, env.benzer_id, u1, u2)
+        ni.iliski_kur(o, env.benzer_id, u2, u1)  # hiyerarşik olmayan ilişkide serbest
+    with pytest.raises(ti.TanimSurumuKilitli, match="kurulmuş kesin bağlantı var"):
+        with veritabani.islem() as o:
+            ti.hiyerarsi_kurali_tanimla(o, env.benzer_id, 0, None)
+    assert _sayi(veritabani, tt.HIYERARSI_KURALI) == 3
+
+
+def test_mevcut_tanim_degistirilemez_ve_silinemez() -> None:
+    """Tanım sistemi güncelleme / silme işlevi sunmaz; kural yazılıdır."""
+    yasak = ("sil", "guncelle", "degistir", "kaldir")
+    assert [
+        ad
+        for ad in dir(ti)
+        if not ad.startswith("_") and any(y in ad.lower() for y in yasak)
+    ] == []
 
 
 def test_yeni_surum_acilir_ve_kendi_tanimlarini_tasir(

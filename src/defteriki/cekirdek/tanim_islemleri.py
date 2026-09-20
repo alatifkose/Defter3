@@ -1,10 +1,18 @@
-"""Tanım sisteminin yazma ve okuma işlevleri (Aşama 4.2; kilit ve hiyerarşi 4.3).
+"""Tanım sisteminin yazma işlevleri ve tam yüzeyi (Aşama 4.2; kilit ve hiyerarşi 4.3).
 
-Tanım tablolarına (``tanim_tablolari``) tek giriş noktası. Her işlev açık bir
-``Session`` alır ve ``Veritabani.islem`` bağlamı içinde çağrılır; kendi başına
-``commit`` etmez, ``rollback`` etmez. Yazma işlevleri satırı ekleyip ``flush``
-eder, böylece kimlik atanır ve olası veritabanı hatası çağıranın işlem
-sınırında yükselir; işlem bağlamı rollback ile her şeyi geri alır.
+Tanım tablolarına (``tanim_tablolari``) yazan tek modül. Okuma işlevleri ve
+``TanimHatasi`` / ``TanimBulunamadi`` ``tanim_sorgulari`` içindedir ve buradan
+yeniden dışa aktarılır: tanım sistemini bütün olarak kullanan çağıran yalnız
+bu modülü import eder; yalnız okuyan modüller (``nesne_islemleri``,
+``taslak_islemleri``) ``tanim_sorgulari`` kullanır, çünkü bu modül ekleme-yalnız
+kilit için kesin nesne tablolarını (``nesne_tablolari``) import eder ve taslak
+modülleri kesin nesne dünyasına ulaşamaz (``tests/test_mimari_sinir.py``).
+
+Her işlev açık bir ``Session`` alır ve ``Veritabani.islem`` bağlamı içinde
+çağrılır; kendi başına ``commit`` etmez, ``rollback`` etmez. Yazma işlevleri
+satırı ekleyip ``flush`` eder, böylece kimlik atanır ve olası veritabanı
+hatası çağıranın işlem sınırında yükselir; işlem bağlamı rollback ile her
+şeyi geri alır.
 
 Hata modeli (hepsi ``TanimHatasi`` altında; domain bağımsız):
 
@@ -12,18 +20,39 @@ Hata modeli (hepsi ``TanimHatasi`` altında; domain bağımsız):
   numarası pozitif tam sayı değil (``bool``, ``float``, metin de reddedilir),
   hiyerarşi kuralı sayıları tutarsız.
 * ``TanimBulunamadi`` — verilen paket, sürüm, nesne türü, ilişki ya da kayıt
-  türü kimliği yok. Olmayan üst kayda bağlanmak sessizce geçmez; listeleme de
-  olmayan üst kayıt için boş liste yerine bu hatayı verir.
+  türü kimliği yok (``tanim_sorgulari``). Olmayan üst kayda bağlanmak sessizce
+  geçmez; listeleme de olmayan üst kayıt için boş liste yerine bu hatayı verir.
 * ``MukerrerTanim`` — aynı kapsamda aynı kod (paket: bütün paketler; sürüm:
   aynı paket içinde sürüm numarası; nesne türü, ilişki, kayıt türü: aynı
   sürüm; özellik: aynı nesne türü; kayıt alanı: aynı kayıt türü; hiyerarşi
   kuralı: aynı ilişki tanımı).
 * ``TanimSurumuUyusmuyor`` — ilişkinin kaynak ya da hedef türü ilişkinin
   sürümünde değil.
-* ``TanimSurumuKilitli`` — sürüm altında nesne üretilmiş (``kilitli``); artık
-  bu sürüme nesne türü, özellik, ilişki, hiyerarşi kuralı, kayıt türü ya da
-  kayıt alanı eklenemez. Yeni tanım gerekiyorsa yeni sürüm açılır; yeni sürüm
-  açmak serbesttir.
+* ``TanimSurumuKilitli`` — ekleme, sürüm altındaki mevcut kesin veriyi geriye
+  dönük bozardı (aşağıdaki ekleme-yalnız kilit).
+
+**Ekleme-yalnız kilit (karar 2026-09-19).** Sürüm altında ilk kesin nesne
+üretilince ``kilitli`` olur; bu "hiçbir şey eklenemez" değil, "mevcut kesin
+verinin anlamını ya da geçerliliğini bozan ekleme yapılamaz" demektir.
+Denetim sürüm bayrağına değil yerel veriye bakar (bayrak yalnız hızlı ön
+kontroldür: kilitsiz sürümün altında kesin nesne olamaz):
+
+* yeni nesne türü, yeni ilişki, yeni kayıt türü, yeni kayıt alanı her zaman
+  serbest (yeni tanımın altında veri yoktur);
+* yeni isteğe bağlı özellik her zaman serbest (eski nesnede yalnız
+  "yazılmamış" sayılır);
+* yeni **zorunlu** özellik yalnız o nesne türünün altında kesin nesne yoksa
+  (kilitten sonra eklenen, henüz kullanılmamış tür zorunlu özellik alabilir);
+* hiyerarşi kuralı yalnız o ilişkiyle kurulmuş kesin bağlantı yoksa (mevcut
+  bağlantılar ``en_cok_ust`` sınırını ya da çevrim yasağını ihlal ediyor
+  olabilir) **ve** ``en_az_ust > 0`` ise kaynak türün altında kesin nesne
+  yoksa (aksi hâlde üstsüz mevcut nesneler bir anda kurala aykırı olurdu);
+* mevcut tanım değiştirilemez ve silinemez (böyle bir işlev yoktur).
+
+Aday (taslak) nesneler sayılmaz; kapalı nesne sayılır. Bozan değişiklik
+gerçekten gerekirse yeni sürüm açılır; ama sürümler arası nesne bağlantısı
+ve taşıma yoktur (``nesne_islemleri``), yani pratikte tek sürüm ekleme-yalnız
+büyür.
 
 Bu denetimler uygulama sözleşmesidir; veritabanındaki benzersizlik, dış
 anahtar ve bileşik dış anahtar kısıtları son savunmadır ve aynı durumları
@@ -42,6 +71,38 @@ import re
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
+from defteriki.cekirdek.nesne_tablolari import Nesne, NesneIliskisi
+from defteriki.cekirdek.tanim_sorgulari import TanimBulunamadi as TanimBulunamadi
+from defteriki.cekirdek.tanim_sorgulari import TanimHatasi as TanimHatasi
+from defteriki.cekirdek.tanim_sorgulari import (
+    hiyerarsi_kurallarini_listele as hiyerarsi_kurallarini_listele,
+)
+from defteriki.cekirdek.tanim_sorgulari import (
+    iliski_tanimi_getir as iliski_tanimi_getir,
+)
+from defteriki.cekirdek.tanim_sorgulari import (
+    iliski_tanimlarini_listele as iliski_tanimlarini_listele,
+)
+from defteriki.cekirdek.tanim_sorgulari import (
+    kayit_alani_tanimlarini_listele as kayit_alani_tanimlarini_listele,
+)
+from defteriki.cekirdek.tanim_sorgulari import (
+    kayit_turlerini_listele as kayit_turlerini_listele,
+)
+from defteriki.cekirdek.tanim_sorgulari import kayit_turu_getir as kayit_turu_getir
+from defteriki.cekirdek.tanim_sorgulari import (
+    nesne_turlerini_listele as nesne_turlerini_listele,
+)
+from defteriki.cekirdek.tanim_sorgulari import nesne_turu_getir as nesne_turu_getir
+from defteriki.cekirdek.tanim_sorgulari import (
+    ozellik_tanimlarini_listele as ozellik_tanimlarini_listele,
+)
+from defteriki.cekirdek.tanim_sorgulari import paket_bul as paket_bul
+from defteriki.cekirdek.tanim_sorgulari import paket_getir as paket_getir
+from defteriki.cekirdek.tanim_sorgulari import paketleri_listele as paketleri_listele
+from defteriki.cekirdek.tanim_sorgulari import surum_getir as surum_getir
+from defteriki.cekirdek.tanim_sorgulari import surum_kilitli_mi as surum_kilitli_mi
+from defteriki.cekirdek.tanim_sorgulari import surumleri_listele as surumleri_listele
 from defteriki.cekirdek.tanim_tablolari import (
     DegerTuru,
     HiyerarsiKurali,
@@ -62,16 +123,8 @@ sürer; büyük-küçük harf ayrımı vardır, kod verildiği gibi saklanır ve
 karşılaştırılır (``Demo`` ile ``DEMO`` farklı kodlardır)."""
 
 
-class TanimHatasi(Exception):
-    """Tanım sistemi hatalarının ortak tabanı."""
-
-
 class GecersizTanim(TanimHatasi, ValueError):
     """Kod biçimi, gösterim adı, sürüm numarası ya da kural sayıları geçersiz."""
-
-
-class TanimBulunamadi(TanimHatasi, LookupError):
-    """Verilen kimlikle paket, sürüm, nesne türü, ilişki ya da kayıt türü yok."""
 
 
 class MukerrerTanim(TanimHatasi):
@@ -83,7 +136,7 @@ class TanimSurumuUyusmuyor(TanimHatasi):
 
 
 class TanimSurumuKilitli(TanimHatasi):
-    """Sürüm altında nesne üretildi; sürüme yeni tanım eklenemez."""
+    """Ekleme, sürüm altındaki mevcut kesin veriyi geriye dönük bozardı."""
 
 
 # --- doğrulama -------------------------------------------------------------------
@@ -125,49 +178,28 @@ def _mukerrer_denetle(oturum: Session, sorgu: Select[tuple[int]], mesaj: str) ->
         raise MukerrerTanim(mesaj)
 
 
-def _kilidi_denetle(surum: TanimSurumu) -> None:
-    if surum.kilitli:
-        raise TanimSurumuKilitli(
-            f"tanım sürümü {surum.id} kilitli: altında nesne üretildi, yeni tanım "
-            "eklenemez; yeni sürüm açın."
-        )
+# --- ekleme-yalnız kilit: mevcut kesin veri ------------------------------------------
 
 
-def _paket_getir(oturum: Session, tanim_paketi_id: int) -> TanimPaketi:
-    paket = oturum.get(TanimPaketi, tanim_paketi_id)
-    if paket is None:
-        raise TanimBulunamadi(f"tanım paketi bulunamadı: kimlik {tanim_paketi_id}")
-    return paket
+def _turde_kesin_nesne_var_mi(oturum: Session, tur: NesneTuru) -> bool:
+    """Türün altında kesin nesne var mı (etkin ya da kapalı; aday sayılmaz).
+    Kilitsiz sürümün altında nesne olamaz; bayrak hızlı ön kontroldür."""
+    if not surum_getir(oturum, tur.tanim_surumu_id).kilitli:
+        return False
+    sorgu = select(Nesne.id).where(Nesne.nesne_turu_id == tur.id).limit(1)
+    return oturum.execute(sorgu).first() is not None
 
 
-def _surum_getir(oturum: Session, tanim_surumu_id: int) -> TanimSurumu:
-    surum = oturum.get(TanimSurumu, tanim_surumu_id)
-    if surum is None:
-        raise TanimBulunamadi(f"tanım sürümü bulunamadı: kimlik {tanim_surumu_id}")
-    return surum
-
-
-def nesne_turu_getir(oturum: Session, nesne_turu_id: int) -> NesneTuru:
-    """Kimlikle nesne türü; yoksa ``TanimBulunamadi``."""
-    tur = oturum.get(NesneTuru, nesne_turu_id)
-    if tur is None:
-        raise TanimBulunamadi(f"nesne türü bulunamadı: kimlik {nesne_turu_id}")
-    return tur
-
-
-def iliski_tanimi_getir(oturum: Session, iliski_tanimi_id: int) -> IliskiTanimi:
-    """Kimlikle ilişki tanımı; yoksa ``TanimBulunamadi``."""
-    iliski = oturum.get(IliskiTanimi, iliski_tanimi_id)
-    if iliski is None:
-        raise TanimBulunamadi(f"ilişki tanımı bulunamadı: kimlik {iliski_tanimi_id}")
-    return iliski
-
-
-def _kayit_turu_getir(oturum: Session, kayit_turu_id: int) -> KayitTuru:
-    tur = oturum.get(KayitTuru, kayit_turu_id)
-    if tur is None:
-        raise TanimBulunamadi(f"kayıt türü bulunamadı: kimlik {kayit_turu_id}")
-    return tur
+def _iliskide_kesin_baglanti_var_mi(oturum: Session, iliski: IliskiTanimi) -> bool:
+    """İlişki tanımıyla kurulmuş kesin nesne ilişkisi var mı."""
+    if not surum_getir(oturum, iliski.tanim_surumu_id).kilitli:
+        return False
+    sorgu = (
+        select(NesneIliskisi.id)
+        .where(NesneIliskisi.iliski_tanimi_id == iliski.id)
+        .limit(1)
+    )
+    return oturum.execute(sorgu).first() is not None
 
 
 # --- yazma -----------------------------------------------------------------------
@@ -205,7 +237,7 @@ def surum_tanimla(
     ``float`` ve metin reddedilir) ve paket içinde benzersiz. Yeni sürüm açmak
     her zaman serbesttir; kilit sürüm başınadır."""
     _surum_noyu_dogrula(surum_no)
-    paket = _paket_getir(oturum, tanim_paketi_id)
+    paket = paket_getir(oturum, tanim_paketi_id)
     _mukerrer_denetle(
         oturum,
         select(TanimSurumu.id).where(
@@ -233,11 +265,11 @@ def nesne_turu_tanimla(
     gosterim_adi: str,
     aciklama: str | None = None,
 ) -> NesneTuru:
-    """Sürüme yeni nesne türü; ``kod`` sürüm içinde benzersiz; sürüm kilitsiz."""
+    """Sürüme yeni nesne türü; ``kod`` sürüm içinde benzersiz. Kilitli sürümde
+    de serbest: yeni türün altında veri yoktur."""
     _kodu_dogrula(kod, "nesne türü")
     _gosterim_adini_dogrula(gosterim_adi, "nesne türü")
-    surum = _surum_getir(oturum, tanim_surumu_id)
-    _kilidi_denetle(surum)
+    surum = surum_getir(oturum, tanim_surumu_id)
     _mukerrer_denetle(
         oturum,
         select(NesneTuru.id).where(
@@ -262,9 +294,11 @@ def ozellik_tanimla(
     zorunlu: bool = False,
     aciklama: str | None = None,
 ) -> OzellikTanimi:
-    """Nesne türüne yeni özellik tanımı; ``kod`` tür içinde benzersiz; türün
-    sürümü kilitsiz. ``deger_turu`` teknik değer türü, ``zorunlu`` nesnenin bu
-    özellik olmadan var olamayacağı anlamına gelir."""
+    """Nesne türüne yeni özellik tanımı; ``kod`` tür içinde benzersiz.
+    ``deger_turu`` teknik değer türü, ``zorunlu`` nesnenin bu özellik olmadan
+    var olamayacağı anlamına gelir. İsteğe bağlı özellik her zaman eklenir;
+    zorunlu özellik yalnız türün altında kesin nesne yoksa (ekleme-yalnız
+    kilit), aksi hâlde ``TanimSurumuKilitli``."""
     _kodu_dogrula(kod, "özellik")
     _gosterim_adini_dogrula(gosterim_adi, "özellik")
     try:
@@ -276,7 +310,12 @@ def ozellik_tanimla(
     if type(zorunlu) is not bool:
         raise GecersizTanim(f"özellik {kod!r}: zorunlu bilgisi mantıksal olmalı.")
     tur = nesne_turu_getir(oturum, nesne_turu_id)
-    _kilidi_denetle(_surum_getir(oturum, tur.tanim_surumu_id))
+    if zorunlu and _turde_kesin_nesne_var_mi(oturum, tur):
+        raise TanimSurumuKilitli(
+            f"nesne türü {tur.kod!r} altında kesin nesne var; zorunlu özellik "
+            f"{kod!r} eklenemez (mevcut nesneleri geçersiz kılardı), yalnız isteğe "
+            "bağlı özellik eklenebilir."
+        )
     _mukerrer_denetle(
         oturum,
         select(OzellikTanimi.id).where(
@@ -307,12 +346,11 @@ def iliski_tanimla(
     aciklama: str | None = None,
 ) -> IliskiTanimi:
     """Sürüme yönlü ilişki tanımı (kaynak → hedef); ``kod`` sürüm içinde
-    benzersiz; iki tür de bu sürümde olmalı; sürüm kilitsiz. Kaynak ile hedef
-    aynı tür olabilir."""
+    benzersiz; iki tür de bu sürümde olmalı. Kaynak ile hedef aynı tür
+    olabilir. Kilitli sürümde de serbest: yeni ilişkinin bağlantısı yoktur."""
     _kodu_dogrula(kod, "ilişki")
     _gosterim_adini_dogrula(gosterim_adi, "ilişki")
-    surum = _surum_getir(oturum, tanim_surumu_id)
-    _kilidi_denetle(surum)
+    surum = surum_getir(oturum, tanim_surumu_id)
     kaynak = nesne_turu_getir(oturum, kaynak_nesne_turu_id)
     hedef = nesne_turu_getir(oturum, hedef_nesne_turu_id)
     for rol, tur in (("kaynak", kaynak), ("hedef", hedef)):
@@ -352,10 +390,11 @@ def hiyerarsi_kurali_tanimla(
 
     ``en_az_ust`` ≥ 0 (0: isteğe bağlı üst), ``en_cok_ust`` ≥ 1 ve ≥ ``en_az_ust``
     ya da ``None`` (sınırsız), ``ust_yasam_durumu`` üstün olması gereken durum
-    ya da ``None`` (fark etmez). Bir ilişkinin en çok bir kuralı olur; sürüm
-    kilitsiz olmalı."""
+    ya da ``None`` (fark etmez). Bir ilişkinin en çok bir kuralı olur.
+    Ekleme-yalnız kilit: ilişkiyle kurulmuş kesin bağlantı varsa kural
+    eklenemez; ``en_az_ust > 0`` ise kaynak türün altında kesin nesne de
+    olmamalı (``TanimSurumuKilitli``)."""
     iliski = iliski_tanimi_getir(oturum, iliski_tanimi_id)
-    _kilidi_denetle(_surum_getir(oturum, iliski.tanim_surumu_id))
     if _tam_sayi_dogrula(en_az_ust, "en az üst sayısı") < 0:
         raise GecersizTanim(f"en az üst sayısı negatif olamaz: {en_az_ust}")
     if en_cok_ust is not None:
@@ -377,6 +416,18 @@ def hiyerarsi_kurali_tanimla(
         select(HiyerarsiKurali.id).where(HiyerarsiKurali.iliski_tanimi_id == iliski.id),
         f"ilişki {iliski.kod!r} için hiyerarşi kuralı zaten var.",
     )
+    if _iliskide_kesin_baglanti_var_mi(oturum, iliski):
+        raise TanimSurumuKilitli(
+            f"ilişki {iliski.kod!r} ile kurulmuş kesin bağlantı var; hiyerarşi "
+            "kuralı eklenemez (mevcut bağlantılar kurala aykırı olabilir)."
+        )
+    if en_az_ust > 0 and _turde_kesin_nesne_var_mi(
+        oturum, nesne_turu_getir(oturum, iliski.kaynak_nesne_turu_id)
+    ):
+        raise TanimSurumuKilitli(
+            f"ilişki {iliski.kod!r}: kaynak tür altında kesin nesne var; en az "
+            f"{en_az_ust} üst şartı eklenemez (mevcut nesneleri geçersiz kılardı)."
+        )
     kural = HiyerarsiKurali(
         iliski_tanimi_id=iliski.id,
         en_az_ust=en_az_ust,
@@ -395,11 +446,11 @@ def kayit_turu_tanimla(
     gosterim_adi: str,
     aciklama: str | None = None,
 ) -> KayitTuru:
-    """Sürüme yeni kayıt türü; ``kod`` sürüm içinde benzersiz; sürüm kilitsiz."""
+    """Sürüme yeni kayıt türü; ``kod`` sürüm içinde benzersiz; kilitli sürümde
+    de serbest."""
     _kodu_dogrula(kod, "kayıt türü")
     _gosterim_adini_dogrula(gosterim_adi, "kayıt türü")
-    surum = _surum_getir(oturum, tanim_surumu_id)
-    _kilidi_denetle(surum)
+    surum = surum_getir(oturum, tanim_surumu_id)
     _mukerrer_denetle(
         oturum,
         select(KayitTuru.id).where(
@@ -422,11 +473,11 @@ def kayit_alani_tanimla(
     gosterim_adi: str,
     aciklama: str | None = None,
 ) -> KayitAlaniTanimi:
-    """Kayıt türüne yeni alan tanımı; ``kod`` tür içinde benzersiz; sürüm kilitsiz."""
+    """Kayıt türüne yeni alan tanımı; ``kod`` tür içinde benzersiz; kilitli
+    sürümde de serbest."""
     _kodu_dogrula(kod, "kayıt alanı")
     _gosterim_adini_dogrula(gosterim_adi, "kayıt alanı")
-    tur = _kayit_turu_getir(oturum, kayit_turu_id)
-    _kilidi_denetle(_surum_getir(oturum, tur.tanim_surumu_id))
+    tur = kayit_turu_getir(oturum, kayit_turu_id)
     _mukerrer_denetle(
         oturum,
         select(KayitAlaniTanimi.id).where(
@@ -440,112 +491,3 @@ def kayit_alani_tanimla(
     oturum.add(alan)
     oturum.flush()
     return alan
-
-
-# --- okuma -----------------------------------------------------------------------
-
-
-def paket_bul(oturum: Session, kod: str) -> TanimPaketi | None:
-    """Koduyla paket; yoksa ``None`` (arama sonucu, hata değil)."""
-    return oturum.execute(
-        select(TanimPaketi).where(TanimPaketi.kod == kod)
-    ).scalar_one_or_none()
-
-
-def paketleri_listele(oturum: Session) -> list[TanimPaketi]:
-    return list(oturum.execute(select(TanimPaketi).order_by(TanimPaketi.kod)).scalars())
-
-
-def surumleri_listele(oturum: Session, tanim_paketi_id: int) -> list[TanimSurumu]:
-    """Paketin sürümleri, numaraya göre artan; paket yoksa ``TanimBulunamadi``."""
-    paket = _paket_getir(oturum, tanim_paketi_id)
-    return list(
-        oturum.execute(
-            select(TanimSurumu)
-            .where(TanimSurumu.tanim_paketi_id == paket.id)
-            .order_by(TanimSurumu.surum_no)
-        ).scalars()
-    )
-
-
-def surum_kilitli_mi(oturum: Session, tanim_surumu_id: int) -> bool:
-    """Sürüm altında nesne üretilmiş mi; sürüm yoksa ``TanimBulunamadi``."""
-    return _surum_getir(oturum, tanim_surumu_id).kilitli
-
-
-def nesne_turlerini_listele(oturum: Session, tanim_surumu_id: int) -> list[NesneTuru]:
-    surum = _surum_getir(oturum, tanim_surumu_id)
-    return list(
-        oturum.execute(
-            select(NesneTuru)
-            .where(NesneTuru.tanim_surumu_id == surum.id)
-            .order_by(NesneTuru.kod)
-        ).scalars()
-    )
-
-
-def ozellik_tanimlarini_listele(
-    oturum: Session, nesne_turu_id: int
-) -> list[OzellikTanimi]:
-    """Türün özellikleri, tanımlanma sırasıyla."""
-    tur = nesne_turu_getir(oturum, nesne_turu_id)
-    return list(
-        oturum.execute(
-            select(OzellikTanimi)
-            .where(OzellikTanimi.nesne_turu_id == tur.id)
-            .order_by(OzellikTanimi.id)
-        ).scalars()
-    )
-
-
-def iliski_tanimlarini_listele(
-    oturum: Session, tanim_surumu_id: int
-) -> list[IliskiTanimi]:
-    surum = _surum_getir(oturum, tanim_surumu_id)
-    return list(
-        oturum.execute(
-            select(IliskiTanimi)
-            .where(IliskiTanimi.tanim_surumu_id == surum.id)
-            .order_by(IliskiTanimi.kod)
-        ).scalars()
-    )
-
-
-def hiyerarsi_kurallarini_listele(
-    oturum: Session, tanim_surumu_id: int
-) -> list[HiyerarsiKurali]:
-    """Sürümdeki hiyerarşi kuralları, ilişki koduna göre."""
-    surum = _surum_getir(oturum, tanim_surumu_id)
-    return list(
-        oturum.execute(
-            select(HiyerarsiKurali)
-            .join(IliskiTanimi, IliskiTanimi.id == HiyerarsiKurali.iliski_tanimi_id)
-            .where(IliskiTanimi.tanim_surumu_id == surum.id)
-            .order_by(IliskiTanimi.kod)
-        ).scalars()
-    )
-
-
-def kayit_turlerini_listele(oturum: Session, tanim_surumu_id: int) -> list[KayitTuru]:
-    surum = _surum_getir(oturum, tanim_surumu_id)
-    return list(
-        oturum.execute(
-            select(KayitTuru)
-            .where(KayitTuru.tanim_surumu_id == surum.id)
-            .order_by(KayitTuru.kod)
-        ).scalars()
-    )
-
-
-def kayit_alani_tanimlarini_listele(
-    oturum: Session, kayit_turu_id: int
-) -> list[KayitAlaniTanimi]:
-    """Kayıt türünün alanları, tanımlanma sırasıyla."""
-    tur = _kayit_turu_getir(oturum, kayit_turu_id)
-    return list(
-        oturum.execute(
-            select(KayitAlaniTanimi)
-            .where(KayitAlaniTanimi.kayit_turu_id == tur.id)
-            .order_by(KayitAlaniTanimi.id)
-        ).scalars()
-    )

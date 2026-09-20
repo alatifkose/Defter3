@@ -139,14 +139,13 @@ from defteriki.cekirdek.deger_kodlama import (
     degeri_coz,
     degeri_kodla,
 )
-from defteriki.cekirdek.tanim_islemleri import (
-    TanimBulunamadi,
+from defteriki.cekirdek.tanim_sorgulari import (
     iliski_tanimi_getir,
+    kayit_turu_getir,
     nesne_turu_getir,
 )
 from defteriki.cekirdek.tanim_tablolari import (
     IliskiTanimi,
-    KayitTuru,
     NesneTuru,
     OzellikTanimi,
     simdi_utc,
@@ -761,13 +760,6 @@ def aday_iliski_kaldir(oturum: Session, aday_iliski_id: int) -> None:
 # --- aday kayıt -----------------------------------------------------------------------
 
 
-def _kayit_turu_getir(oturum: Session, kayit_turu_id: int) -> KayitTuru:
-    tur = oturum.get(KayitTuru, kayit_turu_id)
-    if tur is None:
-        raise TanimBulunamadi(f"kayıt türü bulunamadı: kimlik {kayit_turu_id}")
-    return tur
-
-
 def _icerigi_kodla(icerik: Mapping[str, Any]) -> str:
     return json_kodla(
         icerik,
@@ -789,7 +781,7 @@ def aday_kayit_ekle(
     olarak saklanır; kesin kayıt alanı değildir ve kesin ``kayit`` satırı
     oluşmaz. Kaynak isteğe bağlı, paketin okumasına ait olmalı."""
     paket = _yazilabilir_paket(oturum, paket_id)
-    tur = _kayit_turu_getir(oturum, kayit_turu_id)
+    tur = kayit_turu_getir(oturum, kayit_turu_id)
     metin = _icerigi_kodla(icerik)
     if kaynak_id is not None:
         _kaynagi_dogrula(oturum, paket, kaynak_id)

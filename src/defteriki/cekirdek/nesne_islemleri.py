@@ -22,7 +22,9 @@ Sözleşmeler:
   yolu yoktur; taslak mekanizması Aşama 4.5'in işidir.
 * **Tanım sürümü kilidi**: nesne oluşturulurken kullanılan sürüm aynı işlem
   içinde ``kilitli`` yapılır; işlem rollback olursa kilit de kalkar. Kilitli
-  sürüme ``tanim_islemleri`` yeni tanım eklemez.
+  sürüme ``tanim_islemleri`` yalnız mevcut kesin veriyi bozmayan tanım ekler
+  (ekleme-yalnız kilit: zorunlu özellik ve zorunlu üst şartı yalnız
+  kullanılmamış türe).
 * **Özellik değeri** tanımın ``deger_turu``'ne göre doğrulanır ve kanonik
   metin olarak saklanır (kural ``deger_kodlama`` modülünde, 4.5'te aday
   özellikle ortak): metin olduğu gibi; tam sayı ``str(int)`` (``bool``
@@ -49,7 +51,7 @@ Sözleşmeler:
 * **Yaşam durumu**: ``etkin`` / ``kapali``; geçiş yalnız
   ``yasam_durumunu_degistir`` ile ve hiyerarşi kurallarını bozamaz.
 
-Hata modeli (``NesneHatasi`` altında; tanım hataları ``tanim_islemleri``'nden
+Hata modeli (``NesneHatasi`` altında; tanım hataları ``tanim_sorgulari``'ndan
 olduğu gibi gelir):
 
 * ``NesneBulunamadi`` — nesne ya da nesne ilişkisi kimliği yok.
@@ -82,7 +84,7 @@ from defteriki.cekirdek.deger_kodlama import (
     degeri_kodla,
 )
 from defteriki.cekirdek.nesne_tablolari import Nesne, NesneIliskisi, NesneOzelligi
-from defteriki.cekirdek.tanim_islemleri import (
+from defteriki.cekirdek.tanim_sorgulari import (
     TanimBulunamadi,
     iliski_tanimi_getir,
     nesne_turu_getir,
