@@ -92,8 +92,7 @@ Bitenler:
 * Aşama 4.6 yedinci inceleme turu (2026-09-20, göç `0012`): `bekliyor` tek
   anlamlı oldu — elle duraklatma kaldırıldı (karar: Abdüllatif), `paketi_beklet`
   açık karar talebi ister; denetim izinde `karar_talebi_acildi` yalnız gerçek
-  açılışı anlatır, paket bağlama ve köken devri kendi olay adlarını aldı;
-  GitHub'da kalite kapısı (`.github/workflows/kontrol.yml`)
+  açılışı anlatır, paket bağlama ve köken devri kendi olay adlarını aldı
   ("Bekleme tek anlamlı, denetim izi ayrık")
 * Aşama 4.6 altıncı inceleme turu (2026-09-20, şema değişmedi): bağımsız köken
   zincirleme denetimin **dokunduğu** mevcut açık sorulara da devredilir
@@ -1923,6 +1922,30 @@ kurulmaz; SQLite'a özgü SQL (`typeof`, `json_valid` gibi) şema ve göç
 sınırında kalır, servis katmanına yayılmaz; Aşama 4.6 denetim izine "kim
 yaptı" (aktör) alanı baştan konur.
 
+**3. Uzak kalite kapısı (CI) yok; engel GitHub hesabının kilidi.** Kontrol
+(`scripts/kontrol.py`) yalnız bu makinede, commit öncesi kancayla çalışır.
+Depoya dışarıdan bakan biri — örneğin bağımsız bir denetçi — testlerin
+geçtiğini göremez; kaynağı ve testleri okuyarak denetlemek zorunda kalır.
+
+Eksik olan yapılandırma değil. İş akışı dosyası iki kez yazıldı ve ikisinde de
+aynı yerde durdu:
+
+* 2026-09-18, commit `5bfe105` — koşu düştü, aynı gün `7a2b3e8` ile geri alındı;
+* 2026-09-20, commit `2c5cdb7` — koşu yine düştü, bu commit'le geri alındı.
+
+GitHub'ın verdiği sebep: *"The job was not started because your account is
+locked due to a billing issue."* Yani iş hiç başlamıyor. İki depo da public,
+dolayısıyla dakika ücreti söz konusu değil; engel hesap düzeyindeki kilit.
+Kilit çözülmeden üçüncü kez denemek anlamsız: çalışmayan bir kontrol, hiç
+olmamasından kötüdür — her push'ta kırmızı görünür ve depoya bakan herkese
+proje bozukmuş izlenimi verir.
+
+Kilit çözülünce geri koyulacak dosya küçüktür: `windows-latest`,
+`actions/setup-python` + `pip install uv`, `uv sync --frozen`, ardından
+`uv run python scripts/kontrol.py`. Ürün hedefi Windows masaüstü olduğu için
+koşu orada; Linux koşusu gerekirse matrise eklenir. Bu maddeyi kapatan şey
+kod değil, ödeme tarafının düzelmesidir.
+
 ## Kurulum
 
 ```bash
@@ -2088,12 +2111,10 @@ Aynı kontrol her `git commit` öncesinde pre-commit kancasıyla otomatik
 çalışır (`.pre-commit-config.yaml`, tek kanca: `scripts/kontrol.py`);
 bir adım düşerse commit yapılmaz. Kanca kaynak dosyalarını değiştirmez.
 
-Aynı betik her push ve pull request'te GitHub'da da çalışır
-(`.github/workflows/kontrol.yml`, `windows-latest`, bağımlılıklar
-`uv sync --frozen` ile kilitten kurulur). 2026-09-20'ye kadar uzak bir kalite
-kapısı yoktu; depoya dışarıdan bakan biri testlerin geçtiğini göremiyordu.
-Ürün hedefi Windows masaüstü olduğu için koşu orada; Linux koşusu gerekirse
-matrise eklenir.
+**Uzak kalite kapısı (CI) yoktur** ve bunun sebebi yapılandırma değildir; bkz.
+"Bilinen teknik borç", madde 3. Kontrol yalnız bu makinede, commit öncesinde
+çalışır; depoya dışarıdan bakan biri testlerin geçtiğini göremez, kaynağı
+okuyarak denetlemek zorundadır.
 
 ## Ayarlar
 
@@ -2197,7 +2218,6 @@ alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 ta
 tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı, finansal ad denetimi, taslak / kesin ayrımı; test_nesne_motoru.py: ENVANTER dünyası; test_arsiv.py ve test_belge_zinciri.py: belge zinciri; test_islem_paketi.py: işlem paketi ve taslak; test_mukerrerlik.py: onay ve mükerrerlik; test_gocler.py: göç zinciri ve ORM metadata birebirliği)
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
-.github/workflows/kontrol.yml  her push ve PR'da aynı kontrol (windows-latest)
 kavramlar_sozlugu.md   ortak kavram tanımları; ekleme ve değişiklik yalnız Abdüllatif'in onayıyla
 ```
 
