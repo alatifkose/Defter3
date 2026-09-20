@@ -11,7 +11,11 @@ zinciri tabloları; geri alma satır varken uygulanmaz), Aşama 4.5 ile ``0007``
 (işlem paketi ve beş aday tablosu, ``kaynak (id, okuma_id)`` benzersiz
 indeksi; geri alma satır varken uygulanmaz), Aşama 4.6 ile ``0008``
 (mükerrerlik şartı, karar talebi, aday çözümlemesi, nesne birleşimi, denetim
-izi; kısmi benzersiz indeksler; geri alma satır varken uygulanmaz);
+izi; kısmi benzersiz indeksler; geri alma satır varken uygulanmaz) ve
+``0009`` (2026-09-20 incelemesi: ``karar_talebi`` terminal ``gecersiz``
+durumu, ``nesne_birlesimi.kanonik_nesne_id``, aktör kısıtları, iki yeni
+denetim olayı, ``aday_nesne`` ``AUTOINCREMENT``; beş tablo açık SQL ile
+yeniden kurulur);
 ``upgrade →
 downgrade → upgrade`` döngüsü, adım adım zincir ve göç şemasının ORM
 metadata'sıyla birebirliği sınanır. Bütün göçler geçici test
@@ -52,7 +56,8 @@ DEFTERIKI_DEGISKENLERI = (
 )
 BEKLEME_SANIYE = 120
 BASLANGIC_SURUMU = "0001"
-GUNCEL_SURUM = "0008"
+GUNCEL_SURUM = "0009"
+ONAY_SURUMU = "0008"
 TASLAK_SURUMU = "0007"
 BELGE_SURUMU = "0006"
 KENDINE_SURUMU = "0005"
@@ -95,6 +100,19 @@ def _sema(v: vt.Veritabani) -> list[tuple[str, str, str | None]]:
             )
         ).all()
     return [(str(t), str(a), s) for t, a, s in satirlar]
+
+
+def _sema_sade(v: vt.Veritabani) -> list[tuple[str, str, str | None]]:
+    """``_sema`` ama tablo adının tırnakları atılmış hâliyle.
+
+    SQLite ``ALTER TABLE ... RENAME TO`` sonrası tablo adını DDL metninde
+    tırnak içine alır; bu bir şema farkı değildir. Tablo yeniden kuran bir
+    göçün öncesi ile sonrasını karşılaştıran testler bu gürültüyü ayıklar.
+    """
+    return [
+        (tur, ad, sql.replace(f'"{ad}"', ad, 1) if sql else sql)
+        for tur, ad, sql in _sema(v)
+    ]
 
 
 def _yukselt(
@@ -219,7 +237,12 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
         with v.motor.connect() as baglanti:
             denetci = inspect(baglanti)
             for tablo in UYGULAMA_TABLOLARI:
-                assert denetci.get_pk_constraint(tablo)["name"] == f"pk_{tablo}"
+                # ``aday_nesne`` tek istisnadır: ``0009`` ile birincil anahtarı
+                # ``AUTOINCREMENT`` oldu (silinen aday kimliği yeniden
+                # dağıtılmasın diye) ve SQLite ``AUTOINCREMENT``a yalnız sütun
+                # kısıtında izin verdiğinden kısıt ad taşıyamaz.
+                if tablo != tst.ADAY_NESNE:
+                    assert denetci.get_pk_constraint(tablo)["name"] == f"pk_{tablo}"
                 assert denetci.get_pk_constraint(tablo)["constrained_columns"] == ["id"]
                 for fk in denetci.get_foreign_keys(tablo):
                     assert str(fk["name"]).startswith(f"fk_{tablo}_"), fk
@@ -318,6 +341,7 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 ],
                 "nesne_birlesimi": [
                     "fk_nesne_birlesimi_hedef_nesne_id_nesne_turu_id_nesne",
+                    "fk_nesne_birlesimi_kanonik_nesne_id_nesne_turu_id_nesne",
                     "fk_nesne_birlesimi_karar_talebi_id_karar_talebi",
                     "fk_nesne_birlesimi_kaynak_nesne_id_nesne_turu_id_nesne",
                 ],
@@ -460,15 +484,21 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 "nesne_mukerrerlik_sarti": [],
                 "aday_nesne_mukerrerlik_sarti": [],
                 "karar_talebi": [
+                    "ck_karar_talebi_acan_aktor_turu_gecerli",
                     "ck_karar_talebi_durum_gecerli",
                     "ck_karar_talebi_durum_karar_tutarli",
                     "ck_karar_talebi_karar_gecerli",
+                    "ck_karar_talebi_karari_kullanici_verir",
                     "ck_karar_talebi_kesin_cift_sirasi",
                     "ck_karar_talebi_tek_karsi_uc",
                 ],
-                "aday_nesne_cozumlemesi": [],
+                "aday_nesne_cozumlemesi": [
+                    "ck_aday_nesne_cozumlemesi_karari_kullanici_verir",
+                ],
                 "nesne_birlesimi": [
+                    "ck_nesne_birlesimi_karari_kullanici_verir",
                     "ck_nesne_birlesimi_kaynak_hedeften_farkli",
+                    "ck_nesne_birlesimi_kaynak_kanonikten_farkli",
                 ],
                 "denetim_izi": [
                     "ck_denetim_izi_aktor_kimligi_dolu",
@@ -540,6 +570,7 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 ],
                 "nesne_birlesimi": [
                     "ix_nesne_birlesimi_hedef_nesne_id",
+                    "ix_nesne_birlesimi_kanonik_nesne_id",
                 ],
                 "denetim_izi": [
                     "ix_denetim_izi_islem_paketi_id",
@@ -1437,6 +1468,54 @@ def test_0006_0007_gecisi_belge_ve_nesne_verisini_korur_ve_dolu_geri_alinmaz(
         v.kapat()
 
 
+_ONAY_OZET = "d" * 64
+_ONAY_TOHUMU: tuple[str, ...] = (
+    "INSERT INTO tanim_paketi (kod, gosterim_adi, olusturma_zamani) "
+    "VALUES ('ENVANTER', 'Envanter', '2026-09-20 00:00:00')",
+    "INSERT INTO tanim_surumu (tanim_paketi_id, surum_no, olusturma_zamani, kilitli) "
+    "VALUES (1, 1, '2026-09-20 00:00:00', 1)",
+    "INSERT INTO nesne_turu (tanim_surumu_id, kod, gosterim_adi) "
+    "VALUES (1, 'RAF', 'Raf')",
+    "INSERT INTO ozellik_tanimi (nesne_turu_id, kod, gosterim_adi, deger_turu, "
+    "zorunlu) VALUES (1, 'seri_no', 'Seri No', 'metin', 0)",
+    "INSERT INTO nesne (nesne_turu_id, tanim_surumu_id, yasam_durumu, "
+    "olusturma_zamani) VALUES (1, 1, 'etkin', '2026-09-20')",
+    "INSERT INTO nesne (nesne_turu_id, tanim_surumu_id, yasam_durumu, "
+    "olusturma_zamani) VALUES (1, 1, 'kapali', '2026-09-20')",
+    "INSERT INTO nesne (nesne_turu_id, tanim_surumu_id, yasam_durumu, "
+    "olusturma_zamani) VALUES (1, 1, 'etkin', '2026-09-20')",
+    "INSERT INTO arsiv_dosyasi (sha256, boyut, mime, kaynak_uzantisi, kaynak_adi, "
+    f"goreli_yol, olusturma_zamani) VALUES ('{_ONAY_OZET}', 3, "
+    f"'application/octet-stream', '', 'a', '{_ONAY_OZET[:2]}/{_ONAY_OZET}', "
+    "'2026-09-20 00:00:00')",
+    "INSERT INTO belge (arsiv_dosyasi_id, olusturma_zamani) "
+    "VALUES (1, '2026-09-20 00:00:00')",
+    "INSERT INTO okuma (belge_id, surum_no, durum, icerik, olusturma_zamani, "
+    "tamamlanma_zamani) VALUES (1, 1, 'tamamlandi', '{}', '2026-09-20 00:00:00', "
+    "'2026-09-20 00:00:01')",
+    "INSERT INTO islem_paketi (okuma_id, durum, olusturma_zamani, durum_zamani) "
+    "VALUES (1, 'calisiyor', '2026-09-20', '2026-09-20')",
+    "INSERT INTO aday_nesne (islem_paketi_id, okuma_id, nesne_turu_id, "
+    "tanim_surumu_id, olusturma_zamani) VALUES (1, 1, 1, 1, '2026-09-20')",
+    "INSERT INTO karar_talebi (durum, nesne_turu_id, kaynak_nesne_id, hedef_nesne_id, "
+    "eslesen_ozellik_tanimi_id, olusturma_zamani, acan_aktor_turu, acan_aktor_kimligi, "
+    "karar, karar_zamani, karar_aktor_turu, karar_aktor_kimligi) VALUES ('cozuldu', 1, "
+    "2, 1, 1, '2026-09-20', 'kullanici', 'test', 'ayni', '2026-09-20', 'kullanici', "
+    "'test')",
+    "INSERT INTO karar_talebi (durum, nesne_turu_id, kaynak_nesne_id, hedef_nesne_id, "
+    "eslesen_ozellik_tanimi_id, olusturma_zamani, acan_aktor_turu, acan_aktor_kimligi) "
+    "VALUES ('acik', 1, 3, 1, 1, '2026-09-20', 'kullanici', 'test')",
+    "INSERT INTO nesne_birlesimi (kaynak_nesne_id, hedef_nesne_id, nesne_turu_id, "
+    "karar_talebi_id, olusturma_zamani, aktor_turu, aktor_kimligi) "
+    "VALUES (2, 1, 1, 1, '2026-09-20', 'kullanici', 'test')",
+    "INSERT INTO denetim_izi (olay, olay_zamani, aktor_turu, aktor_kimligi, "
+    "karar_talebi_id) VALUES ('karar_talebi_acildi', '2026-09-20', 'kullanici', "
+    "'test', 1)",
+)
+"""``0008`` şemasında gerçekçi bir onay/mükerrerlik tohumu (ham SQL; servis
+katmanı bu eski şemayı artık yazamaz)."""
+
+
 def test_0007_0008_gecisi_veriyi_korur_ve_dolu_geri_alinmaz(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1569,5 +1648,196 @@ def test_0007_0008_gecisi_veriyi_korur_ve_dolu_geri_alinmaz(
             assert sayilar(oturum) == once
             assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
             assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+    finally:
+        v.kapat()
+
+
+def test_0008_0009_gecisi_veriyi_korur_ve_dolu_geri_alinmaz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0008``de yazılmış talep / birleşim / iz / aday satırları ``0009``a
+    olduğu gibi taşınır; taşınan birleşimin kanonik nesnesi karar hedefidir,
+    ``aday_nesne`` ``AUTOINCREMENT`` olur. ``0009``a özgü veri (geçersiz talep,
+    kanonik hedefi değişmiş birleşim, yeni denetim olayı) varsa geri alma
+    uygulanmaz; satırlar silinince geri alınır ve tekrar ``head`` sıfırdan
+    kurulanla aynı şemayı verir."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    def aday_nesne_semasi() -> str:
+        return str(next(s for _, ad, s in _sema(v) if ad == tst.ADAY_NESNE))
+
+    try:
+        goc(ONAY_SURUMU)
+        assert "AUTOINCREMENT" not in aday_nesne_semasi()
+        with v.islem() as oturum:
+            for sql in _ONAY_TOHUMU:
+                oturum.execute(text(sql))
+            once = int(
+                oturum.execute(text("SELECT count(*) FROM karar_talebi")).scalar_one()
+            )
+        assert once == 2
+        eski_sema = _sema_sade(v)
+
+        goc(GUNCEL_SURUM)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        assert "AUTOINCREMENT" in aday_nesne_semasi()
+        with v.islem() as oturum:
+            assert (
+                int(
+                    oturum.execute(
+                        text("SELECT count(*) FROM karar_talebi")
+                    ).scalar_one()
+                )
+                == once
+            )
+            # taşınan birleşimin kanonik nesnesi kullanıcının karar hedefidir
+            assert oturum.execute(
+                text(
+                    "SELECT kaynak_nesne_id, hedef_nesne_id, kanonik_nesne_id "
+                    "FROM nesne_birlesimi"
+                )
+            ).all() == [(2, 1, 1)]
+            assert (
+                int(
+                    oturum.execute(
+                        text("SELECT count(*) FROM denetim_izi")
+                    ).scalar_one()
+                )
+                == 1
+            )
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert not any(ad.endswith(("_yeni", "_tasima")) for _, ad, _ in _sema(v))
+        tam_sema = _sema(v)
+        assert tam_sema == _yukselt(tmp_path / "sifir", monkeypatch)[1]
+
+        # 0009'a özgü üç veri biçimi geri almayı durdurur
+        engeller = (
+            (
+                "geçersiz karar talebi",
+                "UPDATE karar_talebi SET durum = 'gecersiz', "
+                "gecersizlik_zamani = '2026-09-20' WHERE id = 2",
+                "UPDATE karar_talebi SET durum = 'acik', "
+                "gecersizlik_zamani = NULL WHERE id = 2",
+            ),
+            (
+                "kanonik hedefi değişmiş birleşim",
+                "UPDATE nesne_birlesimi SET kanonik_nesne_id = 3",
+                "UPDATE nesne_birlesimi SET kanonik_nesne_id = hedef_nesne_id",
+            ),
+            (
+                "0009 denetim olayı",
+                "UPDATE denetim_izi SET olay = 'karar_talebi_gecersiz_kaldi'",
+                "UPDATE denetim_izi SET olay = 'karar_talebi_acildi'",
+            ),
+        )
+        for ad, kur, geri_al in engeller:
+            with v.islem() as oturum:
+                oturum.execute(text(kur))
+            with pytest.raises(RuntimeError, match=ad):
+                goc(ONAY_SURUMU, geri=True)
+            assert gocler.sema_surumu(v) == GUNCEL_SURUM
+            assert _sema(v) == tam_sema
+            with v.islem() as oturum:
+                oturum.execute(text(geri_al))
+
+        goc(ONAY_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == ONAY_SURUMU
+        assert _sema_sade(v) == eski_sema
+        with v.islem() as oturum:
+            assert (
+                int(
+                    oturum.execute(
+                        text("SELECT count(*) FROM karar_talebi")
+                    ).scalar_one()
+                )
+                == once
+            )
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+
+        goc(GUNCEL_SURUM)
+        assert _sema(v) == tam_sema
+    finally:
+        v.kapat()
+
+
+def test_0008_0009_bos_veritabani_dongusu_semayi_degistirmez(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0008 → 0009 → 0008 → 0009``: beş tablonun yeniden kurulması şemayı
+    kaydırmaz, geçici tablo bırakmaz."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    try:
+        goc(ONAY_SURUMU)
+        sekiz = _sema_sade(v)
+        goc(GUNCEL_SURUM)
+        dokuz = _sema(v)
+        goc(ONAY_SURUMU, geri=True)
+        assert _sema_sade(v) == sekiz
+        goc(GUNCEL_SURUM)
+        assert _sema(v) == dokuz
+        assert not any(ad.endswith(("_yeni", "_tasima")) for _, ad, _ in dokuz)
+        with v.islem() as oturum:
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+    finally:
+        v.kapat()
+
+
+def test_0009_birlesim_zinciri_varken_kanonik_uydurmaz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0008`` zincire izin veriyordu (``3 → 2`` ve ``2 → 1``). ``0009``
+    böyle bir veride kanonik nesne uydurmaz: göç hata verir, sürüm ``0008``de
+    kalır ve satırlar yerinde durur."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            command.upgrade(alembic, hedef)
+
+    try:
+        goc(ONAY_SURUMU)
+        with v.islem() as oturum:
+            for sql in _ONAY_TOHUMU:
+                oturum.execute(text(sql))
+            oturum.execute(
+                text(
+                    "INSERT INTO nesne_birlesimi (kaynak_nesne_id, hedef_nesne_id, "
+                    "nesne_turu_id, karar_talebi_id, olusturma_zamani, aktor_turu, "
+                    "aktor_kimligi) VALUES (3, 2, 1, 2, '2026-09-20', 'kullanici', "
+                    "'test')"
+                )
+            )
+        with pytest.raises(RuntimeError, match="kanonik gösteriyor"):
+            goc(GUNCEL_SURUM)
+        assert gocler.sema_surumu(v) == ONAY_SURUMU
+        with v.islem() as oturum:
+            assert (
+                int(
+                    oturum.execute(
+                        text("SELECT count(*) FROM nesne_birlesimi")
+                    ).scalar_one()
+                )
+                == 2
+            )
     finally:
         v.kapat()

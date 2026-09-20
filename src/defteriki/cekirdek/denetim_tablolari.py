@@ -18,7 +18,15 @@ Dış anahtarlar: hiç silinmeyen satırlara (``islem_paketi``, ``karar_talebi``
 ``nesne``, ``ozellik_tanimi``) ``RESTRICT`` ile bağlanır. ``aday_nesne_id``
 bilerek dış anahtar **değildir**: aday nesne taslak yaşam döngüsünde
 silinebilir ve denetim izi silinen satırdan sonra da yaşamalıdır; denetim izi
-bir iş işlemini engellemez.
+bir iş işlemini engellemez. Silinen adayın kimliği yeni bir adaya **yeniden
+verilmez**: ``aday_nesne`` ``AUTOINCREMENT`` kullanır (göç ``0009``), böylece
+yıllar sonra okunan bir iz başka bir adayı anlatıyor olamaz.
+
+Bu modül ``nesne_tablolari``yı ve ``mukerrerlik_tablolari``yı **import
+etmez**: ``taslak_islemleri`` bu modülün yazma işlevlerini kullanır ve taslak
+→ kesin nesne import zinciri yasaktır (``tests/test_mimari_sinir.py``).
+Bağlanılan iki tablonun adı bu yüzden yerel sabittir (``KESIN_NESNE``,
+``KARAR_TALEBI``); adların doğruluğu testle korunur.
 
 Bu modül yalnız şemadır: satır yazmaz, ``relationship`` içermez.
 """
@@ -40,11 +48,17 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from defteriki.cekirdek.mukerrerlik_tablolari import KARAR_TALEBI
-from defteriki.cekirdek.nesne_tablolari import NESNE
 from defteriki.cekirdek.tanim_tablolari import OZELLIK_TANIMI
 from defteriki.cekirdek.taslak_tablolari import ISLEM_PAKETI
 from defteriki.cekirdek.veritabani import TabloTabani
+
+KESIN_NESNE = "nesne"
+"""``nesne_tablolari.NESNE`` ile aynı ad; oradan import edilmez (modül
+açıklamasındaki sınır). Eşitlik ``tests/test_mukerrerlik.py`` ile korunur."""
+
+KARAR_TALEBI = "karar_talebi"
+"""``mukerrerlik_tablolari.KARAR_TALEBI`` ile aynı ad; oradan import edilmez
+(import döngüsü olurdu: mükerrerlik şeması aktör türünü buradan alır)."""
 
 DENETIM_IZI = "denetim_izi"
 
@@ -71,6 +85,12 @@ class DenetimOlayi(StrEnum):
     ADAY_NESNEYE_COZUMLENDI = "aday_nesneye_cozumlendi"
     PAKET_BEKLEMEYE_GECTI = "paket_beklemeye_gecti"
     PAKET_YENIDEN_CALISIYOR = "paket_yeniden_calisiyor"
+    KARAR_TALEBI_GECERSIZ_KALDI = "karar_talebi_gecersiz_kaldi"
+    """Paketi iptal edilen talep terminal ``gecersiz`` duruma geçti; karar
+    verilmedi, satır geçmişte kalır."""
+    BIRLESIM_YENIDEN_BAGLANDI = "birlesim_yeniden_baglandi"
+    """Eski bir birleşimin kanonik hedefi, hedefin kendisi birleşince yeni
+    kanonik nesneye bağlandı (zincir düzleştirildi)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,10 +126,10 @@ class DenetimIzi(TabloTabani):
         Integer, ForeignKey(f"{KARAR_TALEBI}.id", ondelete="RESTRICT")
     )
     nesne_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey(f"{NESNE}.id", ondelete="RESTRICT")
+        Integer, ForeignKey(f"{KESIN_NESNE}.id", ondelete="RESTRICT")
     )
     ikincil_nesne_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey(f"{NESNE}.id", ondelete="RESTRICT")
+        Integer, ForeignKey(f"{KESIN_NESNE}.id", ondelete="RESTRICT")
     )
     """Olayın ikinci ucu: birleşimde kaynak nesne, şüphede karşı uç."""
     aday_nesne_id: Mapped[int | None] = mapped_column(Integer)

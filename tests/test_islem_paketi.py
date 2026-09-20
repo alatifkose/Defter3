@@ -40,6 +40,7 @@ from defteriki.cekirdek import tanim_islemleri as ti
 from defteriki.cekirdek import taslak_islemleri as tsi
 from defteriki.cekirdek import taslak_tablolari as tst
 from defteriki.cekirdek import veritabani as vt
+from defteriki.cekirdek.denetim_tablolari import Aktor, AktorTuru
 from defteriki.cekirdek.tanim_tablolari import DegerTuru, YasamDurumu
 from defteriki.cekirdek.taslak_tablolari import PaketDurumu
 
@@ -58,6 +59,15 @@ SAYIM_ICERIGI: dict[str, Any] = {"adet": 12, "not": "ç ğ ş", "raf": "A1"}
 CALISIYOR = PaketDurumu.CALISIYOR
 BEKLIYOR = PaketDurumu.BEKLIYOR
 IPTAL = PaketDurumu.IPTAL
+KULLANICI = Aktor(AktorTuru.KULLANICI, "test-kullanici")
+
+
+def _iptal_et(oturum: Session, paket_id: int) -> tst.IslemPaketi:
+    """``paketi_iptal_et`` artik aktor alir (Asama 4.6: iptal acik karar
+    taleplerini gecersiz kilar ve denetim izine yazar)."""
+    return tsi.paketi_iptal_et(oturum, paket_id, KULLANICI)
+
+
 KESIN_NESNE_TABLOLARI = nt.NESNE_TABLOLARI
 
 
@@ -270,7 +280,7 @@ def test_olmayan_paket_bulunamaz(ortam: Ortam) -> None:
             tsi.paket_belgesi,
             tsi.paketi_beklet,
             tsi.paketi_devam_et,
-            tsi.paketi_iptal_et,
+            _iptal_et,
         ):
             with pytest.raises(tsi.PaketBulunamadi):
                 islev(oturum, 99)
@@ -285,8 +295,8 @@ def test_olmayan_paket_bulunamaz(ortam: Ortam) -> None:
     [
         ((tsi.paketi_beklet,), BEKLIYOR),
         ((tsi.paketi_beklet, tsi.paketi_devam_et), CALISIYOR),
-        ((tsi.paketi_iptal_et,), IPTAL),
-        ((tsi.paketi_beklet, tsi.paketi_iptal_et), IPTAL),
+        ((_iptal_et,), IPTAL),
+        ((tsi.paketi_beklet, _iptal_et), IPTAL),
         ((tsi.paketi_beklet, tsi.paketi_devam_et, tsi.paketi_beklet), BEKLIYOR),
     ],
 )
@@ -312,9 +322,9 @@ def test_izinli_gecisler(
     [
         ((), tsi.paketi_devam_et),  # calisiyor → calisiyor
         ((tsi.paketi_beklet,), tsi.paketi_beklet),  # bekliyor → bekliyor
-        ((tsi.paketi_iptal_et,), tsi.paketi_devam_et),  # iptal → calisiyor
-        ((tsi.paketi_iptal_et,), tsi.paketi_beklet),  # iptal → bekliyor
-        ((tsi.paketi_iptal_et,), tsi.paketi_iptal_et),  # iptal → iptal
+        ((_iptal_et,), tsi.paketi_devam_et),  # iptal → calisiyor
+        ((_iptal_et,), tsi.paketi_beklet),  # iptal → bekliyor
+        ((_iptal_et,), _iptal_et),  # iptal → iptal
     ],
 )
 def test_izinsiz_gecisler_reddedilir(
@@ -336,7 +346,7 @@ def test_izinsiz_gecisler_reddedilir(
 def test_iptal_terminaldir(ortam: Ortam) -> None:
     paket_id = _paket(ortam)
     with ortam.veritabani.islem() as oturum:
-        tsi.paketi_iptal_et(oturum, paket_id)
+        _iptal_et(oturum, paket_id)
     assert tsi.IZINLI_GECISLER[IPTAL] == frozenset()
     with pytest.raises(tsi.PaketDurumuGecersiz, match="iptal terminaldir"):
         with ortam.veritabani.islem() as oturum:
@@ -417,7 +427,7 @@ def test_bekleyen_ve_iptal_pakette_aday_veri_degistirilemez(
     paket_id = _paket(ortam)
     islevler = _yazma_islevleri(ortam, env, paket_id)
     with ortam.veritabani.islem() as o:
-        (tsi.paketi_beklet if hedef is BEKLIYOR else tsi.paketi_iptal_et)(o, paket_id)
+        (tsi.paketi_beklet if hedef is BEKLIYOR else _iptal_et)(o, paket_id)
         once = tsi.paket_ayrinti(o, paket_id)
     taslak_once = _taslak_sayilar(ortam)
 
@@ -1259,7 +1269,7 @@ def test_yazmak_kaydetmek_degildir(ortam: Ortam, env: Envanter) -> None:
     assert _sayi(ortam, tst.ISLEM_PAKETI) == 1
 
     with ortam.veritabani.islem() as o:  # IPTAL: kesin dünya yine değişmedi
-        tsi.paketi_iptal_et(o, paket_id)
+        _iptal_et(o, paket_id)
     kesin_dunya_degismedi()
     assert taslak_tam().durum is IPTAL  # paket ve taslak içeriği sorgulanabilir
     for tablo, beklenen in {
@@ -1584,7 +1594,7 @@ def test_yaris_d_paket_durumu_tek_gecis(ortam: Ortam) -> None:
         _hazirlik(paket_id),
         [
             lambda o: tsi.paketi_beklet(o, paket_id),
-            lambda o: tsi.paketi_iptal_et(o, paket_id),
+            lambda o: _iptal_et(o, paket_id),
         ],
     )
 
@@ -1617,7 +1627,7 @@ def test_yaris_taslak_yazma_ile_paket_durum_gecisi(
 
     def iptal(o: Session) -> object:
         time.sleep(gecis_gecikmesi)
-        return tsi.paketi_iptal_et(o, paket_id)
+        return _iptal_et(o, paket_id)
 
     sonuclar = _yaris(ortam, _hazirlik(paket_id), [yaz, iptal])
     yazma, gecis = sonuclar

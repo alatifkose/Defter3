@@ -222,6 +222,11 @@ def _karar(
         return mu.karar_ver(o, talep_id, karar, KULLANICI, gerekce)
 
 
+def _iptal_et(ortam: Ortam, paket_id: int) -> None:
+    with ortam.veritabani.islem() as o:
+        tsi.paketi_iptal_et(o, paket_id, KULLANICI)
+
+
 def _paket_durumu(ortam: Ortam, paket_id: int) -> str:
     with ortam.veritabani.islem() as o:
         return tsi.paket_getir(o, paket_id).durum
@@ -503,20 +508,23 @@ def test_acik_talep_varken_paket_elle_devam_ettirilemez(
 
 
 def test_iptal_paket_kararla_canlanmaz(ortam: Ortam, env: Envanter) -> None:
+    """İptal terminaldir: talebi ``gecersiz`` olur, karar verilemez, paket
+    dirilmez. ``gecersiz`` bir ``AYRI`` kararı değildir: ``karar`` boş kalır."""
     mevcut = _depo(ortam, env, harici_kimlik="X1")
     _sart(ortam, mevcut, ["harici_kimlik"])
     paket_id = _paket(ortam)
     aday_id = _aday(ortam, paket_id, env.depo_id, {"ad": "Depo", "harici_kimlik": "X1"})
     [talep_id] = _adayi_denetle(ortam, aday_id)
-    with ortam.veritabani.islem() as o:
-        tsi.paketi_iptal_et(o, paket_id)
-    with pytest.raises(tsi.PaketDurumuGecersiz, match="iptal"):
+    _iptal_et(ortam, paket_id)
+    with pytest.raises(mu.KararTalebiKapali, match="geçersiz"):
         _karar(ortam, talep_id, Karar.AYRI)
     with pytest.raises(tsi.PaketDurumuGecersiz, match="iptal"):
         _adayi_denetle(ortam, aday_id)
     assert _paket_durumu(ortam, paket_id) == IPTAL.value
     with ortam.veritabani.islem() as o:
-        assert mu.karar_talebi_getir(o, talep_id).durum == TalepDurumu.ACIK.value
+        talep = mu.karar_talebi_getir(o, talep_id)
+        assert talep.durum == TalepDurumu.GECERSIZ.value
+        assert talep.karar is None and talep.gecersizlik_zamani is not None
 
 
 # --- 18-20: tekrar ve eşzamanlılık ----------------------------------------------------
@@ -614,7 +622,7 @@ def test_ayni_talebi_iki_baglanti_cevaplarsa_tek_karar_kazanir(
     [talep_id] = _denetle(ortam, ikinci)
 
     def cevapla(o: Session) -> object:
-        return mu.karar_ver(o, talep_id, Karar.AYRI, AJAN)
+        return mu.karar_ver(o, talep_id, Karar.AYRI, KULLANICI)
 
     sonuclar = _yaris(
         ortam,
@@ -1112,6 +1120,616 @@ def test_aktor_turleri_domain_bagimsizdir(ortam: Ortam, env: Envanter) -> None:
         assert olay.aktor_kimligi == "test-ajan"
 
 
+# --- 33-45: 2026-09-20 incelemesi — karar yaşam döngüsü ve kanonik kimlik -------------
+# Bulgular gerçek kodla yeniden üretildi; her testin başlığı kapatılan bulgudur.
+
+
+def _talep_uclari(ortam: Ortam, talep_id: int) -> tuple[int | None, int, str]:
+    with ortam.veritabani.islem() as o:
+        talep = mu.karar_talebi_getir(o, talep_id)
+        return talep.kaynak_nesne_id, talep.hedef_nesne_id, talep.durum
+
+
+def _birlesimler(ortam: Ortam) -> list[tuple[int, int, int]]:
+    """``(kaynak, karar hedefi, kanonik)`` üçlüleri, kimlik sırasıyla."""
+    with ortam.veritabani.islem() as o:
+        return [
+            (b.kaynak_nesne_id, b.hedef_nesne_id, b.kanonik_nesne_id)
+            for b in o.execute(
+                select(mt.NesneBirlesimi).order_by(mt.NesneBirlesimi.id)
+            ).scalars()
+        ]
+
+
+def _olaylar(ortam: Ortam) -> list[str]:
+    with ortam.veritabani.islem() as o:
+        return [x.olay for x in di.olaylari_listele(o)]
+
+
+def _butunluk_temiz(ortam: Ortam) -> None:
+    with ortam.veritabani.islem() as o:
+        assert o.execute(text("PRAGMA foreign_key_check")).all() == []
+        assert o.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+
+
+# Bulgu 1 — iptal paketin açık talebi çifti sonsuza kadar kilitliyordu.
+
+
+def test_iptal_paketin_talebi_cifti_gelecekte_kilitlemez(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """P1 iptal edilince talebi ``gecersiz`` olur; P2 aynı çifti yeniden
+    denetleyebilir, yeni talep açılır ve P2 ``BEKLIYOR``a geçer. Eski talep
+    geçmişte durur, karar taşımaz."""
+    p1 = _paket(ortam)
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    [eski_talep] = _denetle(ortam, kaynak, p1)
+    assert _paket_durumu(ortam, p1) == BEKLIYOR.value
+
+    _iptal_et(ortam, p1)
+    assert _talep_uclari(ortam, eski_talep) == (
+        kaynak,
+        hedef,
+        TalepDurumu.GECERSIZ.value,
+    )
+
+    p2 = _paket(ortam)
+    [yeni_talep] = _denetle(ortam, kaynak, p2)
+    assert yeni_talep != eski_talep
+    assert _talep_uclari(ortam, yeni_talep) == (kaynak, hedef, TalepDurumu.ACIK.value)
+    assert _paket_durumu(ortam, p2) == BEKLIYOR.value
+    assert _paket_durumu(ortam, p1) == IPTAL.value  # iptal paket canlanmadı
+
+    with ortam.veritabani.islem() as o:  # eski talep geçmişte, kararsız
+        eski = mu.karar_talebi_getir(o, eski_talep)
+        assert eski.karar is None and eski.karar_aktor_turu is None
+        assert eski.gecersizlik_zamani is not None
+    assert _karar(ortam, yeni_talep, Karar.AYRI).paket_durumu is CALISIYOR
+    _butunluk_temiz(ortam)
+
+
+def test_gecersiz_talebe_kullanici_karari_verilemez(
+    ortam: Ortam, env: Envanter
+) -> None:
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    paket_id = _paket(ortam)
+    [talep_id] = _denetle(ortam, kaynak, paket_id)
+    _iptal_et(ortam, paket_id)
+    for karar in (Karar.AYNI, Karar.AYRI, Karar.KARARSIZ):
+        with pytest.raises(mu.KararTalebiKapali, match="geçersiz"):
+            _karar(ortam, talep_id, karar)
+    with ortam.veritabani.islem() as o:
+        assert mu.karar_talebi_getir(o, talep_id).karar is None
+        assert mu.nesne_birlesimini_bul(o, kaynak) is None
+
+
+def test_iptal_denetim_izine_gecersizlik_olayini_yazar(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Olay ``karar_talebi_gecersiz_kaldi``dır; ``kullanici_karari_verildi``
+    değildir — kullanıcının vermediği karar kimseye yazılmaz."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    paket_id = _paket(ortam)
+    [talep_id] = _denetle(ortam, kaynak, paket_id)
+    _iptal_et(ortam, paket_id)
+    with ortam.veritabani.islem() as o:
+        olaylar = di.olaylari_listele(o, karar_talebi_id=talep_id)
+    assert olaylar[-1].olay == DenetimOlayi.KARAR_TALEBI_GECERSIZ_KALDI.value
+    assert olaylar[-1].aktor_turu == AktorTuru.KULLANICI.value
+    assert f"paketi {paket_id}" in str(olaylar[-1].gerekce)
+    assert DenetimOlayi.KULLANICI_KARARI_VERILDI.value not in [x.olay for x in olaylar]
+
+
+def test_iptal_ile_karar_yarisi_tutarsizlik_uretmez(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """İki bağlantı aynı anda iptal eder ve karar verirse tam biri kazanır;
+    talep ya ``cozuldu`` ya ``gecersiz`` olur, ikisi birden olamaz."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    paket_id = _paket(ortam)
+    [talep_id] = _denetle(ortam, kaynak, paket_id)
+
+    sonuclar = _yaris(
+        ortam,
+        lambda o: mu.karar_talebi_getir(o, talep_id),
+        [
+            lambda o: tsi.paketi_iptal_et(o, paket_id, KULLANICI),
+            lambda o: mu.karar_ver(o, talep_id, Karar.AYRI, KULLANICI),
+        ],
+    )
+    hatalar = [s for s in sonuclar if isinstance(s, Exception)]
+    assert len(hatalar) == 1, sonuclar
+    [hata] = hatalar
+    assert isinstance(hata, (mu.MukerrerlikHatasi, tsi.IslemPaketiHatasi)), repr(hata)
+    assert not isinstance(hata, HAM_DB_HATALARI), repr(hata)
+    with ortam.veritabani.islem() as o:
+        talep = mu.karar_talebi_getir(o, talep_id)
+    assert talep.durum in (TalepDurumu.COZULDU.value, TalepDurumu.GECERSIZ.value)
+    assert (talep.karar is None) == (talep.durum == TalepDurumu.GECERSIZ.value)
+    _butunluk_temiz(ortam)
+
+
+# Bulgu 3 — karar kaynağı kodda zorlanmıyordu.
+
+
+@pytest.mark.parametrize(
+    "aktor",
+    [Aktor(AktorTuru.AJAN, "tarayici"), Aktor(AktorTuru.SISTEM, "defteriki")],
+)
+@pytest.mark.parametrize("karar", [Karar.AYNI, Karar.AYRI, Karar.KARARSIZ])
+def test_kullanici_disindaki_aktor_karar_veremez(
+    ortam: Ortam, env: Envanter, aktor: Aktor, karar: Karar
+) -> None:
+    """Reddedilen çağrı talebi değiştirmez, denetim izine yazmaz, paketi
+    etkilemez."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    paket_id = _paket(ortam)
+    [talep_id] = _denetle(ortam, kaynak, paket_id)
+    onceki_olaylar = _olaylar(ortam)
+
+    with pytest.raises(mu.KararKaynagiGecersiz, match="yalnız kullanıcı"):
+        with ortam.veritabani.islem() as o:
+            mu.karar_ver(o, talep_id, karar, aktor)
+
+    assert _talep_uclari(ortam, talep_id)[2] == TalepDurumu.ACIK.value
+    assert _olaylar(ortam) == onceki_olaylar
+    assert _paket_durumu(ortam, paket_id) == BEKLIYOR.value
+    assert _sayi(ortam, mt.NESNE_BIRLESIMI) == 0
+
+
+def test_ajan_tarama_yapip_suphe_acabilir(ortam: Ortam, env: Envanter) -> None:
+    """Yasak yalnız karardır: ajan tarar, şüphe açar, denetim olayı üretir."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    with ortam.veritabani.islem() as o:
+        [talep] = mu.nesneyi_denetle(o, kaynak, AJAN)
+        assert talep.acan_aktor_turu == AktorTuru.AJAN.value
+
+
+def test_ham_sql_ajan_karari_yazamaz(ortam: Ortam, env: Envanter) -> None:
+    """Sözleşme veritabanında da duruyor: ``karar_aktor_turu`` kontrol kısıtı."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    [talep_id] = _denetle(ortam, kaynak)
+    with pytest.raises(IntegrityError, match="karari_kullanici_verir"):
+        with ortam.veritabani.islem() as o:
+            o.execute(
+                text(
+                    "UPDATE karar_talebi SET durum = 'cozuldu', karar = 'ayni', "
+                    "karar_zamani = '2026-09-20', karar_aktor_turu = 'ajan', "
+                    "karar_aktor_kimligi = 'ham' WHERE id = :t"
+                ),
+                {"t": talep_id},
+            )
+
+
+# Bulgu 4 — birleşim zinciri kurulabiliyordu.
+
+
+def _uc_depo_zinciri(ortam: Ortam, env: Envanter) -> tuple[int, int, int]:
+    """``N3 → N2`` ardından ``N2 → N1``: kullanıcı kararlarıyla gerçek akış."""
+    n1 = _depo(ortam, env, harici_kimlik="X1")
+    n2 = _depo(ortam, env, harici_kimlik="X1")
+    n3 = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, n3, ["harici_kimlik"])
+    with ortam.veritabani.islem() as o:
+        talepler = {
+            (t.hedef_nesne_id, t.kaynak_nesne_id): t.id
+            for t in mu.nesneyi_denetle(o, n3, KULLANICI)
+        }
+    _karar(ortam, talepler[(n1, n3)], Karar.AYRI)
+    sonuc = _karar(ortam, talepler[(n2, n3)], Karar.AYNI)
+    [zincirleme] = [t for t in sonuc.yeni_talepler if t.hedef_nesne_id == n1]
+    _karar(ortam, zincirleme.id, Karar.AYNI)
+    return n1, n2, n3
+
+
+def test_birlesim_zinciri_duzlestirilir(ortam: Ortam, env: Envanter) -> None:
+    """``3 → 2`` sonra ``2 → 1``: hiçbir satır birleşmiş bir nesneyi kanonik
+    göstermez, kanonik hedef tek sıçramada bulunur."""
+    n1, n2, n3 = _uc_depo_zinciri(ortam, env)
+    satirlar = _birlesimler(ortam)
+    assert {(k, kan) for k, _, kan in satirlar} == {(n3, n1), (n2, n1)}
+    kaynaklar = {k for k, _, _ in satirlar}
+    assert not (kaynaklar & {kan for _, _, kan in satirlar})  # zincir yok
+    with ortam.veritabani.islem() as o:
+        for nesne_id in (n2, n3):
+            assert mu.kanonik_nesneyi_bul(o, nesne_id) == n1
+        assert mu.kanonik_nesneyi_bul(o, n1) == n1
+    _butunluk_temiz(ortam)
+
+
+def test_zincir_duzlesince_eski_karar_gecmisi_korunur(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """``hedef_nesne_id`` kullanıcının o günkü kararıdır, değişmez; değişen
+    yalnız ``kanonik_nesne_id``dir ve her yeniden bağlama denetim izinde."""
+    n1, n2, n3 = _uc_depo_zinciri(ortam, env)
+    [(kaynak_ucu, karar_hedefi, kanonik)] = [
+        s for s in _birlesimler(ortam) if s[0] == n3
+    ]
+    assert (kaynak_ucu, karar_hedefi, kanonik) == (n3, n2, n1)
+    with ortam.veritabani.islem() as o:
+        birlesim = mu.nesne_birlesimini_bul(o, n3)
+        assert birlesim is not None
+        talep = mu.karar_talebi_getir(o, birlesim.karar_talebi_id)
+        assert (talep.hedef_nesne_id, talep.kaynak_nesne_id) == (n2, n3)
+        assert talep.karar == Karar.AYNI.value
+        yeniden = [
+            x
+            for x in di.olaylari_listele(o)
+            if x.olay == DenetimOlayi.BIRLESIM_YENIDEN_BAGLANDI.value
+        ]
+    assert [(x.nesne_id, x.ikincil_nesne_id) for x in yeniden] == [(n1, n3)]
+
+
+def test_birlesmis_nesne_ikinci_kez_kaynak_olamaz(ortam: Ortam, env: Envanter) -> None:
+    """Düzleştirme, birleşmiş nesnenin yeniden birleşmesi demek değildir."""
+    n1, _, _ = _uc_depo_zinciri(ortam, env)
+    dorduncu = _depo(ortam, env, harici_kimlik="X1")
+    talepler = _denetle(ortam, dorduncu)
+    with ortam.veritabani.islem() as o:
+        hedefler = {mu.karar_talebi_getir(o, t).hedef_nesne_id for t in talepler}
+    assert hedefler == {n1}  # n2 ve n3 kanonik n1'e eşlendi
+
+
+def test_ikinci_karar_duserse_ilk_birlesim_bozulmaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """İkinci karar düşerse ilk birleşimin kanonik bağı olduğu gibi kalır;
+    yarım düzleştirme olmaz."""
+    n1 = _depo(ortam, env, harici_kimlik="X1")
+    n2 = _depo(ortam, env, harici_kimlik="X1")
+    n3 = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, n3, ["harici_kimlik"])
+    with ortam.veritabani.islem() as o:
+        talepler = {
+            (t.hedef_nesne_id, t.kaynak_nesne_id): t.id
+            for t in mu.nesneyi_denetle(o, n3, KULLANICI)
+        }
+    _karar(ortam, talepler[(n1, n3)], Karar.AYRI)
+    sonuc = _karar(ortam, talepler[(n2, n3)], Karar.AYNI)
+    [zincirleme] = [t for t in sonuc.yeni_talepler if t.hedef_nesne_id == n1]
+    # Karar gerekçe sınırında düşer: ikinci birleşim hiç uygulanmaz.
+    with pytest.raises(mu.GecersizSart):
+        _karar(ortam, zincirleme.id, Karar.AYNI, "a" * (di.AZAMI_GEREKCE_UZUNLUGU + 1))
+    assert _birlesimler(ortam) == [(n3, n2, n2)]
+    with ortam.veritabani.islem() as o:
+        assert mu.kanonik_nesneyi_bul(o, n3) == n2
+        assert mu.karar_talebi_getir(o, zincirleme.id).durum == TalepDurumu.ACIK.value
+
+
+# Bulgu 5 — birleşen kaynağın kimlik değerleri korumadan düşüyordu.
+
+
+def test_birlesen_kaynagin_eski_kimligi_ucuncu_nesneyi_yakalar(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Kaynakta değer + şart, hedefte değer yok. Birleşimden sonra kaynağın
+    eski değeriyle gelen üçüncü nesne kanonik hedefle şüphe doğurur."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1", sehir="EDIRNE")
+    _sart(ortam, kaynak, ["sehir"])
+    [talep_id] = _denetle(ortam, kaynak)
+    _karar(ortam, talep_id, Karar.AYNI)
+
+    ucuncu = _depo(ortam, env, sehir="EDIRNE")
+    [yeni] = _denetle(ortam, ucuncu)
+    kaynak_ucu, hedef_ucu, _ = _talep_uclari(ortam, yeni)
+    assert (hedef_ucu, kaynak_ucu) == (hedef, ucuncu)  # kanonik hedef gösterilir
+    with ortam.veritabani.islem() as o:
+        assert mu.karar_talebi_getir(o, yeni).eslesen_ozellik_tanimi_id == _ozellik_id(
+            ortam, env.depo_id, "sehir"
+        )
+
+
+def test_hedef_ve_kaynagin_farkli_degerleri_birlikte_korunur(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Aynı özellikte iki tarihsel değer varsa ikisi de kimlik kanıtıdır;
+    çekirdek hangisinin doğru güncel değer olduğunu söylemez (kaynağın
+    özellik satırı hedefe kopyalanmaz)."""
+    hedef = _depo(ortam, env, harici_kimlik="X1", sehir="EDIRNE")
+    _sart(ortam, hedef, ["harici_kimlik", "sehir"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1", sehir="ANKARA")
+    [talep_id] = _denetle(ortam, kaynak)
+    _karar(ortam, talep_id, Karar.AYNI)
+
+    with ortam.veritabani.islem() as o:  # hedefin kendi değeri değişmedi
+        degerler = ni.ozellikleri_oku(o, hedef)
+    assert degerler["sehir"] == "EDIRNE"
+
+    for sehir in ("EDIRNE", "ANKARA"):
+        yeni_depo = _depo(ortam, env, sehir=sehir)
+        [talep] = _denetle(ortam, yeni_depo)
+        assert _talep_uclari(ortam, talep)[1] == hedef
+        _karar(ortam, talep, Karar.AYRI)
+
+
+def test_birlesmis_kaynak_bagimsiz_eslesme_olarak_donmez(
+    ortam: Ortam, env: Envanter
+) -> None:
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1", sehir="EDIRNE")
+    _sart(ortam, kaynak, ["sehir"])
+    [talep_id] = _denetle(ortam, kaynak)
+    _karar(ortam, talep_id, Karar.AYNI)
+    ucuncu = _depo(ortam, env, harici_kimlik="X1", sehir="EDIRNE")
+    talepler = _denetle(ortam, ucuncu)
+    with ortam.veritabani.islem() as o:
+        hedefler = [mu.karar_talebi_getir(o, t).hedef_nesne_id for t in talepler]
+    assert hedefler == [hedef]  # tek talep, kanonik uç; kaynak görünmez
+
+
+# Bulgu 2 — aynı aday birden fazla kesin nesneyle eşleşebiliyordu.
+
+
+def _aday_iki_kesin(ortam: Ortam, env: Envanter) -> tuple[int, int, int, list[int]]:
+    """``X`` bir kimlikten, ``Y`` başka bir kimlikten aynı adayla eşleşir."""
+    x = _depo(ortam, env, harici_kimlik="A")
+    _sart(ortam, x, ["harici_kimlik"])
+    y = _depo(ortam, env, sehir="B")
+    _sart(ortam, y, ["sehir"])
+    paket_id = _paket(ortam)
+    z = _aday(
+        ortam, paket_id, env.depo_id, {"ad": "Depo", "harici_kimlik": "A", "sehir": "B"}
+    )
+    talepler = _adayi_denetle(ortam, z)
+    assert len(talepler) == 2
+    return x, y, z, talepler
+
+
+def test_aday_iki_kesin_nesneyle_eslesir_ve_paket_bekler(
+    ortam: Ortam, env: Envanter
+) -> None:
+    x, y, _, talepler = _aday_iki_kesin(ortam, env)
+    with ortam.veritabani.islem() as o:
+        hedefler = {mu.karar_talebi_getir(o, t).hedef_nesne_id for t in talepler}
+        paket_id = mu.karar_talebi_getir(o, talepler[0]).islem_paketi_id
+    assert hedefler == {x, y}
+    assert paket_id is not None
+    assert _paket_durumu(ortam, paket_id) == BEKLIYOR.value
+
+
+def test_aday_ayni_sonra_ayri_tek_cozumleme_birakir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """A vakası: ``Z = X`` ve ``Z ≠ Y``. Birleşim doğmaz, paket çalışır."""
+    x, _, z, talepler = _aday_iki_kesin(ortam, env)
+    with ortam.veritabani.islem() as o:
+        x_talebi = next(
+            t for t in talepler if mu.karar_talebi_getir(o, t).hedef_nesne_id == x
+        )
+    y_talebi = next(t for t in talepler if t != x_talebi)
+    assert _karar(ortam, x_talebi, Karar.AYNI).paket_durumu is BEKLIYOR
+    assert _karar(ortam, y_talebi, Karar.AYRI).paket_durumu is CALISIYOR
+    assert _sayi(ortam, mt.ADAY_NESNE_COZUMLEMESI) == 1
+    assert _sayi(ortam, mt.NESNE_BIRLESIMI) == 0
+    with ortam.veritabani.islem() as o:
+        assert mu.adayin_kesin_nesnesi(o, z) == x
+    _butunluk_temiz(ortam)
+
+
+def test_iki_ayni_karari_kesin_nesneleri_birlestirir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """B vakası: ``Z = X`` ve ``Z = Y`` ise ``X = Y``. İkinci ``AYNI`` ham
+    benzersizlik hatasına düşmez, kaybolmaz; iki kesin nesne birleşir ve
+    adayın kesin hedefi belirsiz kalmaz."""
+    x, y, z, talepler = _aday_iki_kesin(ortam, env)
+    _karar(ortam, talepler[0], Karar.AYNI)
+    sonuc = _karar(ortam, talepler[1], Karar.AYNI)
+
+    assert sonuc.cozuldu and sonuc.birlesim is not None and sonuc.devir is not None
+    hedef, kaynak = min(x, y), max(x, y)
+    assert _birlesimler(ortam) == [(kaynak, hedef, hedef)]
+    assert _sayi(ortam, mt.ADAY_NESNE_COZUMLEMESI) == 1
+    with ortam.veritabani.islem() as o:
+        assert mu.adayin_kesin_nesnesi(o, z) == hedef
+        cozumleme = mu.aday_cozumlemesi_bul(o, z)
+        assert cozumleme is not None
+        birlesim = mu.nesne_birlesimini_bul(o, kaynak)
+        assert birlesim is not None
+        # hangi kararın hangi birleşime yol açtığı denetimden okunur
+        assert birlesim.karar_talebi_id == talepler[1]
+        olaylar = [x.olay for x in di.olaylari_listele(o, karar_talebi_id=talepler[1])]
+    assert DenetimOlayi.NESNE_BIRLESTIRILDI.value in olaylar
+    assert cozumleme.nesne_id in (x, y)  # karar satırı değişmedi
+    assert sonuc.paket_durumu is CALISIYOR
+    _butunluk_temiz(ortam)
+
+
+def test_ikinci_ayni_onceki_ayri_kararina_carparsa_reddedilir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """C vakası: ``X`` ile ``Y`` için daha önce ``AYRI`` denmişse çelişki
+    sessizce çözülmez; işlem tamamen geri alınır, talep açık kalır."""
+    x = _depo(ortam, env, ad="Ortak", harici_kimlik="A")
+    _sart(ortam, x, ["ad", "harici_kimlik"])
+    y = _depo(ortam, env, ad="Ortak", sehir="B")
+    _sart(ortam, y, ["ad", "sehir"])
+    assert x < y
+    [ayri_talebi] = _denetle(ortam, y)
+    _karar(ortam, ayri_talebi, Karar.AYRI)
+
+    paket_id = _paket(ortam)
+    z = _aday(
+        ortam,
+        paket_id,
+        env.depo_id,
+        {"ad": "Baska", "harici_kimlik": "A", "sehir": "B"},
+    )
+    talepler = _adayi_denetle(ortam, z)
+    assert len(talepler) == 2
+    _karar(ortam, talepler[0], Karar.AYNI)
+    onceki_olaylar = _olaylar(ortam)
+
+    with pytest.raises(mu.KararCelismesi, match="ayrı"):
+        _karar(ortam, talepler[1], Karar.AYNI)
+
+    assert _talep_uclari(ortam, talepler[1])[2] == TalepDurumu.ACIK.value
+    assert _olaylar(ortam) == onceki_olaylar
+    assert _sayi(ortam, mt.NESNE_BIRLESIMI) == 0
+    assert _sayi(ortam, mt.ADAY_NESNE_COZUMLEMESI) == 1
+    assert _paket_durumu(ortam, paket_id) == BEKLIYOR.value
+    assert _karar(ortam, talepler[1], Karar.AYRI).paket_durumu is CALISIYOR
+    _butunluk_temiz(ortam)
+
+
+def test_cozumlenmis_adayin_kesin_hedefi_birlesimden_sonra_belirsiz_kalmaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """D vakası: aday ``X``e çözümlendikten sonra ``X`` başka bir nesneye
+    birleşirse adayın kesin hedefi tek adımda yeni kanonik nesnedir; karar
+    satırı ise değişmez."""
+    w = _depo(ortam, env, sehir="EDIRNE")
+    _sart(ortam, w, ["sehir"])
+    x = _depo(ortam, env, harici_kimlik="A", sehir="EDIRNE")
+    _sart(ortam, x, ["harici_kimlik"])
+    paket_id = _paket(ortam)
+    z = _aday(ortam, paket_id, env.depo_id, {"ad": "Depo", "harici_kimlik": "A"})
+    [talep_id] = _adayi_denetle(ortam, z)
+    _karar(ortam, talep_id, Karar.AYNI)
+
+    [birlesim_talebi] = _denetle(ortam, x)
+    assert _talep_uclari(ortam, birlesim_talebi)[:2] == (x, w)
+    _karar(ortam, birlesim_talebi, Karar.AYNI)
+
+    with ortam.veritabani.islem() as o:
+        cozumleme = mu.aday_cozumlemesi_bul(o, z)
+        assert cozumleme is not None and cozumleme.nesne_id == x  # karar değişmedi
+        assert mu.adayin_kesin_nesnesi(o, z) == w  # kanonik hedef tek adımda
+    _butunluk_temiz(ortam)
+
+
+def test_ayni_kanonige_ikinci_ayni_yeni_satir_yazmaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """İki talep aynı kanonik nesneye çıkıyorsa ikinci ``AYNI`` çözümlemeyi
+    tekrarlamaz; karar yine denetim izine yazılır."""
+    x, y, _, talepler = _aday_iki_kesin(ortam, env)
+    _karar(ortam, talepler[0], Karar.AYNI)
+    _karar(ortam, talepler[1], Karar.AYNI)  # X ile Y birleşti
+    hedef = min(x, y)
+
+    paket2 = _paket(ortam)
+    z2 = _aday(
+        ortam,
+        paket2,
+        env.depo_id,
+        {"ad": "Depo", "harici_kimlik": "A", "sehir": "B"},
+    )
+    yeni_talepler = _adayi_denetle(ortam, z2)
+    assert len(yeni_talepler) == 1  # iki kimlik tek kanonik nesneye çıkar
+    sonuc = _karar(ortam, yeni_talepler[0], Karar.AYNI)
+    assert sonuc.birlesim is None
+    with ortam.veritabani.islem() as o:
+        assert mu.adayin_kesin_nesnesi(o, z2) == hedef
+    assert _sayi(ortam, mt.ADAY_NESNE_COZUMLEMESI) == 2
+    assert _sayi(ortam, mt.NESNE_BIRLESIMI) == 1
+
+
+def test_eszamanli_iki_birlesim_tutarsiz_graf_uretmez(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """İki bağlantı aynı anda birleştirirse tam biri yazar; kalan graf yine
+    zincirsizdir."""
+    n1 = _depo(ortam, env, harici_kimlik="X1")
+    n2 = _depo(ortam, env, harici_kimlik="X1")
+    n3 = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, n3, ["harici_kimlik"])
+    _sart(ortam, n2, ["harici_kimlik"])
+    with ortam.veritabani.islem() as o:
+        talepler = {
+            (t.hedef_nesne_id, t.kaynak_nesne_id): t.id
+            for t in mu.nesneyi_denetle(o, n3, KULLANICI)
+        }
+        talepler.update(
+            {
+                (t.hedef_nesne_id, t.kaynak_nesne_id): t.id
+                for t in mu.nesneyi_denetle(o, n2, KULLANICI)
+            }
+        )
+    ucuncu = talepler[(n1, n3)]
+    ikinci = talepler[(n2, n3)]
+    sonuclar = _yaris(
+        ortam,
+        lambda o: ni.nesne_getir(o, n3),
+        [
+            lambda o: mu.karar_ver(o, ucuncu, Karar.AYNI, KULLANICI),
+            lambda o: mu.karar_ver(o, ikinci, Karar.AYNI, KULLANICI),
+        ],
+    )
+    for hata in (s for s in sonuclar if isinstance(s, Exception)):
+        assert isinstance(hata, mu.MukerrerlikHatasi), repr(hata)
+        assert not isinstance(hata, HAM_DB_HATALARI), repr(hata)
+    satirlar = _birlesimler(ortam)
+    kaynaklar = {k for k, _, _ in satirlar}
+    assert not (kaynaklar & {kan for _, _, kan in satirlar})
+    _butunluk_temiz(ortam)
+
+
+# Bulgu 6 — silinen aday kimliği yeniden kullanılabiliyordu.
+
+
+def test_silinen_aday_kimligi_yeniden_kullanilmaz(ortam: Ortam, env: Envanter) -> None:
+    """Denetim izindeki ``aday_nesne_id`` dış anahtar değildir; kimlik yeniden
+    dağıtılsaydı eski iz yeni adayı gösterirdi."""
+    paket_id = _paket(ortam)
+    ilk = _aday(
+        ortam,
+        paket_id,
+        env.depo_id,
+        {"ad": "Depo", "harici_kimlik": "A"},
+        ["harici_kimlik"],
+    )
+    with ortam.veritabani.islem() as o:
+        izler = [
+            x.aday_nesne_id
+            for x in di.olaylari_listele(o)
+            if x.aday_nesne_id is not None
+        ]
+    assert izler == [ilk]
+    with ortam.veritabani.islem() as o:
+        tsi.aday_nesne_sil(o, ilk)
+    ikinci = _aday(ortam, paket_id, env.depo_id, {"ad": "Depo", "harici_kimlik": "B"})
+    assert ikinci > ilk
+    with ortam.veritabani.islem() as o:
+        assert tsi.aday_nesne_getir(o, ikinci).id == ikinci
+        with pytest.raises(tsi.AdayBulunamadi):
+            tsi.aday_nesne_getir(o, ilk)
+
+
+def test_aday_kimlikleri_paket_icinde_de_yeniden_kullanilmaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """``islem_paketi_id + aday_nesne_id`` tek başına yetmezdi: aynı paket
+    içinde silinen en büyük kimlik eskiden yeniden dağıtılıyordu."""
+    paket_id = _paket(ortam)
+    kimlikler: list[int] = []
+    for sira in range(3):
+        aday_id = _aday(ortam, paket_id, env.depo_id, {"ad": f"Depo {sira}"})
+        kimlikler.append(aday_id)
+        with ortam.veritabani.islem() as o:
+            tsi.aday_nesne_sil(o, aday_id)
+    assert kimlikler == sorted(set(kimlikler))
+    assert len(set(kimlikler)) == 3
+
+
 # --- şema ve mimari sınır -------------------------------------------------------------
 
 
@@ -1119,6 +1737,15 @@ def test_kesin_nesne_tablo_adi_dogrudur() -> None:
     """``mukerrerlik_tablolari`` kesin nesne modülünü import etmez (taslak →
     kesin zincirini kırmamak için); adın doğruluğu burada korunur."""
     assert mt.KESIN_NESNE == nt.NESNE
+
+
+def test_denetim_tablolarinin_yerel_tablo_adlari_dogrudur() -> None:
+    """``denetim_tablolari`` de kesin nesne ve mükerrerlik modüllerini import
+    etmez: ``taslak_islemleri`` iptal ederken denetim izine yazar ve taslak →
+    kesin import zinciri kurulamaz; ``mukerrerlik_tablolari`` ise aktör türünü
+    denetim modülünden alır (ters yön bir döngü olurdu)."""
+    assert dt.KESIN_NESNE == nt.NESNE
+    assert dt.KARAR_TALEBI == mt.KARAR_TALEBI
 
 
 def test_taslak_tablolari_hala_kesin_nesneye_baglanmaz(ortam: Ortam) -> None:

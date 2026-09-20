@@ -24,9 +24,12 @@ açılıp içerik kopyalanmaz. Aşama 4.6'dan beri devam etmenin ek şartı vard
 pakette açık karar talebi kaldıysa devam edilemez (durum açık talep sayısından
 türer, ``mukerrerlik_islemleri``). İptal fiziksel silme değildir: hiçbir aday satır,
 kaynak, okuma, belge ya da arşiv dosyası silinmez; paket ve içeriği
-sorgulanabilir kalır. Durum geçişi koşullu güncellemedir (``UPDATE ... WHERE
-durum = eski``): aynı bağlantıda araya giren başka bir değişiklik satır
-etkilemez ve ``PaketDurumuGecersiz`` verir.
+sorgulanabilir kalır. İptal, paketin açık karar taleplerini terminal
+``gecersiz`` duruma geçirir (karar yazılmaz, geçmiş silinmez); böylece aynı
+çift ileride başka bir pakette yeniden değerlendirilebilir. Durum geçişi
+koşullu güncellemedir (``UPDATE ... WHERE durum = eski``): aynı bağlantıda
+araya giren başka bir değişiklik satır etkilemez ve ``PaketDurumuGecersiz``
+verir.
 
 **Eşzamanlı yazma sözleşmesi** (2026-09-19 incelemesi; iki bağlantılı gerçek
 yarış testleriyle kanıtlanır). Bu servisler önce okur (SQLite WAL anlık
@@ -142,6 +145,8 @@ from defteriki.cekirdek.deger_kodlama import (
     degeri_coz,
     degeri_kodla,
 )
+from defteriki.cekirdek.denetim_islemleri import olay_yaz
+from defteriki.cekirdek.denetim_tablolari import Aktor, DenetimOlayi
 from defteriki.cekirdek.mukerrerlik_tablolari import (
     AdayNesneCozumlemesi,
     AdayNesneMukerrerlikSarti,
@@ -479,10 +484,53 @@ def paketi_devam_et(oturum: Session, paket_id: int) -> IslemPaketi:
     return _durumu_degistir(oturum, paket_id, PaketDurumu.CALISIYOR)
 
 
-def paketi_iptal_et(oturum: Session, paket_id: int) -> IslemPaketi:
+def paketi_iptal_et(oturum: Session, paket_id: int, aktor: Aktor) -> IslemPaketi:
     """``calisiyor`` ya da ``bekliyor`` → ``iptal`` (terminal). Hiçbir satır
-    silinmez; paket ve taslak içeriği sorgulanabilir kalır."""
-    return _durumu_degistir(oturum, paket_id, PaketDurumu.IPTAL)
+    silinmez; paket ve taslak içeriği sorgulanabilir kalır.
+
+    Paketin **açık karar talepleri** aynı işlemde terminal ``gecersiz`` duruma
+    geçer (2026-09-20 incelemesi, bulgu 1). İptal paketin talebine karar
+    verilemeyeceği için talep açık bırakılsaydı hem paket diriltilemez hem de
+    aynı çift bir daha hiçbir pakette değerlendirilemezdi (servis "bu çift
+    zaten değerlendirildi" der, veritabanı kısmi benzersiz indeksi yeni açık
+    talebi reddeder). ``gecersiz`` talep ``AYRI`` kararı **değildir**: ``karar``
+    boş kalır, satır geçmişte durur, denetim izine ``karar_talebi_gecersiz_kaldi``
+    yazılır; kullanıcının vermediği bir karar kimseye yazılmaz.
+    """
+    paket = _durumu_degistir(oturum, paket_id, PaketDurumu.IPTAL)
+    _acik_talepleri_gecersiz_kil(oturum, paket, aktor)
+    return paket
+
+
+def _acik_talepleri_gecersiz_kil(
+    oturum: Session, paket: IslemPaketi, aktor: Aktor
+) -> list[int]:
+    """İptal edilen paketin açık taleplerini ``gecersiz`` yapar; kimliklerini
+    döndürür. Koşullu güncelleme: eşzamanlı cevaplanan talep etkilenmez."""
+    with _yazma_siniri(oturum):
+        kimlikler = list(
+            oturum.execute(
+                update(KararTalebi)
+                .where(
+                    KararTalebi.islem_paketi_id == paket.id,
+                    KararTalebi.durum == TalepDurumu.ACIK.value,
+                )
+                .values(
+                    durum=TalepDurumu.GECERSIZ.value, gecersizlik_zamani=simdi_utc()
+                )
+                .returning(KararTalebi.id)
+            ).scalars()
+        )
+        for talep_id in kimlikler:
+            olay_yaz(
+                oturum,
+                DenetimOlayi.KARAR_TALEBI_GECERSIZ_KALDI,
+                aktor,
+                islem_paketi_id=paket.id,
+                karar_talebi_id=talep_id,
+                gerekce=f"işlem paketi {paket.id} iptal edildi",
+            )
+    return kimlikler
 
 
 # --- kaynak / provenance --------------------------------------------------------------

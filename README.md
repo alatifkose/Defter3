@@ -15,8 +15,10 @@ Aşama 3 kapısından yeniden başlar; önceki Aşama 4-6 geliştirme hattı
 `main` dalında yedek olarak durur, oraya yazılmaz. Aşama 4.1 (genel
 veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de, Aşama 4.3
 (nesne motoru), Aşama 4.4 (belge, arşiv, okuma ve kaynak) ve Aşama 4.5
-(işlem paketi ve taslak durumu) 2026-09-19'da bitti; Aşama 4.6 (onay ve
-mükerrerlik) sırada.
+(işlem paketi ve taslak durumu) 2026-09-19'da, Aşama 4.6 (onay ve
+mükerrerlik) 2026-09-20'de bitti; 4.6'nın bağımsız inceleme bulguları aynı gün
+kapandı (göç `0009`, "Karar kaynağı, iptal ve kanonik kimlik"). Aşama 4.7
+(kesin kayıt) sırada.
 Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
@@ -74,6 +76,14 @@ Bitenler:
   `defteriki.cekirdek.mukerrerlik_islemleri`,
   `defteriki.cekirdek.denetim_tablolari`, `defteriki.cekirdek.denetim_islemleri`
   ("Onay ve mükerrerlik" bölümü)
+* Aşama 4.6 inceleme düzeltmeleri (2026-09-20, göç `0009`): kararı yalnız
+  kullanıcı verir (servis kapısı + kontrol kısıtları), iptal edilen paketin
+  açık talepleri terminal `gecersiz` olur ve çifti kilitlemez, kanonik kesin
+  nesne tek sıçramada bulunur (`kanonik_nesne_id`, birleşim zinciri
+  düzleştirilir), aynı adayın iki `AYNI` kararı kesin nesneleri birleştirir,
+  birleşen nesnenin kimlik geçmişi mükerrerlik korumasından düşmez, aday
+  kimlikleri yeniden dağıtılmaz (`AUTOINCREMENT`) ("Karar kaynağı, iptal ve
+  kanonik kimlik")
 
 Henüz yok: kesin kayıt (hareket) verisi (Aşama 4.7), kesin kaydetme / paketi
 kesinleştirme (4.8), genel kural motoru (4.9), finans tanım paketi
@@ -88,8 +98,7 @@ tablosu ("Tanım sistemi" bölümü), Aşama 4.3'ün üç nesne tablosu ("Nesne
 motoru" bölümü), Aşama 4.4'ün dört belge zinciri tablosu ("Belge zinciri"
 bölümü), Aşama 4.5'in altı taslak tablosu ("İşlem paketi ve taslak" bölümü)
 ve Aşama 4.6'nın altı onay / mükerrerlik / denetim tablosudur ("Onay ve
-mükerrerlik" bölümü) ("İşlem paketi ve taslak"
-bölümü). Finansal tablo yoktur, `finans/` boştur.
+mükerrerlik" bölümü). Finansal tablo yoktur, `finans/` boştur.
 
 **Bağlantı (`src/defteriki/cekirdek/veritabani.py`).** SQLite dosyasının yolu
 tek kaynaktan gelir: `Ayarlar.veritabani_yolu`. Çekirdek bu yolu çağırandan
@@ -137,13 +146,19 @@ dokunmaz; geri alma dört tabloyu düşürür ama herhangi birinde satır varsa
 uygulanmaz ve hata verir, veri sessizce silinmez), `0007_islem_paketi_taslak`
 işlem paketi ve beş aday tablosunu ekler ve `kaynak` üzerine `(id, okuma_id)`
 benzersiz indeksini koyar (var olan tablolar yeniden kurulmaz; geri alma aynı
-politikayla, satır varken uygulanmaz) ve `0008_onay_ve_mukerrerlik` (altı
+politikayla, satır varken uygulanmaz) `0008_onay_ve_mukerrerlik` (altı
 onay / mükerrerlik / denetim tablosu, iki kısmi benzersiz indeks; aynı
-politikayla, satır varken uygulanmaz) (zincirin başı bugün `0008`; ayrıntı
-"Nesne motoru", "Belge zinciri", "İşlem paketi ve taslak" ve "Onay ve
-mükerrerlik" bölümlerinde).
+politikayla, satır varken uygulanmaz) ve
+`0009_karar_yasam_dongusu_ve_kanonik_kimlik` (2026-09-20 incelemesi: karar
+talebine terminal `gecersiz` durumu ve `gecersizlik_zamani`, `nesne_birlesimi`
+üzerine `kanonik_nesne_id`, "kararı yalnız kullanıcı verir" kontrol kısıtları,
+iki yeni denetim olayı, `aday_nesne` birincil anahtarına `AUTOINCREMENT`; beş
+tablo `0003`ün açık SQL kalıbıyla yeniden kurulur, `0009`a özgü veri varsa
+geri alma uygulanmaz) (zincirin başı bugün `0009`; ayrıntı "Nesne motoru",
+"Belge zinciri", "İşlem paketi ve taslak" ve "Onay ve mükerrerlik"
+bölümlerinde).
 **Kalıcı geliştirme veritabanı** (`C:\dev\Defter3-veri\gelistirme\
-defteriki.sqlite3`) bilinçli olarak hâlâ `0003` sürümündedir; `0004`–`0008`
+defteriki.sqlite3`) bilinçli olarak hâlâ `0003` sürümündedir; `0004`–`0009`
 ona uygulanmamıştır ve yalnız Abdüllatif'in açık talimatıyla uygulanır. Göç
 testleri yalnız `tmp_path` altındaki geçici veritabanlarında çalışır. `0003`
 tabloyu açık SQL adımlarıyla yeniden kurar,
@@ -959,7 +974,10 @@ calisiyor → iptal,  bekliyor → iptal  paketi_iptal_et (terminal)
   ettirilemez. **İptal fiziksel silme değildir:** hiçbir aday nesne / özellik
   / ilişki / kayıt / bağ, kaynak, okuma, belge ya da arşiv dosyası silinmez;
   paket ve taslak içeriği sorgulanabilir kalır. İptal edilen paket kesin
-  dünyayı zaten hiç değiştirmediği için başka geri alma gerekmez.
+  dünyayı zaten hiç değiştirmediği için başka geri alma gerekmez. Aşama 4.6'dan
+  beri `paketi_iptal_et` aktör alır ve paketin açık karar taleplerini aynı
+  işlemde terminal `gecersiz` duruma geçirir ("Karar kaynağı, iptal ve kanonik
+  kimlik"); talep silinmez, karar yazılmaz.
 * `kaydedildi` / `kesinleşti` / `tamamlandi` gibi kesin kayıt durumu yoktur
   (4.8).
 
@@ -1202,7 +1220,9 @@ yazılır; satırın kimliği Aşama 3.4'te gerçek Cowork ile doğrulanan
 **açık talep sayısından türer**: açık talep varken `BEKLIYOR`, hiç kalmayınca
 `CALISIYOR`. İlk kararın tek başına paketi canlandırmaması bu kuraldan gelir;
 `taslak_islemleri.paketi_devam_et` de açık talep varken reddeder. `IPTAL`
-terminaldir: iptal paketin talebine karar verilmez ve paket diriltilmez.
+terminaldir: iptal paketin talebine karar verilmez ve paket diriltilmez; açık
+talepleri iptal anında terminal `gecersiz` duruma geçer ("Karar kaynağı, iptal
+ve kanonik kimlik").
 Bekleyen karar yalnız ilgili paketi ve şüpheli ucu durdurur; mevcut kesin
 nesneler sistem genelinde kilitlenmez.
 
@@ -1232,16 +1252,19 @@ kurulur, sonra hedefin ve üstü değişen çocukların kuralları denetlenir. H
 zaten olan ilişki ikinci kez yazılmaz; kaynak ile hedef arasındaki bağlantı
 kendine döneceği için yazılmaz. Herhangi bir ihlalde **her şey** geri alınır:
 yarım ilişki taşınmaz, kaynak yarım kapanmaz, karar yarım uygulanmaz, denetim
-izi yarım kalmaz. Kaynağın şartları hedefe taşınır; kaynak silinmez, yaşam
-durumu `kapali` olur ve `nesne_birlesimi` satırı onu kalıcı olarak hedefe
-bağlar. Kaynağın özellik değerleri kaynakta kalır: hangi değerin doğru olduğu
-bir domain yorumudur, çekirdek karar vermez. Birleşim zinciri kurulmaz
-(birleşmiş nesne ne kaynak ne hedef olabilir). Devir sonrası kaynağın kendi
+izi yarım kalmaz. Kaynağın şartları hedefe **kopyalanır** (kaynaktan
+silinmez); kaynak silinmez, yaşam durumu `kapali` olur ve `nesne_birlesimi`
+satırı onu kalıcı olarak hedefe bağlar. Kaynağın özellik değerleri kaynakta
+kalır: hangi değerin doğru güncel değer olduğu bir domain yorumudur, çekirdek
+karar vermez — ama o değerler mükerrerlik açısından korumadan düşmez ("Karar
+kaynağı, iptal ve kanonik kimlik"). Birleşim zinciri kurulmaz. Devir sonrası
+kaynağın kendi
 "en az üst" kuralı aranmaz; birleşim kaydı onu artık bağımsız nesne olmaktan
 çıkarır.
 
 **Zincirleme mükerrerlik.** Birleşimden sonra hedefin kendisi (kaynağın
-şartlarını devraldı) ve hedefin hiyerarşik çocukları yeniden denetlenir; yeni
+şartlarını ve kimlik değerlerini devraldı) ve hedefin hiyerarşik çocukları
+yeniden denetlenir; yeni
 eşleşme yeni talep açar ve paket bütün talepler çözülene kadar `BEKLIYOR`
 kalır. Döngü olamaz: aynı çift için ikinci talep açılmaz (açık talep kısmi
 benzersiz indeksle veritabanı düzeyinde, çözülmüş talep servis denetimiyle) ve
@@ -1254,7 +1277,8 @@ olayı anlamaya yetecek kimlik referansları taşır. 4.6'nın durum değiştire
 bütün servisleri aktörü açıkça alır. Ayırt edilen olaylar: mükerrerlik şartı
 belirlendi, mükerrerlik şüphesi açıldı, karar talebi açıldı, kullanıcı kararı
 verildi, nesne ayrı kabul edildi, nesne birleştirildi, aday nesneye
-çözümlendi, paket beklemeye geçti, paket yeniden çalışıyor. **Gizlilik:** ize
+çözümlendi, paket beklemeye geçti, paket yeniden çalışıyor, karar talebi
+geçersiz kaldı, birleşim yeniden bağlandı. **Gizlilik:** ize
 belge ham içeriği, özelliklerin ham değerleri, sır ya da dosya içeriği
 yazılmaz; kimlik / referans saklamak yeterliyse değer tekrar kopyalanmaz.
 `gerekce` yalnız kullanıcının kısa açıklamasıdır ve
@@ -1262,21 +1286,89 @@ yazılmaz; kimlik / referans saklamak yeterliyse değer tekrar kopyalanmaz.
 başında denetlenir. Denetim satırı işin kendisiyle aynı transaction içinde
 yazılır: iş geri alınırsa izi de geri alınır.
 
-**Tablolar (göç `0008`).**
+**Tablolar (göç `0008`, `0009` ile genişledi).**
 
 | Tablo | Ne tutar | Kısıtlar |
 |---|---|---|
 | `nesne_mukerrerlik_sarti` | kesin nesnenin şart özellikleri | iki bileşik dış anahtar aynı `nesne_turu_id` üzerinden (`nesne` ve `ozellik_tanimi`): başka türün özelliği veritabanında da şart olamaz; `(nesne_id, ozellik_tanimi_id)` benzersiz |
 | `aday_nesne_mukerrerlik_sarti` | aday nesnenin şart özellikleri | aynı kalıp, `aday_nesne` üzerinden |
-| `karar_talebi` | şüphe **ve** kalıcı karar talebi (tek satır) | uçlardan tam biri aday / kesin (`(aday_nesne_id IS NULL) <> (kaynak_nesne_id IS NULL)`); kesin çiftte `kaynak > hedef`; durum ile karar alanları tutarlı; dört bileşik dış anahtar `nesne_turu_id` üzerinden; iki **kısmi benzersiz indeks** açık talepler için |
+| `karar_talebi` | şüphe **ve** kalıcı karar talebi (tek satır) | uçlardan tam biri aday / kesin (`(aday_nesne_id IS NULL) <> (kaynak_nesne_id IS NULL)`); kesin çiftte `kaynak > hedef`; durum (`acik` / `cozuldu` / `gecersiz`) ile karar ve `gecersizlik_zamani` alanları tutarlı; `karar_aktor_turu` yalnız `kullanici`; dört bileşik dış anahtar `nesne_turu_id` üzerinden; iki **kısmi benzersiz indeks** açık talepler için |
 | `aday_nesne_cozumlemesi` | aday → kesin nesne köprüsü | `aday_nesne_id` ve `karar_talebi_id` benzersiz; iki bileşik dış anahtar aynı tür üzerinden |
-| `nesne_birlesimi` | birleşen → korunan nesne | `kaynak_nesne_id` ve `karar_talebi_id` benzersiz; `kaynak <> hedef` |
-| `denetim_izi` | aktörlü iş olayı | olay ve aktör türü kontrol kısıtı, boş olmayan aktör kimliği; `aday_nesne_id` bilerek dış anahtar **değil** (aday silinebilir, iz yaşamalı) |
+| `nesne_birlesimi` | birleşen → karar hedefi (`hedef_nesne_id`, değişmez) ve bugünkü kanonik nesne (`kanonik_nesne_id`) | `kaynak_nesne_id` ve `karar_talebi_id` benzersiz; `kaynak <> hedef`; `kaynak <> kanonik`; `aktor_turu` yalnız `kullanici` |
+| `denetim_izi` | aktörlü iş olayı | olay ve aktör türü kontrol kısıtı, boş olmayan aktör kimliği; `aday_nesne_id` bilerek dış anahtar **değil** (aday silinebilir, iz yaşamalı; kimlik `AUTOINCREMENT` sayesinde yeniden dağıtılmaz) |
 
 Şüphe ile talep bilerek ayrı tablolara bölünmedi: şüphenin açık olup olmaması
 ile talebin açık olup olmaması tek gerçektir ve "aynı çift için ikinci açık
 şüphe" kısıtı ancak tek satırda kısmi benzersiz indeksle ifade edilebilir; iki
 tablo iki doğruluk kaynağı ve eşzamanlılık boşluğu üretirdi.
+
+### Karar kaynağı, iptal ve kanonik kimlik
+
+2026-09-20 bağımsız incelemesinin kapattığı altı bulgu. Hepsi gerçek kodla
+yeniden üretildi, düzeltme göç `0009`u gerektirdi.
+
+**Kararı yalnız kullanıcı verir, artık kodda da.** `karar_ver` aktörü
+`KULLANICI` olmayan çağrıyı `KararKaynagiGecersiz` ile en başta reddeder:
+talep değişmez, denetim izine yazılmaz, paket durumu değişmez. Veritabanı da
+aynı şeyi söyler: `karar_talebi.karar_aktor_turu`, `aday_nesne_cozumlemesi` ve
+`nesne_birlesimi` üzerindeki `aktor_turu` kontrol kısıtları yalnız `kullanici`
+kabul eder, ham SQL de ajan kararı yazamaz. Ajan ve sistem tarama yapar, şüphe
+açar, denetim olayı üretir. Daha önce README bunu söylüyor ama hiçbir şey
+zorlamıyordu.
+
+**İptal edilen paketin talebi çifti kilitlemez.** `paketi_iptal_et` aktör alır
+ve paketin açık taleplerini aynı işlemde terminal `gecersiz` duruma geçirir
+(`gecersizlik_zamani` dolar, denetim izine `karar_talebi_gecersiz_kaldi`
+yazılır). `gecersiz` bir `AYRI` kararı **değildir**: `karar` boş kalır, satır
+geçmişte durur, kullanıcı kararı verilemez. Ama artık açık talep sayılmaz;
+kısmi benzersiz indeksten ve "bu çift zaten değerlendirildi" denetiminden
+çıkar, böylece aynı çift başka bir pakette yeniden değerlendirilebilir. Eskiden
+iptal edilen paketin talebi hem cevaplanamıyor hem de o çifti kalıcı olarak
+susturuyordu.
+
+**Kanonik kesin nesne tek sıçramada bulunur.** Bir gerçek nesnenin sistemdeki
+karşılığı tek bir kanonik kesin nesnedir. `nesne_birlesimi.hedef_nesne_id`
+kullanıcının o günkü kararıdır ve değişmez; `kanonik_nesne_id` bugünkü kanonik
+nesnedir ve hiçbir zaman kendisi birleşmiş bir nesneyi göstermez. `3 → 2`
+varken `2 → 1` birleşirse eski satır `1`e yeniden bağlanır (zincir düzleşir,
+denetim izine `birlesim_yeniden_baglandi` yazılır, `karar_talebi_id` bağları
+korunur). `kanonik_nesneyi_bul` ve `adayin_kesin_nesnesi` tek adımda çalışır;
+Aşama 4.8 kanonik hedefi tahmin etmek zorunda kalmaz.
+
+**Aynı aday birden fazla kesin nesneyle eşleşebilir.** Kullanıcı ikisine de
+`AYNI` derse aday için ikinci çözümleme satırı yazılmaz (eskiden ham
+`UNIQUE` hatası sızıyordu); mantıksal sonuç — `Z = X` ve `Z = Y` ise `X = Y` —
+iki kesin nesnenin birleştirilmesi olarak uygulanır ve birleşim bu karara
+bağlanır, yani hangi kararın hangi birleşime yol açtığı denetimden okunur.
+İkisi zaten aynı kanonik nesneye çıkıyorsa yeni satır yazılmaz, karar yine ize
+geçer. O çift için daha önce `AYRI` denmişse çelişki sessizce çözülmez:
+`KararCelismesi` yükselir, işlem tamamen geri alınır, talep açık kalır.
+Kullanıcının eski kararını ezmek de yeni kararını yok saymak da çekirdeğin işi
+değildir.
+
+**Birleşen nesnenin kimlik geçmişi korumadan düşmez.** Mükerrerlik taraması
+kanonik nesnenin değerleri olarak ona birleşmiş kaynakların değerlerini de
+sayar; karşı ucun şartı da kanonik nesne üzerinden aranır (şartlar birleşimde
+kanonik nesnede toplanır). Birleşmiş nesne eşleşme sonucunda kendi başına
+görünmez, kanonik nesnesine eşlenir ve karar talebi kanonik nesneyi gösterir.
+Kaynağın değerleri hedefin özelliği **yapılmaz**: aynı özellikte iki farklı
+değer varsa hangisinin doğru olduğu bir domain yorumudur, ikisi de kimlik
+kanıtı olarak kalır. Nesnenin normal özellik okuması değişmez; geçmiş yalnız
+mükerrerlik motorunda kullanılır.
+
+**Denetim izindeki aday kimliği karışmaz.** `denetim_izi.aday_nesne_id` dış
+anahtar değildir (aday silinebilir, iz yaşamalı), `aday_nesne.id` ise SQLite
+`rowid` takma adıydı: en büyük kimlik silinince yeniden dağıtılıyor ve eski iz
+yeni adayı gösteriyordu. `0009` ile `aday_nesne` birincil anahtarı
+`AUTOINCREMENT` oldu; kimlik bir daha dağıtılmaz. Bedeli: SQLite
+`AUTOINCREMENT`a yalnız sütun kısıtında izin verdiğinden bu tablonun birincil
+anahtarı `pk_aday_nesne` adını taşıyamaz — projedeki tek ad istisnası.
+
+**Modül sınırı.** `denetim_tablolari` artık `nesne_tablolari`yı ve
+`mukerrerlik_tablolari`yı import etmez (iki tablo adı yerel sabit, doğruluğu
+testle korunur); böylece `taslak_islemleri` iptal ederken denetim izine
+yazabilir ve taslak → kesin nesne import zinciri kurulmaz. Aktör türü tek
+yerde tanımlıdır ve `mukerrerlik_tablolari` onu denetim modülünden alır.
 
 **Eşzamanlılık.** Her yazma kendi SAVEPOINT'inde çalışır ve dar hata
 eşlemesinden geçer (4.5 kalıbı): kilit / anlık görüntü çakışması
@@ -1288,16 +1380,17 @@ serviste retry döngüsü yoktur. İki bağlantılı gerçek yarış testleri he
 dışındaki eski modüller bu tura dahil edilmedi ("Bilinen teknik borç").
 
 **Kapsam dışı, bilinçli.** Güvenli karar motoru, güven puanı ve sezgisel kural
-yoktur; karar kaynağı yalnız kullanıcıdır (Aşama 4.9 yeni bir karar kaynağı
-ekleyebilir). İki aday nesnenin birbiriyle mükerrerliği aranmaz (paket içi
+yoktur; karar kaynağı yalnız kullanıcıdır ve bu artık sözde değil kodda ve
+şemada zorlanır ("Karar kaynağı, iptal ve kanonik kimlik"). Aşama 4.9 yeni bir
+karar kaynağı getirirse hem servis kapısı hem `karar_aktor_turu` kısıtı birlikte
+genişletilir. İki aday nesnenin birbiriyle mükerrerliği aranmaz (paket içi
 çözüm 4.8'in işidir). Kesin kayıt (`Kayit` / `KayitAlani`) tablosu **hâlâ
 yoktur**; 4.6 "kayıtları taşıma" gereksinimini 4.7 tablolarını erken açarak
 değil, mevcut dünya üzerinde çözer: aday kayıt bağları hiç ellenmez, aday →
 kesin nesne çözümlemesi ayrı bir köprü tabloda ilişkisel durur. Kesinleştirme
-4.8'dedir. `finans/` hâlâ boştur. İptal edilen bir paketin açık talepleri
-cevapsız kalır (iptal terminaldir); toplama işi sonraki aşamalara aittir.
+4.8'dedir. `finans/` hâlâ boştur.
 
-**Testler** (`tests/test_mukerrerlik.py`, 47 test): sıfır şart protokolü
+**Testler** (`tests/test_mukerrerlik.py`, 76 test): sıfır şart protokolü
 çalıştırmaz; tek şart eşleşince şüphe; iki şartta yalnız birincisi ya da
 yalnız ikincisi eşleşse de şüphe (VEYA); hiçbiri eşleşmezse şüphe yok;
 seçilmemiş özellik eşleşse de şüphe yok; iki yönlü tarama şartsız ucu yakalar;
@@ -1318,10 +1411,33 @@ korunur; çözümlenmiş ve talebe konu aday silinemez; şartlı aday silinince
 şartları da gider; zincirleme alt nesne şüphesi oluşur ve döngüye girmez;
 denetim izi aktör ve olayları taşır, ham özellik değeri taşımaz, uzun gerekçe
 reddedilir; şema ayrımı ve `çekirdek → finans` yasağı korunur;
-`foreign_key_check` ve `integrity_check` temizdir. Göç testleri
-(`tests/test_gocler.py`): `0007 → 0008 → 0007 → 0008` döngüsü, satır varken
-geri almanın reddi, sıfır veritabanından `head` ile ORM metadata birebirliği,
-bütün kısıt ve indeks adlarının kalıba uygunluğu.
+`foreign_key_check` ve `integrity_check` temizdir.
+
+2026-09-20 incelemesinin regresyon testleri aynı dosyada: iptal paketin talebi
+`gecersiz` olur ve aynı çift yeni pakette yeniden değerlendirilir, eski talep
+geçmişte karar taşımadan durur ve karara açılmaz, denetim izinde
+`karar_talebi_gecersiz_kaldi` görünür, iptal ile karar yarışında tam biri
+kazanır; ajan ve sistem aktörü `AYNI` / `AYRI` / `KARARSIZ` veremez (üç karar
+× iki aktör) ve reddedilen çağrı hiçbir şeyi değiştirmez, ajan yine tarayıp
+şüphe açabilir, ham SQL ajan kararı yazamaz; `3 → 2` ardından `2 → 1`
+birleşiminde zincir kalmaz, eski karar hedefi ve `karar_talebi_id` bağı
+korunur, kanonik nesne tek sıçramada bulunur, ikinci karar düşerse ilk
+birleşim bozulmaz, eşzamanlı iki birleşim tutarsız graf üretmez; birleşen
+kaynağın eski kimlik değeri üçüncü nesneyi yakalar ve karar talebi kanonik
+hedefi gösterir, hedef ile kaynağın farklı değerleri birlikte korunur,
+birleşmiş kaynak bağımsız eşleşme olarak dönmez; aynı aday iki kesin nesneyle
+eşleşir ve paket bekler, `AYNI` + `AYRI` tek çözümleme bırakır, iki `AYNI`
+kesin nesneleri birleştirir ve adayın kesin hedefi belirsiz kalmaz, önceki
+`AYRI` kararına çarpan ikinci `AYNI` reddedilir ve her şey geri alınır,
+çözümlenmiş adayın hedefi birleşimden sonra tek adımda bulunur; silinen aday
+kimliği yeniden kullanılmaz (aynı paket içinde de).
+
+Göç testleri (`tests/test_gocler.py`): `0007 → 0008 → 0007 → 0008` ve
+`0008 → 0009 → 0008 → 0009` döngüleri, satır varken geri almanın reddi
+(`0009`da geçersiz talep / kanonik hedefi değişmiş birleşim / yeni denetim
+olayı için ayrı ayrı), `0008`de kalmış birleşim zinciri varken `0009`un
+kanonik nesne uydurmayı reddetmesi, sıfır veritabanından `head` ile ORM
+metadata birebirliği, bütün kısıt ve indeks adlarının kalıba uygunluğu.
 
 ## Mimari sınır: çekirdek ve finans
 
@@ -1513,7 +1629,7 @@ kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çık�
 Bu sürümde tek araç var: `sistem_durumu`. Uygulama sürümü, ortam adı, şema
 sürümü ve yetenek listesini döndürür; yol, anahtar ya da ortam değişkeni
 içermez. Şema sürümü gerçektir (Aşama 4.1): veritabanı dosyası varsa
-Alembic'in `alembic_version` tablosundaki sürüm (bugün `0006`; zincirin
+Alembic'in `alembic_version` tablosundaki sürüm (mevcut göç zincirinin
 başı neyse o), dosya yoksa ya da göç uygulanmamışsa `yok`. Dosya yokken
 bağlantı açılmaz, boş SQLite dosyası oluşmaz; araç göç çalıştırmaz. Testler
 dosya yok, dosya var ama göçsüz ve göç uygulanmış senaryolarını süreç içinde

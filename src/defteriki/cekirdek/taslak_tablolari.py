@@ -142,7 +142,9 @@ class AdayNesne(TabloTabani):
     __tablename__ = ADAY_NESNE
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    """Paket içinde kullanılacak kararlı kimlik; ``nesne.id`` değildir."""
+    """Paket içinde kullanılacak kararlı kimlik; ``nesne.id`` değildir. Aday
+    silinebildiği için bu kimlik ``AUTOINCREMENT`` ile verilir (aşağıdaki
+    ``sqlite_autoincrement``): silinen adayın kimliği bir daha kullanılmaz."""
     islem_paketi_id: Mapped[int] = mapped_column(Integer, nullable=False)
     okuma_id: Mapped[int] = mapped_column(Integer, nullable=False)
     """Paketin okuması (kopya); kaynak bağının aynı okumada kalması için."""
@@ -175,6 +177,13 @@ class AdayNesne(TabloTabani):
         Index(None, "islem_paketi_id"),
         Index(None, "nesne_turu_id"),
         Index(None, "kaynak_id"),
+        # Kimlik yeniden kullanılmaz: silinen adayın kimliği yeni adaya
+        # verilirse denetim izindeki ``aday_nesne_id`` (dış anahtar değildir)
+        # yıllar sonra başka bir adayı gösterir. SQLite ``AUTOINCREMENT``
+        # olmadan en büyük ``rowid`` silinince onu yeniden dağıtır. Bunun
+        # bedeli: birincil anahtar kısıtı sütun içinde yazılır, dolayısıyla
+        # ``pk_aday_nesne`` adını taşıyamaz (SQLite dilbilgisi izin vermez).
+        {"sqlite_autoincrement": True},
     )
 
 
