@@ -524,13 +524,17 @@ def _acik_talepleri_gecersiz_kil(
     oturum: Session, paket: IslemPaketi, aktor: Aktor
 ) -> list[int]:
     """Başka etkin paketi kalmayan açık talepleri ``gecersiz`` yapar.
-    Koşullu güncelleme: ortak veya eşzamanlı cevaplanan talep etkilenmez."""
+
+    Koşullu güncelleme: ortak veya eşzamanlı cevaplanan talep etkilenmez.
+    ``bagimsiz_koken`` taşıyan soru hiç dokunulmaz: onu soran tek şey bir paket
+    değildir, paketsiz doğmuş olabilir ya da kökeni bir birleşmede kanonik
+    halefine devretmiş olabilir (``mukerrerlik_islemleri._kokeni_devret``)."""
     with _yazma_siniri(oturum):
         kimlikler = list(
             oturum.execute(
                 update(KararTalebi)
                 .where(
-                    KararTalebi.islem_paketi_id.is_not(None),
+                    KararTalebi.bagimsiz_koken.is_(False),
                     or_(
                         KararTalebi.islem_paketi_id == paket.id,
                         KararTalebi.id.in_(

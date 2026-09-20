@@ -39,6 +39,10 @@ kanonik değerleri birebir karşılaştırır.
   aynı çift yeniden değerlendirilebilir.
   ``gecersizlik_zamani`` yalnız bu durumda doludur (kontrol kısıtı).
 
+  ``bagimsiz_koken`` sorunun bir paketten bağımsız doğduğunu söyler; böyle
+  bir soru hiçbir paketin iptaliyle hükümsüz olmaz ve bu nitelik kanonik
+  halefe devredilir (tarihsel ``islem_paketi_id`` değiştirilmeden).
+
   Kararı **yalnız kullanıcı** verir: ``karar_aktor_turu`` veritabanı düzeyinde
   de ``kullanici`` olmak zorundadır. Talebi açan aktör (``acan_aktor_turu``)
   üç türden biri olabilir; ajan tarama yapıp şüphe açabilir, karar veremez.
@@ -74,6 +78,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -178,6 +183,11 @@ KARAR_AKTORU_KOSULU = (
 Aşama 4.9 yeni bir karar kaynağı getirirse bu kısıt göçle genişletilir."""
 COZEN_AKTOR_KOSULU = f"aktor_turu = '{AktorTuru.KULLANICI.value}'"
 """Çözümleme ve birleşim satırları yalnız kullanıcı kararından doğar."""
+BAGIMSIZ_KOKEN_KOSULU = (
+    "bagimsiz_koken IN (0, 1) AND (islem_paketi_id IS NOT NULL OR bagimsiz_koken = 1)"
+)
+"""Paketsiz açılan soru her zaman bağımsız kökenlidir; tersi serbesttir
+(paketli doğmuş soru bağımsız bir sorudan devraldığı için bağımsız olabilir)."""
 TEK_UC_KOSULU = "(aday_nesne_id IS NULL) <> (kaynak_nesne_id IS NULL)"
 """Karşı uç ya aday nesnedir ya kesin nesne; tam olarak biri."""
 KESIN_CIFT_SIRASI_KOSULU = "kaynak_nesne_id IS NULL OR kaynak_nesne_id > hedef_nesne_id"
@@ -261,8 +271,21 @@ class KararTalebi(TabloTabani):
     karar_aktor_turu: Mapped[str | None] = mapped_column(String)
     karar_aktor_kimligi: Mapped[str | None] = mapped_column(String)
     gecersizlik_zamani: Mapped[datetime | None] = mapped_column(DateTime)
-    """Yalnız ``gecersiz`` durumda dolu: paketi iptal edildiği için talebin
-    hükümsüz kaldığı an. Kim iptal etti bilgisi denetim izindedir."""
+    """Yalnız ``gecersiz`` durumda dolu: talebin hükümsüz kaldığı an. Neden
+    (paket iptali, ucun kanonik olmaktan çıkması, gereksiz kalması) denetim
+    izindedir."""
+    bagimsiz_koken: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("0")
+    )
+    """Soru bir paketten bağımsız doğduysa ``True`` (göç ``0011``).
+
+    ``islem_paketi_id`` sorunun **doğduğu** pakettir ve değişmez; paketsiz
+    açılan soruda boştur. Ama bir birleşmeden sonra aynı soru kanonik uçlarla
+    yeniden sorulduğunda hâlihazırda bir pakete ait açık soru bulunabilir; o
+    zaman tarihsel açılış paketi bozulmadan bağımsız köken buraya taşınır.
+    Bağımsız kökenli soru hiçbir paketin iptaliyle hükümsüz olmaz: onu soran
+    yalnız paket değildir. ``islem_paketi_id IS NULL`` iken bu alan zorunlu
+    olarak ``True``dur (kontrol kısıtı)."""
     gerekce: Mapped[str | None] = mapped_column(Text)
     """Kullanıcının kısa gerekçesi; belge içeriği ya da ham değer taşımaz."""
 
@@ -294,6 +317,7 @@ class KararTalebi(TabloTabani):
         CheckConstraint(KESIN_CIFT_SIRASI_KOSULU, name="kesin_cift_sirasi"),
         CheckConstraint(ACAN_AKTOR_KOSULU, name="acan_aktor_turu_gecerli"),
         CheckConstraint(KARAR_AKTORU_KOSULU, name="karari_kullanici_verir"),
+        CheckConstraint(BAGIMSIZ_KOKEN_KOSULU, name="bagimsiz_koken_tutarli"),
         # Aynı çift için ikinci bir AÇIK talep açılamaz (eşzamanlı açma dahil);
         # çözülmüş talepler kısıt dışıdır, satırda kalır.
         Index(

@@ -18,7 +18,8 @@ veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de, Aşama 4.
 (işlem paketi ve taslak durumu) 2026-09-19'da, Aşama 4.6 (onay ve
 mükerrerlik) 2026-09-20'de bitti; 4.6'nın bağımsız inceleme bulguları aynı gün
 üçüncü tur düzeltmeleriyle tamamlandı (göç `0010`, "Aday kararları ve ortak
-paket beklemesi"). Aşama 4.7 (kesin kayıt)
+paket beklemesi"; dördüncü tur göç `0011`, "Bağımsız köken ve tarama
+atomikliği"). Aşama 4.7 (kesin kayıt)
 sırada.
 Bitenler:
 
@@ -162,11 +163,15 @@ iki yeni denetim olayı, `aday_nesne` birincil anahtarına `AUTOINCREMENT`; beş
 tablo `0003`ün açık SQL kalıbıyla yeniden kurulur, `0009`a özgü veri varsa
 geri alma uygulanmaz), `0010_karar_talebi_paketleri` (ortak soruların paket
 bağları, mevcut taleplerin paketlerinden doldurulur; ek paket bağı varsa
-geri alma reddedilir) (zincirin başı bugün `0010`; ayrıntı "Nesne motoru",
+geri alma reddedilir) ve `0011_bagimsiz_koken` (``karar_talebi`` yeniden
+kurulur; sorunun paketten bağımsız doğduğunu söyleyen `bagimsiz_koken` alanı
+eklenir, mevcut satırlarda `islem_paketi_id IS NULL` koşulundan türetilir;
+kökenini bir paketten devralmış satır varsa geri alma reddedilir)
+(zincirin başı bugün `0011`; ayrıntı "Nesne motoru",
 "Belge zinciri", "İşlem paketi ve taslak" ve "Onay ve mükerrerlik"
 bölümlerinde).
 **Kalıcı geliştirme veritabanı** (`C:\dev\Defter3-veri\gelistirme\
-defteriki.sqlite3`) bilinçli olarak hâlâ `0003` sürümündedir; `0004`–`0010`
+defteriki.sqlite3`) bilinçli olarak hâlâ `0003` sürümündedir; `0004`–`0011`
 ona uygulanmamıştır ve yalnız Abdüllatif'in açık talimatıyla uygulanır. Göç
 testleri yalnız `tmp_path` altındaki geçici veritabanlarında çalışır. `0003`
 tabloyu açık SQL adımlarıyla yeniden kurar,
@@ -1295,7 +1300,7 @@ yazılmaz; kimlik / referans saklamak yeterliyse değer tekrar kopyalanmaz.
 başında denetlenir. Denetim satırı işin kendisiyle aynı transaction içinde
 yazılır: iş geri alınırsa izi de geri alınır.
 
-**Tablolar (göç `0008`, `0009` ve `0010` ile genişledi).**
+**Tablolar (göç `0008`; `0009`, `0010` ve `0011` ile genişledi).**
 
 `0010` ile eklenen `karar_talebi_paketi`, `(karar_talebi_id, islem_paketi_id)`
 bileşik anahtarı ve iki `RESTRICT` dış anahtarıyla tek talebin paketlerini tutar.
@@ -1480,7 +1485,7 @@ değil, mevcut dünya üzerinde çözer: aday kayıt bağları hiç ellenmez, ad
 kesin nesne çözümlemesi ayrı bir köprü tabloda ilişkisel durur. Kesinleştirme
 4.8'dedir. `finans/` hâlâ boştur.
 
-**Testler** (`tests/test_mukerrerlik.py`, 109 test): sıfır şart protokolü
+**Testler** (`tests/test_mukerrerlik.py`, 123 test): sıfır şart protokolü
 çalıştırmaz; tek şart eşleşince şüphe; iki şartta yalnız birincisi ya da
 yalnız ikincisi eşleşse de şüphe (VEYA); hiçbiri eşleşmezse şüphe yok;
 seçilmemiş özellik eşleşse de şüphe yok; iki yönlü tarama şartsız ucu yakalar;
@@ -1536,12 +1541,74 @@ bırakmaz ve çağıranın önceki bağımsız değişikliği korunur, aday çö
 yolunda da yarım satır kalmaz, `paketi_iptal_et` iki kesme noktasında yarım
 iptal bırakmaz ve yeniden denenince olağan biçimde çalışır.
 
+Dördüncü turun regresyon testleri: bağımsız köken hem zincirleme denetimin
+zaten açtığı halefe hem `_kanonik_soruyu_koru`nun yeni açtığı halefe geçer,
+ardışık birleşmelerde de kalır ve bağlı bütün paketler iptal edildikten sonra
+soru cevaplanabilir olur; tarihsel açılış paketi değişmez; birleşme olmadan
+bağımsız soru iptalden etkilenmez; üç paket paylaşan paket kaynaklı soru ilk
+iki iptalde açık kalır, son etkin paketin iptalinde hükümsüz olur; kesin
+tarama, paket bağı yazımı ve aday taraması `paketi_beklet` adımında düşünce
+hiçbir talep, bağ, denetim izi ya da durum değişikliği kalmaz, çağıranın
+önceki bağımsız değişikliği durur, yeniden denemede tarama olağan biçimde
+çalışır ve paket gerçekten bekler (bekleyen pakete aday eklenemez);
+`karar_ver` içinden çağrılan zincirleme tarama düşerse karar da geri alınır;
+çözümlenmemiş adayın aynı kanonik hedefi gösteren iki sorusundan biri
+gerekçeli hükümsüz olur ve kullanıcı adına karar yazılmaz, kalan tek soru
+cevaplanınca paket serbest kalır, düşen sorunun paketi korunan soruya bağlanır,
+kanonikleri ayrı sorular açık kalır.
+
 Göç testleri (`tests/test_gocler.py`): `0007 → 0008 → 0007 → 0008` ve
 `0008 → 0009 → 0008 → 0009` döngüleri, satır varken geri almanın reddi
 (`0009`da geçersiz talep / kanonik hedefi değişmiş birleşim / yeni denetim
 olayı için ayrı ayrı), `0008`de kalmış birleşim zinciri varken `0009`un
-kanonik nesne uydurmayı reddetmesi, sıfır veritabanından `head` ile ORM
+kanonik nesne uydurmayı reddetmesi, `0010 → 0011 → 0010 → 0011` döngüsü ve
+`0011`in kökeni `islem_paketi_id IS NULL` koşulundan türetmesi (devralınmış
+köken varken geri alma reddedilir), sıfır veritabanından `head` ile ORM
 metadata birebirliği, bütün kısıt ve indeks adlarının kalıba uygunluğu.
+
+### Bağımsız köken ve tarama atomikliği
+
+Dördüncü inceleme turu (göç `0011`). Üç davranış düzeltildi; önceki turların
+`AYRI` korumaları, karar/iptal atomikliği ve ortak paket beklemesi korundu.
+
+**Bağımsız köken kanonik halefe taşınır.** Paketten bağımsız açılan soru
+(`islem_paketi_id IS NULL`) iptalle kapanmıyordu, ama bir birleşmeden sonra
+soru kanonik uçlarla yeniden sorulurken hâlihazırda bir pakete ait açık soruyla
+birleşebiliyordu; o anda köken kayboluyor ve o paket iptal edilince hâlâ
+geçerli olan soru cevapsız düşüyordu. Köken artık ayrı ve kalıcı bir alanda
+durur: `karar_talebi.bagimsiz_koken`. **Tarihsel açılış paketi değiştirilmez**;
+devredilen yalnız "bu soruyu soran tek şey bir paket değil" bilgisidir ve
+devir denetim izine yazılır. Halef ister zincirleme denetimin zaten açtığı soru
+olsun ister `_kanonik_soruyu_koru`nun yeni açtığı soru, köken iki yolda da
+korunur. Bağımsız kökenli soru hiçbir paketin iptaliyle hükümsüz olmaz ve
+bütün bağlı paketleri iptal edilse bile cevaplanabilir kalır: karar hiçbir
+paketi diriltmeden uygulanır. Paket kaynaklı sorunun son etkin paket
+iptalinde hükümsüzleşmesi değişmedi.
+
+**Tarama servisleri de tek dış SAVEPOINT altında.** `nesneyi_denetle` ve
+`adayi_denetle` önce soruyu (ya da mevcut ortak soruya paket bağını) yazıp
+sonra paketi bekletiyordu; bekletme adımı düşer ve çağıran hatayı yutup dış
+işlemi commit ederse soru kalıcı kalıyor, paket `calisiyor` görünüyor ve açık
+sorusu olmasına rağmen pakete yeni aday eklenebiliyordu. İki tarama da artık
+bütün yazmalarını — talepler, paket bağları, denetim izleri ve paket durumu —
+tek bir dış SAVEPOINT içinde yapar. Başarısız çağrı kendi değişikliklerinin
+tamamını geri alır, çağıranın önceki bağımsız yazmalarına dokunmaz ve dış
+işleme commit/rollback uygulamaz. `karar_ver` taramayı kendi dış SAVEPOINT'i
+içinden çağırır; iç içe SAVEPOINT olağan davranıştır ve iç tarama düşerse
+karar da bütünüyle geri alınır.
+
+**Aday uzlaştırması çözümlenmemiş adayları da kapsar.** Birleşmeler bir adayın
+iki ayrı sorusunu aynı kanonik nesneye düşürebilir; ikisi de açık kalınca
+kullanıcıdan gereksiz ikinci bir karar isteniyor ve paket boşuna bekliyordu.
+Artık aynı `(aday, güncel kanonik hedef)` için tek açık soru kalır. Üç durumda
+soru gereksizdir: aday zaten o kanonik nesneye çözümlenmiştir, o kanonik nesne
+için kullanıcının verdiği bir karar (`AYNI` ya da `AYRI`) zaten vardır —
+tarihsel kimlik üzerinden verilmiş olsa bile —, ya da aynı çift için daha eski
+bir açık soru vardır. Gereksiz soru gerekçeli `gecersiz` olur; kullanıcı adına
+`AYNI` / `AYRI` yazılmaz. Korunan soru, düşen sorunun bütün paketlerine
+bağlanır, yani ortak soru etkin paketleri bekletmeye devam eder; etkilenen
+paket durumları aynı işlemde eşitlenir. Kanonikleri ayrı olan sorular
+dokunulmadan açık kalır.
 
 ## Mimari sınır: çekirdek ve finans
 

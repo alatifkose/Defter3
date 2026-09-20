@@ -56,7 +56,8 @@ DEFTERIKI_DEGISKENLERI = (
 )
 BEKLEME_SANIYE = 120
 BASLANGIC_SURUMU = "0001"
-GUNCEL_SURUM = "0010"
+GUNCEL_SURUM = "0011"
+ORTAK_PAKET_SURUMU = "0010"
 ONAY_SURUMU = "0008"
 TASLAK_SURUMU = "0007"
 BELGE_SURUMU = "0006"
@@ -495,6 +496,7 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 "aday_nesne_mukerrerlik_sarti": [],
                 "karar_talebi": [
                     "ck_karar_talebi_acan_aktor_turu_gecerli",
+                    "ck_karar_talebi_bagimsiz_koken_tutarli",
                     "ck_karar_talebi_durum_gecerli",
                     "ck_karar_talebi_durum_karar_tutarli",
                     "ck_karar_talebi_karar_gecerli",
@@ -1621,8 +1623,8 @@ def test_0007_0008_gecisi_veriyi_korur_ve_dolu_geri_alinmaz(
                 text(
                     "INSERT INTO karar_talebi (durum, nesne_turu_id, kaynak_nesne_id, "
                     "hedef_nesne_id, eslesen_ozellik_tanimi_id, olusturma_zamani, "
-                    "acan_aktor_turu, acan_aktor_kimligi) VALUES ('acik', 1, 2, 1, 1, "
-                    "'2026-09-20', 'kullanici', 'test')"
+                    "acan_aktor_turu, acan_aktor_kimligi, bagimsiz_koken) VALUES "
+                    "('acik', 1, 2, 1, 1, '2026-09-20', 'kullanici', 'test', 1)"
                 )
             )
             oturum.execute(
@@ -1903,5 +1905,135 @@ def test_0009_birlesim_zinciri_varken_kanonik_uydurmaz(
                 )
                 == 2
             )
+    finally:
+        v.kapat()
+
+
+def test_0010_0011_gecisi_kokeni_turetir_ve_dolu_geri_alinmaz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0011`` mevcut satırlara ``bagimsiz_koken`` değerini ``islem_paketi_id
+    IS NULL`` koşulundan türetir: bugünkü davranış birebir korunur. Bir soru
+    kökenini bir paketten devraldıysa (``bagimsiz_koken = 1`` olduğu hâlde
+    ``islem_paketi_id`` dolu) bu bilgi eski şemada ifade edilemez; geri alma
+    uygulanmaz. Satırlar silinince geri alınır ve tekrar ``head`` sıfırdan
+    kurulanla aynı şemayı verir."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    def kokenler() -> list[tuple[int, int | None, int]]:
+        with v.islem() as oturum:
+            return [
+                (int(i), p, int(k))
+                for i, p, k in oturum.execute(
+                    text(
+                        "SELECT id, islem_paketi_id, bagimsiz_koken "
+                        "FROM karar_talebi ORDER BY id"
+                    )
+                ).all()
+            ]
+
+    try:
+        goc(ORTAK_PAKET_SURUMU)
+        with v.islem() as oturum:
+            # ``nesne_birlesimi`` tohumu ``0008`` şemasına göre yazıldı; burada
+            # gereksiz ve ``0009``un zorunlu sütununu taşımıyor, atlanır.
+            for sql in _ONAY_TOHUMU:
+                if "nesne_birlesimi" not in sql:
+                    oturum.execute(text(sql))
+            oturum.execute(  # paketsiz (bağımsız) soru
+                text(
+                    "INSERT INTO karar_talebi (durum, nesne_turu_id, "
+                    "kaynak_nesne_id, hedef_nesne_id, eslesen_ozellik_tanimi_id, "
+                    "olusturma_zamani, acan_aktor_turu, acan_aktor_kimligi) "
+                    "VALUES ('acik', 1, 3, 2, 1, '2026-09-20', 'kullanici', 'test')"
+                )
+            )
+            oturum.execute(  # paketli soru
+                text("UPDATE karar_talebi SET islem_paketi_id = 1 WHERE id = 2")
+            )
+        eski_sema = _sema_sade(v)
+        with v.islem() as oturum:  # 0010'da köken sütunu henüz yok
+            onceki = {
+                int(i): p
+                for i, p in oturum.execute(
+                    text("SELECT id, islem_paketi_id FROM karar_talebi ORDER BY id")
+                ).all()
+            }
+        assert len(onceki) == 3
+
+        goc(GUNCEL_SURUM)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        # köken koşuldan türetildi: paketsiz satır 1, paketli satır 0
+        assert kokenler() == [(i, p, 1 if p is None else 0) for i, p in onceki.items()]
+        tam_sema = _sema(v)
+        assert tam_sema == _yukselt(tmp_path / "sifir", monkeypatch)[1]
+
+        with v.islem() as oturum:  # devralınmış köken: paketli ama bağımsız
+            oturum.execute(
+                text("UPDATE karar_talebi SET bagimsiz_koken = 1 WHERE id = 2")
+            )
+        with pytest.raises(RuntimeError, match="bağımsız kökeni"):
+            goc(ORTAK_PAKET_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        assert _sema(v) == tam_sema
+
+        with v.islem() as oturum:
+            oturum.execute(
+                text("UPDATE karar_talebi SET bagimsiz_koken = 0 WHERE id = 2")
+            )
+        goc(ORTAK_PAKET_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == ORTAK_PAKET_SURUMU
+        assert _sema_sade(v) == eski_sema
+        with v.islem() as oturum:  # satırlar olduğu gibi duruyor
+            assert (
+                int(
+                    oturum.execute(
+                        text("SELECT count(*) FROM karar_talebi")
+                    ).scalar_one()
+                )
+                == 3
+            )
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+
+        goc(GUNCEL_SURUM)
+        assert _sema(v) == tam_sema
+    finally:
+        v.kapat()
+
+
+def test_0010_0011_bos_veritabani_dongusu_semayi_degistirmez(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0010 → 0011 → 0010 → 0011``: ``karar_talebi``nin yeniden kurulması
+    şemayı kaydırmaz, geçici tablo bırakmaz."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    try:
+        goc(ORTAK_PAKET_SURUMU)
+        on = _sema_sade(v)
+        goc(GUNCEL_SURUM)
+        son = _sema(v)
+        goc(ORTAK_PAKET_SURUMU, geri=True)
+        assert _sema_sade(v) == on
+        goc(GUNCEL_SURUM)
+        assert _sema(v) == son
+        assert not any(ad.endswith(("_yeni", "_tasima")) for _, ad, _ in son)
+        with v.islem() as oturum:
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
     finally:
         v.kapat()
