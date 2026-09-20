@@ -1972,8 +1972,7 @@ def test_iki_ucu_ayni_kanonige_dusen_talep_karar_beklemez(
 def test_bayat_talep_baska_pakete_aitse_o_paket_de_esitlenir(
     ortam: Ortam, env: Envanter
 ) -> None:
-    """Hükümsüz kalan talep başka bir pakete aitse o paket de beklemeyi
-    bırakır; durum her zaman açık talep sayısından türer."""
+    """Kanonik soru tek kalır; iki paket de ortak sorunun cevabını bekler."""
     p1 = _paket(ortam)
     p2 = _paket(ortam)
     n1 = _depo(ortam, env, harici_kimlik="X1")
@@ -1994,8 +1993,20 @@ def test_bayat_talep_baska_pakete_aitse_o_paket_de_esitlenir(
     _karar(ortam, ikinci.id, Karar.AYNI)  # N3 → N2
 
     assert _talep_durumu(ortam, bayat.id) == TalepDurumu.GECERSIZ.value
-    assert _paket_durumu(ortam, p2) == CALISIYOR.value  # P2 artık beklemiyor
+    assert _paket_durumu(ortam, p2) == BEKLIYOR.value
     assert _paket_durumu(ortam, p1) == BEKLIYOR.value  # soru P1'de duruyor
+    with ortam.veritabani.islem() as o:
+        [ortak] = mu.talepleri_listele(o, durum=TalepDurumu.ACIK)
+        for p in (p1, p2):
+            assert [
+                t.id
+                for t in mu.talepleri_listele(
+                    o, islem_paketi_id=p, durum=TalepDurumu.ACIK
+                )
+            ] == [ortak.id]
+    _karar(ortam, ortak.id, Karar.AYRI)
+    assert _paket_durumu(ortam, p1) == CALISIYOR.value
+    assert _paket_durumu(ortam, p2) == CALISIYOR.value
     _butunluk_temiz(ortam)
 
 
@@ -2105,6 +2116,256 @@ def test_paket_iptali_duserse_yarim_iptal_kalmaz(
     _iptal_et(ortam, paket_id)
     assert _paket_durumu(ortam, paket_id) == IPTAL.value
     assert _talep_durumu(ortam, talep_id) == TalepDurumu.GECERSIZ.value
+
+
+@pytest.mark.parametrize("once_ayri", [False, True])
+@pytest.mark.parametrize("ters", [False, True])
+def test_aday_ayri_karari_kesin_birlesmede_korunur(
+    ortam: Ortam, env: Envanter, once_ayri: bool, ters: bool
+) -> None:
+    x, y, z, talepler = _aday_iki_kesin(ortam, env)
+    if ters:
+        x, y = y, x
+    with ortam.veritabani.islem() as o:
+        hedefler = {mu.karar_talebi_getir(o, t).hedef_nesne_id: t for t in talepler}
+    if once_ayri:
+        _karar(ortam, hedefler[y], Karar.AYRI)
+    _karar(ortam, hedefler[x], Karar.AYNI)
+    if not once_ayri:
+        _karar(ortam, hedefler[y], Karar.AYRI)
+    _sart(ortam, x, ["ad"])
+    [talep] = _denetle(ortam, y)
+    once = _olaylar(ortam)
+    with ortam.veritabani.islem() as o:
+        bagimsiz = ni.nesne_olustur(o, env.depo_id, {"ad": "Bağımsız"}).id
+        with pytest.raises(mu.KararCelismesi):
+            mu.karar_ver(o, talep, Karar.AYNI, KULLANICI)
+    with ortam.veritabani.islem() as o:
+        assert mu.adayin_kesin_nesnesi(o, z) == x
+        assert mu.kanonik_nesneyi_bul(o, y) == y
+        assert mu.karar_talebi_getir(o, talep).durum == TalepDurumu.ACIK.value
+        assert ni.nesne_getir(o, bagimsiz).id == bagimsiz
+    assert _olaylar(ortam) == once
+
+
+def test_adayin_ilk_cozumlemesi_tarihsel_ayriyi_asamaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    x, y, z, talepler = _aday_iki_kesin(ortam, env)
+    _karar(ortam, talepler[1], Karar.AYRI)
+    _sart(ortam, x, ["ad"])
+    [talep] = _denetle(ortam, y)
+    _karar(ortam, talep, Karar.AYNI)
+    once = _olaylar(ortam)
+    with ortam.veritabani.islem() as o:
+        with pytest.raises(mu.KararCelismesi):
+            mu.karar_ver(o, talepler[0], Karar.AYNI, KULLANICI)
+    with ortam.veritabani.islem() as o:
+        assert mu.adayin_kesin_nesnesi(o, z) is None
+        assert mu.karar_talebi_getir(o, talepler[0]).karar is None
+    assert _olaylar(ortam) == once
+
+
+@pytest.mark.parametrize("cozum_hedefi", [0, 1])
+def test_cozulmus_aday_kanonik_kimligi_tekrar_sormaz(
+    ortam: Ortam, env: Envanter, cozum_hedefi: int
+) -> None:
+    x, y, z, talepler = _aday_iki_kesin(ortam, env)
+    _karar(ortam, talepler[cozum_hedefi], Karar.AYNI)
+    _sart(ortam, x, ["ad"])
+    [talep] = _denetle(ortam, y)
+    _karar(ortam, talep, Karar.AYNI)
+    with ortam.veritabani.islem() as o:
+        assert mu.adayin_kesin_nesnesi(o, z) == x
+        eski = mu.karar_talebi_getir(o, talepler[1 - cozum_hedefi])
+        assert eski.durum == TalepDurumu.GECERSIZ.value
+        assert eski.karar is None
+        assert eski.islem_paketi_id is not None
+        assert tsi.paket_getir(o, eski.islem_paketi_id).durum == CALISIYOR.value
+    assert _adayi_denetle(ortam, z) == []
+    assert _acik_talepler(ortam) == []
+
+
+def _iki_paket_ortak_soru(ortam: Ortam, env: Envanter) -> tuple[int, int, int]:
+    p1, p2 = _paket(ortam), _paket(ortam)
+    n1 = _depo(ortam, env, harici_kimlik="X1")
+    n2 = _depo(ortam, env, harici_kimlik="X1")
+    n3 = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, n3, ["harici_kimlik"])
+    _denetle(ortam, n1, p2)
+    with ortam.veritabani.islem() as o:
+        birlesme = next(
+            t.id
+            for t in mu.nesneyi_denetle(o, n3, KULLANICI, p1)
+            if t.hedef_nesne_id == n2
+        )
+    _karar(ortam, birlesme, Karar.AYNI)
+    [(ortak, _, _)] = _acik_talepler(ortam)
+    return p1, p2, ortak
+
+
+def test_aday_ayri_karari_baska_aday_uzerinden_de_asilamaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    x, y, _, talepler = _aday_iki_kesin(ortam, env)
+    _karar(ortam, talepler[0], Karar.AYNI)
+    _karar(ortam, talepler[1], Karar.AYRI)
+    p2 = _paket(ortam)
+    z2 = _aday(
+        ortam,
+        p2,
+        env.depo_id,
+        {"ad": "İkinci aday", "harici_kimlik": "A", "sehir": "B"},
+    )
+    ikinci = _adayi_denetle(ortam, z2)
+    _karar(ortam, ikinci[1], Karar.AYNI)
+    with pytest.raises(mu.KararCelismesi):
+        _karar(ortam, ikinci[0], Karar.AYNI)
+    with ortam.veritabani.islem() as o:
+        assert mu.adayin_kesin_nesnesi(o, z2) == y
+        assert mu.kanonik_nesneyi_bul(o, x) == x
+    assert _paket_durumu(ortam, p2) == BEKLIYOR.value
+
+
+def test_aday_talebi_kapatma_duserse_birlesme_geri_alinir(
+    ortam: Ortam, env: Envanter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    x, y, z, talepler = _aday_iki_kesin(ortam, env)
+    _karar(ortam, talepler[1], Karar.AYNI)
+    _sart(ortam, x, ["ad"])
+    [birlesme] = _denetle(ortam, y)
+    once = _olaylar(ortam)
+    kapat: Callable[[Session, mt.KararTalebi, Aktor], list[mt.KararTalebi]] = getattr(
+        mu, "_cozulmus_aday_taleplerini_kapat"
+    )
+
+    def kapat_ve_patlat(
+        o: Session, talep: mt.KararTalebi, aktor: Aktor
+    ) -> list[mt.KararTalebi]:
+        assert len(kapat(o, talep, aktor)) == 1
+        raise EnjekteHata("aday talebi kapandıktan sonra")
+
+    with ortam.veritabani.islem() as o:
+        monkeypatch.setattr(mu, "_cozulmus_aday_taleplerini_kapat", kapat_ve_patlat)
+        with pytest.raises(EnjekteHata):
+            mu.karar_ver(o, birlesme, Karar.AYNI, KULLANICI)
+        monkeypatch.undo()
+    with ortam.veritabani.islem() as o:
+        assert mu.adayin_kesin_nesnesi(o, z) == y
+        assert mu.nesne_birlesimini_bul(o, y) is None
+        assert mu.karar_talebi_getir(o, talepler[0]).durum == TalepDurumu.ACIK.value
+        assert mu.karar_talebi_getir(o, birlesme).durum == TalepDurumu.ACIK.value
+    assert _olaylar(ortam) == once
+
+
+def test_ortak_paket_iptali_hatasi_baglari_ve_beklemeyi_korur(
+    ortam: Ortam, env: Envanter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    p1, p2, talep = _iki_paket_ortak_soru(ortam, env)
+    _iptal_et(ortam, p1)
+    once = _olaylar(ortam)
+    with ortam.veritabani.islem() as o:
+        monkeypatch.setattr(tsi, "olay_yaz", _patlat)
+        with pytest.raises(EnjekteHata):
+            tsi.paketi_iptal_et(o, p2, KULLANICI)
+        monkeypatch.undo()
+    assert _paket_durumu(ortam, p1) == IPTAL.value
+    assert _paket_durumu(ortam, p2) == BEKLIYOR.value
+    assert _talep_durumu(ortam, talep) == TalepDurumu.ACIK.value
+    assert _olaylar(ortam) == once
+    _karar(ortam, talep, Karar.AYRI)
+    assert _paket_durumu(ortam, p2) == CALISIYOR.value
+
+
+@pytest.mark.parametrize("iptal_indeksi", [0, 1])
+@pytest.mark.parametrize("karar", [Karar.AYNI, Karar.AYRI])
+def test_ortak_soru_paket_iptaliyle_kaybolmaz(
+    ortam: Ortam, env: Envanter, iptal_indeksi: int, karar: Karar
+) -> None:
+    p1, p2, talep = _iki_paket_ortak_soru(ortam, env)
+    iptal, kalan = (p1, p2) if iptal_indeksi == 0 else (p2, p1)
+    for p in (p1, p2):
+        with pytest.raises(tsi.PaketDurumuGecersiz):
+            _aday(ortam, p, env.depo_id, {"ad": "Erken"})
+        with ortam.veritabani.islem() as o:
+            with pytest.raises(tsi.PaketDurumuGecersiz):
+                tsi.paketi_devam_et(o, p)
+    _iptal_et(ortam, iptal)
+    assert _paket_durumu(ortam, kalan) == BEKLIYOR.value
+    assert _talep_durumu(ortam, talep) == TalepDurumu.ACIK.value
+    _karar(ortam, talep, Karar.KARARSIZ, "Henüz karar yok")
+    assert _paket_durumu(ortam, kalan) == BEKLIYOR.value
+    _karar(ortam, talep, karar)
+    assert _paket_durumu(ortam, kalan) == CALISIYOR.value
+    assert _paket_durumu(ortam, iptal) == IPTAL.value
+    _aday(ortam, kalan, env.depo_id, {"ad": "Cevaptan sonra"})
+    _butunluk_temiz(ortam)
+
+
+def test_ortak_son_paket_iptali_soruyu_gecersiz_kilar(
+    ortam: Ortam, env: Envanter
+) -> None:
+    p1, p2, talep = _iki_paket_ortak_soru(ortam, env)
+    _iptal_et(ortam, p1)
+    _iptal_et(ortam, p2)
+    assert _talep_durumu(ortam, talep) == TalepDurumu.GECERSIZ.value
+    with ortam.veritabani.islem() as o:
+        eski = mu.karar_talebi_getir(o, talep)
+        assert eski.karar is None
+        assert eski.kaynak_nesne_id is not None
+        kaynak = eski.kaynak_nesne_id
+    p3 = _paket(ortam)
+    assert len(_denetle(ortam, kaynak, p3)) == 1
+    assert _paket_durumu(ortam, p3) == BEKLIYOR.value
+
+
+def test_ayni_soru_yeni_paketi_de_bekletir_tekrar_acilmaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    p1, p2 = _paket(ortam), _paket(ortam)
+    x = _depo(ortam, env, harici_kimlik="A")
+    y = _depo(ortam, env, harici_kimlik="A")
+    _sart(ortam, x, ["harici_kimlik"])
+    [talep] = _denetle(ortam, y, p1)
+    for _ in range(2):
+        assert _denetle(ortam, y, p2) == []
+    assert _paket_durumu(ortam, p2) == BEKLIYOR.value
+    assert _sayi(ortam, mt.KARAR_TALEBI) == 1
+    assert _sayi(ortam, mt.KARAR_TALEBI_PAKETI) == 2
+    _karar(ortam, talep, Karar.AYRI)
+    assert _paket_durumu(ortam, p1) == CALISIYOR.value
+    assert _paket_durumu(ortam, p2) == CALISIYOR.value
+
+
+@pytest.mark.parametrize("kesme", ["_talebi_pakete_bagla", "_kanonik_soruyu_koru"])
+def test_paket_bagi_aktarimi_duserse_karar_tamamen_geri_alinir(
+    ortam: Ortam, env: Envanter, monkeypatch: pytest.MonkeyPatch, kesme: str
+) -> None:
+    p1, p2, ortak = _iki_paket_ortak_soru(ortam, env)
+    with ortam.veritabani.islem() as o:
+        eski = mu.karar_talebi_getir(o, ortak)
+        assert eski.kaynak_nesne_id is not None
+        n2 = eski.kaynak_nesne_id
+    n4 = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, n4, ["harici_kimlik"])
+    talepler = _denetle(ortam, n4, p1)
+    with ortam.veritabani.islem() as o:
+        birlesme = next(
+            t for t in talepler if mu.karar_talebi_getir(o, t).hedef_nesne_id == n2
+        )
+    once = _olaylar(ortam)
+    bag_sayisi = _sayi(ortam, mt.KARAR_TALEBI_PAKETI)
+    with ortam.veritabani.islem() as o:
+        monkeypatch.setattr(mu, kesme, _patlat)
+        with pytest.raises(EnjekteHata):
+            mu.karar_ver(o, birlesme, Karar.AYNI, KULLANICI)
+        monkeypatch.undo()
+    assert _olaylar(ortam) == once
+    assert _sayi(ortam, mt.KARAR_TALEBI_PAKETI) == bag_sayisi
+    assert _talep_durumu(ortam, birlesme) == TalepDurumu.ACIK.value
+    assert _paket_durumu(ortam, p2) == BEKLIYOR.value
+    with ortam.veritabani.islem() as o:
+        assert mu.nesne_birlesimini_bul(o, n4) is None
 
 
 # --- şema ve mimari sınır -------------------------------------------------------------

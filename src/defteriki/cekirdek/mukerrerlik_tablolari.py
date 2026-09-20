@@ -99,6 +99,7 @@ açıklamasındaki sınır). Eşitlik ``tests/test_mukerrerlik.py`` ile korunur.
 NESNE_MUKERRERLIK_SARTI = "nesne_mukerrerlik_sarti"
 ADAY_NESNE_MUKERRERLIK_SARTI = "aday_nesne_mukerrerlik_sarti"
 KARAR_TALEBI = "karar_talebi"
+KARAR_TALEBI_PAKETI = "karar_talebi_paketi"
 ADAY_NESNE_COZUMLEMESI = "aday_nesne_cozumlemesi"
 NESNE_BIRLESIMI = "nesne_birlesimi"
 
@@ -106,6 +107,7 @@ MUKERRERLIK_TABLOLARI: tuple[str, ...] = (
     NESNE_MUKERRERLIK_SARTI,
     ADAY_NESNE_MUKERRERLIK_SARTI,
     KARAR_TALEBI,
+    KARAR_TALEBI_PAKETI,
     ADAY_NESNE_COZUMLEMESI,
     NESNE_BIRLESIMI,
 )
@@ -240,8 +242,8 @@ class KararTalebi(TabloTabani):
     islem_paketi_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey(f"{ISLEM_PAKETI}.id", ondelete="RESTRICT")
     )
-    """Şüphe bir işlem paketinden doğduysa paketi; iki kesin nesne arasındaki
-    bağımsız şüphede boş olabilir."""
+    """Şüphenin doğduğu paket (tarihsel bilgi); bağımsız şüphede boş olabilir.
+    Ortak sorunun bütün paketleri ``KararTalebiPaketi`` üzerinden bulunur."""
     nesne_turu_id: Mapped[int] = mapped_column(Integer, nullable=False)
     """İki uç da aynı nesne türündedir; bileşik dış anahtarların ortak sütunu."""
     aday_nesne_id: Mapped[int | None] = mapped_column(Integer)
@@ -316,6 +318,30 @@ class KararTalebi(TabloTabani):
         Index(None, "durum"),
         Index(None, "hedef_nesne_id"),
     )
+
+
+class KararTalebiPaketi(TabloTabani):
+    """Tek sorunun beklettiği paketler; eski talep bağları geçmişte korunur.
+
+    ``KararTalebi.islem_paketi_id`` sorunun doğduğu pakettir. Birleşme veya
+    yeniden tarama ile aynı sorudan etkilenen diğer paketler burada bağlanır.
+    İptal edilen paket bağı silinmez; bekleme yalnız etkin paketler içindir.
+    """
+
+    __tablename__ = KARAR_TALEBI_PAKETI
+
+    karar_talebi_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(f"{KARAR_TALEBI}.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    islem_paketi_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(f"{ISLEM_PAKETI}.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+
+    __table_args__ = (Index(None, "islem_paketi_id"),)
 
 
 class AdayNesneCozumlemesi(TabloTabani):

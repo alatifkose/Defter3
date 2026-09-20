@@ -17,8 +17,8 @@ veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de, Aşama 4.
 (nesne motoru), Aşama 4.4 (belge, arşiv, okuma ve kaynak) ve Aşama 4.5
 (işlem paketi ve taslak durumu) 2026-09-19'da, Aşama 4.6 (onay ve
 mükerrerlik) 2026-09-20'de bitti; 4.6'nın bağımsız inceleme bulguları aynı gün
-iki turda kapandı (göç `0009`, "Karar kaynağı, iptal ve kanonik kimlik";
-ikinci tur "AYRI geçmişi ve karar atomikliği"). Aşama 4.7 (kesin kayıt)
+üçüncü tur düzeltmeleriyle tamamlandı (göç `0010`, "Aday kararları ve ortak
+paket beklemesi"). Aşama 4.7 (kesin kayıt)
 sırada.
 Bitenler:
 
@@ -160,11 +160,13 @@ talebine terminal `gecersiz` durumu ve `gecersizlik_zamani`, `nesne_birlesimi`
 üzerine `kanonik_nesne_id`, "kararı yalnız kullanıcı verir" kontrol kısıtları,
 iki yeni denetim olayı, `aday_nesne` birincil anahtarına `AUTOINCREMENT`; beş
 tablo `0003`ün açık SQL kalıbıyla yeniden kurulur, `0009`a özgü veri varsa
-geri alma uygulanmaz) (zincirin başı bugün `0009`; ayrıntı "Nesne motoru",
+geri alma uygulanmaz), `0010_karar_talebi_paketleri` (ortak soruların paket
+bağları, mevcut taleplerin paketlerinden doldurulur; ek paket bağı varsa
+geri alma reddedilir) (zincirin başı bugün `0010`; ayrıntı "Nesne motoru",
 "Belge zinciri", "İşlem paketi ve taslak" ve "Onay ve mükerrerlik"
 bölümlerinde).
 **Kalıcı geliştirme veritabanı** (`C:\dev\Defter3-veri\gelistirme\
-defteriki.sqlite3`) bilinçli olarak hâlâ `0003` sürümündedir; `0004`–`0009`
+defteriki.sqlite3`) bilinçli olarak hâlâ `0003` sürümündedir; `0004`–`0010`
 ona uygulanmamıştır ve yalnız Abdüllatif'in açık talimatıyla uygulanır. Göç
 testleri yalnız `tmp_path` altındaki geçici veritabanlarında çalışır. `0003`
 tabloyu açık SQL adımlarıyla yeniden kurar,
@@ -249,7 +251,7 @@ olur ve hata yükselir, oturum kapanır; işlem içindeki DDL de geri alınır
 test kökünde oluşur; sıfır
 veritabanından `upgrade head` `0008`e çıkar ve tablolar `alembic_version` +
 sekiz tanım tablosu + üç nesne tablosu + dört belge zinciri tablosu + altı
-taslak tablosu + altı onay / mükerrerlik / denetim tablosudur; iki
+taslak tablosu + yedi onay / mükerrerlik / denetim tablosudur; iki
 sıfır veritabanı aynı şemayı
 üretir; tekrar
 `upgrade` şemayı değiştirmez; `head → 0001 → head` döngüsünde tanım tabloları
@@ -981,7 +983,7 @@ calisiyor → iptal,  bekliyor → iptal  paketi_iptal_et (terminal)
   / ilişki / kayıt / bağ, kaynak, okuma, belge ya da arşiv dosyası silinmez;
   paket ve taslak içeriği sorgulanabilir kalır. İptal edilen paket kesin
   dünyayı zaten hiç değiştirmediği için başka geri alma gerekmez. Aşama 4.6'dan
-  beri `paketi_iptal_et` aktör alır ve paketin açık karar taleplerini aynı
+  beri `paketi_iptal_et` aktör alır ve başka etkin paketle paylaşılmayan talepleri aynı
   işlemde terminal `gecersiz` duruma geçirir ("Karar kaynağı, iptal ve kanonik
   kimlik"); talep silinmez, karar yazılmaz.
 * `kaydedildi` / `kesinleşti` / `tamamlandi` gibi kesin kayıt durumu yoktur
@@ -1226,9 +1228,9 @@ yazılır; satırın kimliği Aşama 3.4'te gerçek Cowork ile doğrulanan
 **açık talep sayısından türer**: açık talep varken `BEKLIYOR`, hiç kalmayınca
 `CALISIYOR`. İlk kararın tek başına paketi canlandırmaması bu kuraldan gelir;
 `taslak_islemleri.paketi_devam_et` de açık talep varken reddeder. `IPTAL`
-terminaldir: iptal paketin talebine karar verilmez ve paket diriltilmez; açık
-talepleri iptal anında terminal `gecersiz` duruma geçer ("Karar kaynağı, iptal
-ve kanonik kimlik").
+terminaldir: paket diriltilmez. Başka etkin paketle paylaşılan sorular açık
+kalır ve kalan paket adına cevaplanabilir; paylaşılmayan paket kaynaklı
+talepler terminal `gecersiz` olur ("Aday kararları ve ortak paket beklemesi").
 Bekleyen karar yalnız ilgili paketi ve şüpheli ucu durdurur; mevcut kesin
 nesneler sistem genelinde kilitlenmez.
 
@@ -1293,7 +1295,10 @@ yazılmaz; kimlik / referans saklamak yeterliyse değer tekrar kopyalanmaz.
 başında denetlenir. Denetim satırı işin kendisiyle aynı transaction içinde
 yazılır: iş geri alınırsa izi de geri alınır.
 
-**Tablolar (göç `0008`, `0009` ile genişledi).**
+**Tablolar (göç `0008`, `0009` ve `0010` ile genişledi).**
+
+`0010` ile eklenen `karar_talebi_paketi`, `(karar_talebi_id, islem_paketi_id)`
+bileşik anahtarı ve iki `RESTRICT` dış anahtarıyla tek talebin paketlerini tutar.
 
 | Tablo | Ne tutar | Kısıtlar |
 |---|---|---|
@@ -1324,7 +1329,7 @@ açar, denetim olayı üretir. Daha önce README bunu söylüyor ama hiçbir şe
 zorlamıyordu.
 
 **İptal edilen paketin talebi çifti kilitlemez.** `paketi_iptal_et` aktör alır
-ve paketin açık taleplerini aynı işlemde terminal `gecersiz` duruma geçirir
+ve başka etkin paketle paylaşılmayan talepleri aynı işlemde `gecersiz` yapar
 (`gecersizlik_zamani` dolar, denetim izine `karar_talebi_gecersiz_kaldi`
 yazılır). `gecersiz` bir `AYRI` kararı **değildir**: `karar` boş kalır, satır
 geçmişte durur, kullanıcı kararı verilemez. Ama artık açık talep sayılmaz;
@@ -1406,10 +1411,10 @@ benzersiz indeks ihlal edilebilirdi. Bu yüzden birleşen nesneyi gösteren aç�
 geçerliyse, aynı işlem içinde çalışan zincirleme denetimle kanonik uçlarla
 yeniden açılır. İki ucu aynı kanonik nesneye düşen talep yeniden açılmaz:
 soru kendiliğinden yanıtlanmıştır, kullanıcıdan ikinci bir karar beklenmez.
-Hükümsüz kalan talep başka bir pakete aitse o paketin durumu da eşitlenir.
-Aday talepleri bu uzlaştırmaya girmez; onların kesin ucu zaten karar anında
-kanonik nesneye çözülür. **Yeni bir durum ya da şema gerekmedi:** `gecersiz`
-zaten "karar verilmeden hükümsüz kalan talep" demektir, hükümsüzlük nedeni
+Hükümsüz kalan talebin bütün etkin paket bağları kanonik soruda korunur;
+paketler cevap verilmeden serbest kalmaz. Aday zaten sorunun kanonik
+hedefine çözümlenmişse aday talebi de hükümsüz kalır. `gecersiz`
+"karar verilmeden hükümsüz kalan talep" demektir, hükümsüzlük nedeni
 denetim izinin gerekçesinde yazar (`karar_talebi_gecersiz_kaldi`). Talep
 geçmişi bozulmaz: satırın eski uçları ve açılış bilgisi yerinde kalır, `karar`
 boş kalır.
@@ -1427,6 +1432,33 @@ transaction'a dokunmaz (ne commit ne rollback), dolayısıyla çağıranın bu
 hata enjeksiyonu testleri bunu kanıtlar: ilk değişiklikten sonraki ve sonraki
 kritik adımlardaki hatalar çağıran tarafında yakalanır, dış transaction commit
 edilir, kalıcı durum yeni bir oturumdan okunur.
+
+### Aday kararları ve ortak paket beklemesi
+
+Üçüncü inceleme düzeltmesi (göç `0010`): adayın kalıcı `AYRI` kararı,
+adayın çözümlendiği kesin kimlikle birlikte birleşme kontrolüne katılır.
+`Z = X`, `Z ≠ Y` sonrasında `X = Y` reddedilir. Önce `Z ≠ Y`, sonra
+`Y → X` olmuşsa ilk `Z = X` çözümlemesi de reddedilir. Reddedilen karar
+talebi açık kalır; karar geçmişi ve dış işlemin önceki yazmaları korunur.
+
+`karar_talebi_paketi`, tek soruyu bekleyen bütün paketleri bağlar.
+`karar_talebi.islem_paketi_id` açılış paketini tarihsel olarak saklar;
+pakete göre listeleme ve devam/yazma engeli ortak bağları da dikkate alır.
+Birleşmeden dolayı eski talep hükümsüz olduğunda soru tek kanonik çift
+olarak korunur ve eski paket bağları buna aktarılır. Aynı soruyu başka
+pakette taramak ikinci soru açmaz, o paketi mevcut soruya bağlar.
+
+Bir paketi iptal etmek diğer etkin paketlerin sorusunu kapatmaz. Açılış
+paketi iptal edilmişse kullanıcı kararı kalan etkin paket adına uygulanır;
+iptal paket diriltilmez. Son etkin paket iptal edilince paket kaynaklı soru
+`gecersiz` olur. Paketten bağımsız açılan sorular iptalle kapanmaz.
+Göç mevcut taleplerin paket bağlarını doldurur; ek bağlar varsa geri alma
+reddedilir. Geliştirme veritabanına göç uygulanmadı.
+
+Aday zaten talebin güncel kanonik hedefine çözümlüyse gereksiz açık soru
+`gecersiz` olur; kullanıcı adına `AYNI` yazılmaz. Yeniden tarama da aynı
+kimliği tekrar sormaz. Paket bağları, hükümsüzleştirme ve paket durumları
+mevcut karar SAVEPOINT'inin içindedir.
 
 **Eşzamanlılık.** Her yazma kendi SAVEPOINT'inde çalışır ve dar hata
 eşlemesinden geçer (4.5 kalıbı): kilit / anlık görüntü çakışması
@@ -1448,7 +1480,7 @@ değil, mevcut dünya üzerinde çözer: aday kayıt bağları hiç ellenmez, ad
 kesin nesne çözümlemesi ayrı bir köprü tabloda ilişkisel durur. Kesinleştirme
 4.8'dedir. `finans/` hâlâ boştur.
 
-**Testler** (`tests/test_mukerrerlik.py`, 91 test): sıfır şart protokolü
+**Testler** (`tests/test_mukerrerlik.py`, 109 test): sıfır şart protokolü
 çalıştırmaz; tek şart eşleşince şüphe; iki şartta yalnız birincisi ya da
 yalnız ikincisi eşleşse de şüphe (VEYA); hiçbiri eşleşmezse şüphe yok;
 seçilmemiş özellik eşleşse de şüphe yok; iki yönlü tarama şartsız ucu yakalar;
@@ -1497,7 +1529,7 @@ iki merge derinindeki üyesi de sayılır ve kullanıcıya `AYRI` çıkışı ka
 ilgisiz bir `AYRI` geçerli birleşmeyi engellemez; bayat açık talep hükümsüz
 kalır ve soru kanonik uçlarla tek talep olarak yeniden sorulur, hükümsüz
 talebe karar verilemez, iki ucu aynı kanonik nesneye düşen talep yeniden
-sorulmaz, başka pakete ait bayat talep o paketi de serbest bırakır; `karar_ver`
+sorulmaz, başka pakete ait bayat talep o paketi de cevap gelene kadar bekletir; `karar_ver`
 dört ayrı kesme noktasında (ilk değişiklikten hemen sonrası, birleşim satırı
 yazıldıktan sonrası, uzlaştırma ve servisin son adımı) hiçbir kalıcı değişiklik
 bırakmaz ve çağıranın önceki bağımsız değişikliği korunur, aday çözümlemesi

@@ -24,7 +24,7 @@ açılıp içerik kopyalanmaz. Aşama 4.6'dan beri devam etmenin ek şartı vard
 pakette açık karar talebi kaldıysa devam edilemez (durum açık talep sayısından
 türer, ``mukerrerlik_islemleri``). İptal fiziksel silme değildir: hiçbir aday satır,
 kaynak, okuma, belge ya da arşiv dosyası silinmez; paket ve içeriği
-sorgulanabilir kalır. İptal, paketin açık karar taleplerini terminal
+sorgulanabilir kalır. İptal, başka etkin paketle paylaşılmayan açık talepleri terminal
 ``gecersiz`` duruma geçirir (karar yazılmaz, geçmiş silinmez); böylece aynı
 çift ileride başka bir pakette yeniden değerlendirilebilir. Durum geçişi
 koşullu güncellemedir (``UPDATE ... WHERE durum = eski``): aynı bağlantıda
@@ -127,7 +127,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -151,6 +151,7 @@ from defteriki.cekirdek.mukerrerlik_tablolari import (
     AdayNesneCozumlemesi,
     AdayNesneMukerrerlikSarti,
     KararTalebi,
+    KararTalebiPaketi,
     TalepDurumu,
 )
 from defteriki.cekirdek.tanim_sorgulari import (
@@ -472,7 +473,14 @@ def paketi_devam_et(oturum: Session, paket_id: int) -> IslemPaketi:
     (Aşama 4.6: paket durumu açık talep sayısından türer)."""
     acik = oturum.execute(
         select(KararTalebi.id).where(
-            KararTalebi.islem_paketi_id == paket_id,
+            or_(
+                KararTalebi.islem_paketi_id == paket_id,
+                KararTalebi.id.in_(
+                    select(KararTalebiPaketi.karar_talebi_id).where(
+                        KararTalebiPaketi.islem_paketi_id == paket_id
+                    )
+                ),
+            ),
             KararTalebi.durum == TalepDurumu.ACIK.value,
         )
     ).first()
@@ -488,8 +496,10 @@ def paketi_iptal_et(oturum: Session, paket_id: int, aktor: Aktor) -> IslemPaketi
     """``calisiyor`` ya da ``bekliyor`` → ``iptal`` (terminal). Hiçbir satır
     silinmez; paket ve taslak içeriği sorgulanabilir kalır.
 
-    Paketin **açık karar talepleri** aynı işlemde terminal ``gecersiz`` duruma
-    geçer (2026-09-20 incelemesi, bulgu 1). İptal paketin talebine karar
+    Paketin **açık karar talepleri**, başka etkin paketle paylaşılmıyorsa,
+    aynı işlemde terminal ``gecersiz`` duruma geçer. Ortak soru kalan
+    paketleri bekletir; son etkin paket iptal edilince hükümsüz olur.
+    Paketten bağımsız doğmuş sorular iptalle kapanmaz. İptal paketin talebine karar
     verilemeyeceği için talep açık bırakılsaydı hem paket diriltilemez hem de
     aynı çift bir daha hiçbir pakette değerlendirilemezdi (servis "bu çift
     zaten değerlendirildi" der, veritabanı kısmi benzersiz indeksi yeni açık
@@ -513,14 +523,32 @@ def paketi_iptal_et(oturum: Session, paket_id: int, aktor: Aktor) -> IslemPaketi
 def _acik_talepleri_gecersiz_kil(
     oturum: Session, paket: IslemPaketi, aktor: Aktor
 ) -> list[int]:
-    """İptal edilen paketin açık taleplerini ``gecersiz`` yapar; kimliklerini
-    döndürür. Koşullu güncelleme: eşzamanlı cevaplanan talep etkilenmez."""
+    """Başka etkin paketi kalmayan açık talepleri ``gecersiz`` yapar.
+    Koşullu güncelleme: ortak veya eşzamanlı cevaplanan talep etkilenmez."""
     with _yazma_siniri(oturum):
         kimlikler = list(
             oturum.execute(
                 update(KararTalebi)
                 .where(
-                    KararTalebi.islem_paketi_id == paket.id,
+                    KararTalebi.islem_paketi_id.is_not(None),
+                    or_(
+                        KararTalebi.islem_paketi_id == paket.id,
+                        KararTalebi.id.in_(
+                            select(KararTalebiPaketi.karar_talebi_id).where(
+                                KararTalebiPaketi.islem_paketi_id == paket.id
+                            )
+                        ),
+                    ),
+                    ~select(KararTalebiPaketi.karar_talebi_id)
+                    .join(
+                        IslemPaketi,
+                        IslemPaketi.id == KararTalebiPaketi.islem_paketi_id,
+                    )
+                    .where(
+                        KararTalebiPaketi.karar_talebi_id == KararTalebi.id,
+                        IslemPaketi.durum != PaketDurumu.IPTAL.value,
+                    )
+                    .exists(),
                     KararTalebi.durum == TalepDurumu.ACIK.value,
                 )
                 .values(

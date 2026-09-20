@@ -28,9 +28,11 @@ tanımı bir türe aittir, dolayısıyla farklı türler eşleşmez.
 yazılır; satırın kimliği Aşama 3.4'te doğrulanan ``BEKLIYOR + talep kimliği``
 protokolündeki kalıcı kimliktir. Paket, açık talebi varken ``BEKLIYOR``
 olur; bütün açık talepleri çözülünce ``CALISIYOR``a döner (ilk karar tek
-başına paketi canlandırmaz). ``IPTAL`` terminaldir: iptal paketin talebine
-karar verilmez, paket diriltilmez; paketin açık talepleri iptal anında
-terminal ``GECERSIZ`` duruma geçer (``taslak_islemleri.paketi_iptal_et``).
+başına paketi canlandırmaz). Bir talep ``KararTalebiPaketi`` üzerinden birden
+fazla paketi bekletebilir. ``IPTAL`` terminaldir: paket diriltilmez; açık
+talep ancak onu bekleyen başka etkin paket kalmadığında ``GECERSIZ`` olur
+(``taslak_islemleri.paketi_iptal_et``). Ortak soruya kalan paket adına karar
+verilebilir; açılış paketi tarihsel bilgi olarak değişmez.
 ``GECERSIZ`` bir ``AYRI`` kararı değildir — ``karar`` boş kalır, satır
 geçmişte durur — ama açık talep sayılmaz: aynı çift başka bir pakette yeniden
 değerlendirilebilir, yoksa iptal edilen bir paket o çifti sonsuza kadar
@@ -90,13 +92,16 @@ kural hizmet eder:
   bütün üyeleri (önceki birleşmelerle katılanlar dahil) karşılaştırılır;
   herhangi iki üye arasında kullanıcının verdiği bir ``AYRI`` varsa birleşme
   ``KararCelismesi`` ile reddedilir ve hiçbir kalıcı değişiklik kalmaz. Eski
-  karar silinmez, değiştirilmez; çelişkiyi çekirdek çözmez.
+  karar silinmez, değiştirilmez; çelişkiyi çekirdek çözmez. Çözümlenmiş
+  adayların AYRI kararları da iki kümenin karşılaştırmasına katılır; adayın
+  ilk çözümlemesi ayrıca kendi tarihsel AYRI kararlarıyla denetlenir.
 * *Bayat talep kalmaz.* Birleşen nesneyi gösteren açık kesin çift talepleri
   terminal ``GECERSIZ`` olur ve soru, hâlâ geçerliyse, aynı işlem içinde
   zincirleme denetimle kanonik uçlarla yeniden açılır: ne kalıcı bekleme, ne
   mükerrer karar, ne benzersizlik ihlali. İki ucu aynı kanonik nesneye düşen
-  talep yeniden sorulmaz. Aday talepleri bu uzlaştırmaya girmez; kesin uçları
-  zaten karar anında kanonik nesneye çözülür.
+  talep yeniden sorulmaz. Eski talebin bütün etkin paket bağları yeni tek
+  soruya taşınır. Aday zaten talebin kanonik hedefine çözümlüyse aday talebi
+  de GECERSIZ olur; kullanıcı adına yeni karar üretilmez.
 * *Birleşim zinciri kurulmaz.* ``nesne_birlesimi.hedef_nesne_id`` kullanıcının
   o günkü kararıdır ve değişmez; ``kanonik_nesne_id`` ise bugünkü kanonik
   nesnedir. Hedef sonradan başka bir nesneye birleşirse eski satırların
@@ -152,6 +157,7 @@ from defteriki.cekirdek.mukerrerlik_tablolari import (
     AdayNesneMukerrerlikSarti,
     Karar,
     KararTalebi,
+    KararTalebiPaketi,
     NesneBirlesimi,
     NesneMukerrerlikSarti,
     TalepDurumu,
@@ -235,7 +241,7 @@ class KararSonucu:
     birlesim: NesneBirlesimi | None = None
     devir: DevirOzeti | None = None
     yeni_talepler: tuple[KararTalebi, ...] = field(default_factory=tuple)
-    """Zincirleme denetimin açtığı yeni talepler."""
+    """Zincirleme denetimin açtığı veya kanonik uzlaştırmanın bağladığı talepler."""
     gecersiz_kalan_talepler: tuple[KararTalebi, ...] = field(default_factory=tuple)
     """Birleşme yüzünden uçları kanonik olmaktan çıktığı için hükümsüz kalan
     açık talepler; karar taşımazlar, geçmişte dururlar."""
@@ -298,7 +304,16 @@ def talepleri_listele(
     """Karar talepleri, kimlik sırasıyla (deterministik)."""
     sorgu = select(KararTalebi).order_by(KararTalebi.id)
     if islem_paketi_id is not None:
-        sorgu = sorgu.where(KararTalebi.islem_paketi_id == islem_paketi_id)
+        sorgu = sorgu.where(
+            or_(
+                KararTalebi.islem_paketi_id == islem_paketi_id,
+                KararTalebi.id.in_(
+                    select(KararTalebiPaketi.karar_talebi_id).where(
+                        KararTalebiPaketi.islem_paketi_id == islem_paketi_id
+                    )
+                ),
+            )
+        )
     if durum is not None:
         sorgu = sorgu.where(KararTalebi.durum == TalepDurumu(durum).value)
     return list(oturum.execute(sorgu).scalars())
@@ -384,7 +399,14 @@ def _acik_talep_sayisi(oturum: Session, islem_paketi_id: int) -> int:
             select(func.count())
             .select_from(KararTalebi)
             .where(
-                KararTalebi.islem_paketi_id == islem_paketi_id,
+                or_(
+                    KararTalebi.islem_paketi_id == islem_paketi_id,
+                    KararTalebi.id.in_(
+                        select(KararTalebiPaketi.karar_talebi_id).where(
+                            KararTalebiPaketi.islem_paketi_id == islem_paketi_id
+                        )
+                    ),
+                ),
                 KararTalebi.durum == TalepDurumu.ACIK.value,
             )
         ).scalar_one()
@@ -638,13 +660,49 @@ def _eslesen_nesneler(
     return eslesmeler
 
 
-def _talep_var_mi(
+def _talebin_paketleri(oturum: Session, talep: KararTalebi) -> set[int]:
+    paketler = set(
+        oturum.scalars(
+            select(KararTalebiPaketi.islem_paketi_id).where(
+                KararTalebiPaketi.karar_talebi_id == talep.id
+            )
+        )
+    )
+    if talep.islem_paketi_id is not None:
+        paketler.add(talep.islem_paketi_id)
+    return paketler
+
+
+def _talebi_pakete_bagla(
+    oturum: Session, talep: KararTalebi, paket_id: int, aktor: Aktor
+) -> None:
+    paket = paket_getir(oturum, paket_id)
+    if paket.durum == PaketDurumu.IPTAL.value:
+        return
+    if oturum.get(KararTalebiPaketi, (talep.id, paket_id)) is not None:
+        return
+    with _yazma_siniri(oturum):
+        oturum.add(
+            KararTalebiPaketi(karar_talebi_id=talep.id, islem_paketi_id=paket_id)
+        )
+        oturum.flush()
+        olay_yaz(
+            oturum,
+            DenetimOlayi.KARAR_TALEBI_ACILDI,
+            aktor,
+            islem_paketi_id=paket_id,
+            karar_talebi_id=talep.id,
+            gerekce="mevcut ortak karar talebine paket bağlandı",
+        )
+
+
+def _cift_talebi(
     oturum: Session,
     *,
     hedef_nesne_id: int,
     aday_nesne_id: int | None = None,
     kaynak_nesne_id: int | None = None,
-) -> bool:
+) -> KararTalebi | None:
     """Bu çift için (açık ya da çözülmüş) talep var mı? Çözülmüş "ayrı" kararı
     aynı çifti yeniden durdurmaz; açık talep ikinci kez açılmaz.
 
@@ -652,15 +710,26 @@ def _talep_var_mi(
     bir talep kullanıcı kararı taşımaz, dolayısıyla aynı çiftin başka bir
     pakette değerlendirilmesini engelleyemez.
     """
-    sorgu = select(KararTalebi.id).where(
-        KararTalebi.hedef_nesne_id == hedef_nesne_id,
+    hedefler = _kimlik_gecmisi_idleri(oturum, hedef_nesne_id)
+    sorgu = select(KararTalebi).where(
         KararTalebi.durum != TalepDurumu.GECERSIZ.value,
     )
     if aday_nesne_id is not None:
-        sorgu = sorgu.where(KararTalebi.aday_nesne_id == aday_nesne_id)
+        sorgu = sorgu.where(
+            KararTalebi.aday_nesne_id == aday_nesne_id,
+            KararTalebi.hedef_nesne_id.in_(hedefler),
+        )
     else:
-        sorgu = sorgu.where(KararTalebi.kaynak_nesne_id == kaynak_nesne_id)
-    return oturum.execute(sorgu).first() is not None
+        assert kaynak_nesne_id is not None
+        sorgu = sorgu.where(
+            KararTalebi.hedef_nesne_id == hedef_nesne_id,
+            KararTalebi.kaynak_nesne_id == kaynak_nesne_id,
+        )
+    return oturum.scalars(
+        sorgu.order_by(
+            (KararTalebi.durum == TalepDurumu.ACIK.value).desc(), KararTalebi.id
+        )
+    ).first()
 
 
 def _talep_ac(
@@ -694,6 +763,13 @@ def _talep_ac(
         )
         oturum.add(talep)
         oturum.flush()
+        if islem_paketi_id is not None:
+            oturum.add(
+                KararTalebiPaketi(
+                    karar_talebi_id=talep.id, islem_paketi_id=islem_paketi_id
+                )
+            )
+            oturum.flush()
         for olay in (
             DenetimOlayi.MUKERRERLIK_SUPHESI_ACILDI,
             DenetimOlayi.KARAR_TALEBI_ACILDI,
@@ -732,7 +808,7 @@ def adayi_denetle(
         aday.nesne_turu_id,
         _aday_degerleri(oturum, aday.id),
         {s.ozellik_tanimi_id for s in aday_sartlarini_listele(oturum, aday.id)},
-        haric=set(),
+        haric={cozum} if (cozum := adayin_kesin_nesnesi(oturum, aday.id)) else set(),
     )
     talepler = [
         _talep_ac(
@@ -745,7 +821,7 @@ def adayi_denetle(
             aday_nesne_id=aday.id,
         )
         for nesne_id in sorted(eslesmeler)
-        if not _talep_var_mi(oturum, hedef_nesne_id=nesne_id, aday_nesne_id=aday.id)
+        if _cift_talebi(oturum, hedef_nesne_id=nesne_id, aday_nesne_id=aday.id) is None
     ]
     _paket_durumunu_esitle(oturum, paket.id, aktor)
     return talepler
@@ -763,6 +839,10 @@ def nesneyi_denetle(
     ``AYNI`` kararında korunur. Birleştirilmiş nesneler taramaya girmez.
     """
     nesne = nesne_getir(oturum, nesne_id)
+    if islem_paketi_id is not None:
+        paket = paket_getir(oturum, islem_paketi_id)
+        if paket.durum == PaketDurumu.IPTAL.value:
+            raise PaketDurumuGecersiz(f"işlem paketi {paket.id} iptal; taranamaz.")
     if nesne_birlesimini_bul(oturum, nesne.id) is not None:
         return []
     kimlik_idleri = _kimlik_gecmisi_idleri(oturum, nesne.id)
@@ -776,7 +856,12 @@ def nesneyi_denetle(
     talepler: list[KararTalebi] = []
     for karsi_id in sorted(eslesmeler):
         hedef_id, kaynak_id = min(nesne.id, karsi_id), max(nesne.id, karsi_id)
-        if _talep_var_mi(oturum, hedef_nesne_id=hedef_id, kaynak_nesne_id=kaynak_id):
+        mevcut = _cift_talebi(
+            oturum, hedef_nesne_id=hedef_id, kaynak_nesne_id=kaynak_id
+        )
+        if mevcut is not None:
+            if mevcut.durum == TalepDurumu.ACIK.value and islem_paketi_id is not None:
+                _talebi_pakete_bagla(oturum, mevcut, islem_paketi_id, aktor)
             continue
         talepler.append(
             _talep_ac(
@@ -878,10 +963,17 @@ def karar_ver(
     if paket_id is not None:
         paket = paket_getir(oturum, paket_id)
         if paket.durum == PaketDurumu.IPTAL.value:
-            raise PaketDurumuGecersiz(
-                f"işlem paketi {paket.id} iptal (terminal); talebine karar "
-                "verilmez ve paket diriltilmez."
+            etkinler = sorted(
+                p
+                for p in _talebin_paketleri(oturum, talep)
+                if paket_getir(oturum, p).durum != PaketDurumu.IPTAL.value
             )
+            if not etkinler:
+                raise PaketDurumuGecersiz(
+                    f"işlem paketi {paket.id} iptal (terminal); talebine karar "
+                    "verilmez ve paket diriltilmez."
+                )
+            paket_id = etkinler[0]
     with _yazma_siniri(oturum):  # dış SAVEPOINT: ya hepsi ya hiçbiri
         return _karari_uygula(oturum, talep, karar, aktor, gerekce, paket_id)
 
@@ -912,6 +1004,11 @@ def _karari_uygula(
         )
         return KararSonucu(talep=talep, cozuldu=False, paket_durumu=durum)
 
+    if karar is Karar.AYRI and talep.aday_nesne_id is not None:
+        if adayin_kesin_nesnesi(oturum, talep.aday_nesne_id) == kanonik_nesneyi_bul(
+            oturum, talep.hedef_nesne_id
+        ):
+            raise KararCelismesi("Aday zaten bu kanonik nesneye çözümlü; ayrı olamaz.")
     _talebi_kapat(oturum, talep, karar, aktor, gerekce)
     olay_yaz(
         oturum,
@@ -954,13 +1051,29 @@ def _karari_uygula(
             _zincirleme_denetle(oturum, talep.hedef_nesne_id, paket_id, aktor)
         )
 
-    gecersiz = () if birlestirme is None else birlestirme.gecersiz_talepler
-    # Hükümsüz kalan talep başka bir pakete aitse o paket de artık beklemiyor
-    # olabilir; durum açık talep sayısından türediği için hepsi eşitlenir.
-    for diger_paket_id in sorted(
-        {t.islem_paketi_id for t in gecersiz if t.islem_paketi_id is not None}
-        - {paket_id}
-    ):
+    gecersiz = list(() if birlestirme is None else birlestirme.gecersiz_talepler)
+    if karar is Karar.AYNI:
+        gecersiz.extend(_cozulmus_aday_taleplerini_kapat(oturum, talep, aktor))
+    etkilenen = _talebin_paketleri(oturum, talep)
+    if birlestirme is not None:
+        for p in sorted(etkilenen - {paket_id}):
+            if paket_getir(oturum, p).durum != PaketDurumu.IPTAL.value:
+                yeni_talepler += tuple(
+                    _zincirleme_denetle(
+                        oturum, birlestirme.birlesim.hedef_nesne_id, p, aktor
+                    )
+                )
+    for eski in gecersiz:
+        paketler = _talebin_paketleri(oturum, eski)
+        etkilenen.update(paketler)
+        if eski.kaynak_nesne_id is not None:
+            yeni = _kanonik_soruyu_koru(oturum, eski, aktor)
+            if yeni is not None:
+                if yeni.id not in {t.id for t in yeni_talepler}:
+                    yeni_talepler += (yeni,)
+                for p in sorted(paketler):
+                    _talebi_pakete_bagla(oturum, yeni, p, aktor)
+    for diger_paket_id in sorted(etkilenen - {paket_id}):
         _paket_durumunu_esitle(oturum, diger_paket_id, aktor)
     durum = (
         None if paket_id is None else _paket_durumunu_esitle(oturum, paket_id, aktor)
@@ -973,7 +1086,7 @@ def _karari_uygula(
         birlesim=None if birlestirme is None else birlestirme.birlesim,
         devir=None if birlestirme is None else birlestirme.devir,
         yeni_talepler=yeni_talepler,
-        gecersiz_kalan_talepler=gecersiz,
+        gecersiz_kalan_talepler=tuple(gecersiz),
     )
 
 
@@ -1055,19 +1168,26 @@ def _ayri_karari(
     yazdıysa o yazılmıştır, iki yön de aranır.
     """
     bu, karsi = sorted(set(kume)), sorted(set(karsi_kume))
+    # Adayın kesin çözümlemesi de kimliğin parçasıdır. AYRI satırındaki
+    # kaynak NULL olsa bile adayın çözümlendiği nesne karşı ucu temsil eder.
+    kaynak = func.coalesce(KararTalebi.kaynak_nesne_id, AdayNesneCozumlemesi.nesne_id)
     return (
         oturum.execute(
             select(KararTalebi)
+            .outerjoin(
+                AdayNesneCozumlemesi,
+                AdayNesneCozumlemesi.aday_nesne_id == KararTalebi.aday_nesne_id,
+            )
             .where(
                 KararTalebi.karar == Karar.AYRI.value,
                 or_(
                     and_(
                         KararTalebi.hedef_nesne_id.in_(bu),
-                        KararTalebi.kaynak_nesne_id.in_(karsi),
+                        kaynak.in_(karsi),
                     ),
                     and_(
                         KararTalebi.hedef_nesne_id.in_(karsi),
-                        KararTalebi.kaynak_nesne_id.in_(bu),
+                        kaynak.in_(bu),
                     ),
                 ),
             )
@@ -1105,6 +1225,20 @@ def _adayi_cozumle(
     aday_id = talep.aday_nesne_id
     assert aday_id is not None  # kontrol kısıtı: uçlardan tam biri dolu
     hedef_id = kanonik_nesneyi_bul(oturum, talep.hedef_nesne_id)
+    ayri = oturum.scalars(
+        select(KararTalebi)
+        .where(
+            KararTalebi.aday_nesne_id == aday_id,
+            KararTalebi.karar == Karar.AYRI.value,
+            KararTalebi.hedef_nesne_id.in_(_kimlik_gecmisi_idleri(oturum, hedef_id)),
+        )
+        .order_by(KararTalebi.id)
+    ).first()
+    if ayri is not None:
+        raise KararCelismesi(
+            f"aday {aday_id}, karar talebi {ayri.id} ile bu kimlikten "
+            "ayrı kabul edildi."
+        )
     mevcut = aday_cozumlemesi_bul(oturum, aday_id)
     if mevcut is None:
         with _yazma_siniri(oturum):
@@ -1251,8 +1385,10 @@ def _acik_talepleri_uzlastir(
     hükümsüz kalan talep" demektir (paket iptalinden beri), burada hükümsüzlük
     nedeni farklıdır ve denetim izinin gerekçesinde yazar.
 
-    Aday talepleri bu uzlaştırmaya girmez: onların kesin ucu zaten karar anında
-    ``kanonik_nesneyi_bul`` ile çözülür, bayat kalmazlar.
+    Paket bağları çağıranın ``_kanonik_soruyu_koru`` adımıyla korunur.
+    Çözümlenmiş adayların gereksiz talepleri ayrı olarak
+    ``_cozulmus_aday_taleplerini_kapat`` ile hükümsüz kılınır; çözümlenmemiş
+    adayın kesin ucu karar anında kanonik nesneye çevrilir.
     """
     with _yazma_siniri(oturum):
         satirlar = list(
@@ -1287,6 +1423,72 @@ def _acik_talepleri_uzlastir(
                 ),
             )
     return satirlar
+
+
+def _kanonik_soruyu_koru(
+    oturum: Session, eski: KararTalebi, aktor: Aktor
+) -> KararTalebi | None:
+    """Bayat soruyu, eşleşme şartları sonradan değişse bile, cevapsız düşürme."""
+    assert eski.kaynak_nesne_id is not None
+    kaynak = kanonik_nesneyi_bul(oturum, eski.kaynak_nesne_id)
+    hedef = kanonik_nesneyi_bul(oturum, eski.hedef_nesne_id)
+    if kaynak == hedef:
+        return None
+    hedef, kaynak = min(kaynak, hedef), max(kaynak, hedef)
+    mevcut = _cift_talebi(oturum, hedef_nesne_id=hedef, kaynak_nesne_id=kaynak)
+    if mevcut is not None:
+        return mevcut if mevcut.durum == TalepDurumu.ACIK.value else None
+    return _talep_ac(
+        oturum,
+        aktor,
+        islem_paketi_id=eski.islem_paketi_id,
+        nesne_turu_id=eski.nesne_turu_id,
+        hedef_nesne_id=hedef,
+        kaynak_nesne_id=kaynak,
+        eslesen_ozellik_tanimi_id=eski.eslesen_ozellik_tanimi_id,
+    )
+
+
+def _cozulmus_aday_taleplerini_kapat(
+    oturum: Session, karar_talebi: KararTalebi, aktor: Aktor
+) -> list[KararTalebi]:
+    """Çözümlenmiş adayın kendi kanonik kimliği için tekrar karar bekleme.
+
+    Kullanıcı kararı uydurulmaz: anlamsız kalan soru gerekçeli GECERSIZ olur.
+    Hedef değişmemiş olsa da adayın çözümlemesi birleşmeyle değişmiş olabilir.
+    """
+    talepler = list(
+        oturum.scalars(
+            select(KararTalebi)
+            .join(
+                AdayNesneCozumlemesi,
+                AdayNesneCozumlemesi.aday_nesne_id == KararTalebi.aday_nesne_id,
+            )
+            .where(KararTalebi.durum == TalepDurumu.ACIK.value)
+            .order_by(KararTalebi.id)
+        )
+    )
+    gecersiz: list[KararTalebi] = []
+    for talep in talepler:
+        assert talep.aday_nesne_id is not None
+        if adayin_kesin_nesnesi(oturum, talep.aday_nesne_id) != kanonik_nesneyi_bul(
+            oturum, talep.hedef_nesne_id
+        ):
+            continue
+        talep.durum = TalepDurumu.GECERSIZ.value
+        talep.gecersizlik_zamani = simdi_utc()
+        oturum.flush()
+        olay_yaz(
+            oturum,
+            DenetimOlayi.KARAR_TALEBI_GECERSIZ_KALDI,
+            aktor,
+            islem_paketi_id=talep.islem_paketi_id,
+            karar_talebi_id=talep.id,
+            aday_nesne_id=talep.aday_nesne_id,
+            gerekce=f"karar talebi {karar_talebi.id}: aday zaten aynı kanonik nesne",
+        )
+        gecersiz.append(talep)
+    return gecersiz
 
 
 def _nesneleri_birlestir(

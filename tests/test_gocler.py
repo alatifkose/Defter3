@@ -56,7 +56,7 @@ DEFTERIKI_DEGISKENLERI = (
 )
 BEKLEME_SANIYE = 120
 BASLANGIC_SURUMU = "0001"
-GUNCEL_SURUM = "0009"
+GUNCEL_SURUM = "0010"
 ONAY_SURUMU = "0008"
 TASLAK_SURUMU = "0007"
 BELGE_SURUMU = "0006"
@@ -243,7 +243,11 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 # kısıtında izin verdiğinden kısıt ad taşıyamaz.
                 if tablo != tst.ADAY_NESNE:
                     assert denetci.get_pk_constraint(tablo)["name"] == f"pk_{tablo}"
-                assert denetci.get_pk_constraint(tablo)["constrained_columns"] == ["id"]
+                assert denetci.get_pk_constraint(tablo)["constrained_columns"] == (
+                    ["karar_talebi_id", "islem_paketi_id"]
+                    if tablo == mt.KARAR_TALEBI_PAKETI
+                    else ["id"]
+                )
                 for fk in denetci.get_foreign_keys(tablo):
                     assert str(fk["name"]).startswith(f"fk_{tablo}_"), fk
                     assert fk.get("options", {}).get("ondelete") == "RESTRICT", fk
@@ -334,6 +338,10 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     "fk_karar_talebi_islem_paketi_id_islem_paketi",
                     "fk_karar_talebi_kaynak_nesne_id_nesne_turu_id_nesne",
                 ],
+                "karar_talebi_paketi": [
+                    "fk_karar_talebi_paketi_islem_paketi_id_islem_paketi",
+                    "fk_karar_talebi_paketi_karar_talebi_id_karar_talebi",
+                ],
                 "aday_nesne_cozumlemesi": [
                     "fk_aday_nesne_cozumlemesi_aday_nesne_id_nesne_turu_id_aday_nesne",
                     "fk_aday_nesne_cozumlemesi_karar_talebi_id_karar_talebi",
@@ -411,6 +419,7 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     "uq_aday_nesne_mukerrerlik_sarti_aday_nesne_id_ozellik_tanimi_id",
                 ],
                 "karar_talebi": [],
+                "karar_talebi_paketi": [],
                 "aday_nesne_cozumlemesi": [
                     "uq_aday_nesne_cozumlemesi_aday_nesne_id",
                     "uq_aday_nesne_cozumlemesi_karar_talebi_id",
@@ -442,6 +451,7 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 for tablo in UYGULAMA_TABLOLARI
             }
             assert kontroller == {
+                "karar_talebi_paketi": [],
                 "tanim_paketi": [],
                 "tanim_surumu": [
                     "ck_tanim_surumu_kilitli_ikili",
@@ -517,6 +527,7 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 )
             }
             assert indeksler == {
+                "karar_talebi_paketi": ["ix_karar_talebi_paketi_islem_paketi_id"],
                 "nesne": ["ix_nesne_nesne_turu_id", "ix_nesne_tanim_surumu_id"],
                 "nesne_ozelligi": ["ix_nesne_ozelligi_ozellik_tanimi_id"],
                 "nesne_iliskisi": [
@@ -1795,6 +1806,59 @@ def test_0008_0009_bos_veritabani_dongusu_semayi_degistirmez(
         with v.islem() as oturum:
             assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
             assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+    finally:
+        v.kapat()
+
+
+def test_0010_paket_baglarini_tasir_ve_ortak_bagi_kaybetmez(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    try:
+        goc("0008")
+        with v.islem() as o:
+            for sql in _ONAY_TOHUMU:
+                o.execute(text(sql))
+            o.execute(text("UPDATE karar_talebi SET islem_paketi_id = 1"))
+        goc("0009")
+        with v.islem() as o:
+            once = o.execute(text("SELECT * FROM karar_talebi ORDER BY id")).all()
+        goc("0010")
+        with v.islem() as o:
+            assert (
+                o.execute(text("SELECT * FROM karar_talebi ORDER BY id")).all() == once
+            )
+            assert o.execute(
+                text("SELECT * FROM karar_talebi_paketi ORDER BY karar_talebi_id")
+            ).all() == [(1, 1), (2, 1)]
+        goc("0009", geri=True)  # yalnız eski şemada ifade edilebilen bağlar
+        goc("0010")
+        with v.islem() as o:
+            o.execute(
+                text(
+                    "INSERT INTO islem_paketi (okuma_id, durum, "
+                    "olusturma_zamani, durum_zamani) "
+                    "VALUES (1, 'bekliyor', '2026-09-20', '2026-09-20')"
+                )
+            )
+            o.execute(text("INSERT INTO karar_talebi_paketi VALUES (2, 2)"))
+        with pytest.raises(RuntimeError, match="Ortak karar talebi"):
+            goc("0009", geri=True)
+        assert gocler.sema_surumu(v) == "0010"
+        with v.islem() as o:
+            assert (
+                o.execute(text("SELECT count(*) FROM karar_talebi_paketi")).scalar_one()
+                == 3
+            )
+            assert o.execute(text("PRAGMA foreign_key_check")).all() == []
     finally:
         v.kapat()
 
