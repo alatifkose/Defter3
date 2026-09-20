@@ -47,7 +47,9 @@ kontroldür: kilitsiz sürümün altında kesin nesne olamaz):
   bağlantılar ``en_cok_ust`` sınırını ya da çevrim yasağını ihlal ediyor
   olabilir) **ve** ``en_az_ust > 0`` ise kaynak türün altında kesin nesne
   yoksa (aksi hâlde üstsüz mevcut nesneler bir anda kurala aykırı olurdu);
-* mevcut tanım değiştirilemez ve silinemez (böyle bir işlev yoktur).
+* tanım değiştirme ve silme işlevi yoktur (API düzeyinde koruma; oturuma
+  doğrudan erişen kod ORM alanını değiştirebilir, bu kapsam dışı ve bilinçli
+  sınırdır: MCP ve GUI oturuma değil işlevlere erişir).
 
 Aday (taslak) nesneler sayılmaz; kapalı nesne sayılır. Bozan değişiklik
 gerçekten gerekirse yeni sürüm açılır; ama sürümler arası nesne bağlantısı
@@ -310,12 +312,6 @@ def ozellik_tanimla(
     if type(zorunlu) is not bool:
         raise GecersizTanim(f"özellik {kod!r}: zorunlu bilgisi mantıksal olmalı.")
     tur = nesne_turu_getir(oturum, nesne_turu_id)
-    if zorunlu and _turde_kesin_nesne_var_mi(oturum, tur):
-        raise TanimSurumuKilitli(
-            f"nesne türü {tur.kod!r} altında kesin nesne var; zorunlu özellik "
-            f"{kod!r} eklenemez (mevcut nesneleri geçersiz kılardı), yalnız isteğe "
-            "bağlı özellik eklenebilir."
-        )
     _mukerrer_denetle(
         oturum,
         select(OzellikTanimi.id).where(
@@ -323,6 +319,14 @@ def ozellik_tanimla(
         ),
         f"özellik {kod!r} nesne türü {tur.kod!r} için zaten var.",
     )
+    # Mükerrerlik kilitten önce: var olan özellik ikinci kez verilirse sebep
+    # "zaten var"dır, "kilitli" değil (2026-09-20 incelemesi).
+    if zorunlu and _turde_kesin_nesne_var_mi(oturum, tur):
+        raise TanimSurumuKilitli(
+            f"nesne türü {tur.kod!r} altında kesin nesne var; zorunlu özellik "
+            f"{kod!r} eklenemez (mevcut nesneleri geçersiz kılardı), yalnız isteğe "
+            "bağlı özellik eklenebilir."
+        )
     ozellik = OzellikTanimi(
         nesne_turu_id=tur.id,
         kod=kod,

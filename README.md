@@ -529,8 +529,10 @@ hızlı ön kontroldür; kilitsiz sürümün altında kesin nesne olamaz):
   olabilir) **ve** `en_az_ust > 0` ise kaynak türün altında kesin nesne yoksa
   (yalnız "bağlantı yok" yetmez: 50 raf olup hiç bağlantı olmayabilir,
   `en_az_ust = 1` hepsini bir anda kurala aykırı yapardı);
-* mevcut tanım değiştirilemez ve silinemez (böyle bir işlev yoktur; testle
-  sınanır).
+* tanım değiştirme ve silme işlevi yoktur; test bunu sınar. Bu API
+  düzeyinde korumadır: oturuma doğrudan erişen kod ORM alanını
+  değiştirebilir, bu kapsam dışıdır ve bilinçli sınırdır (MCP ve GUI oturuma
+  değil işlevlere erişir).
 
 Aday (taslak) nesneler sayılmaz. Çapraz sürüm ilişki yasağı aynen durur ve
 sürümler arası nesne taşıma ilk sürümde desteklenmez; bozan değişiklik
@@ -606,7 +608,9 @@ kayıt türü / alanı eklenir ve eski nesne geçerli kalır (okunur, yeni özel
 yazılır, durumu değişir), kullanılan türe zorunlu özellik reddedilir (kapalı
 nesne de sayılır), kullanılan kaynak türe `en_az_ust > 0` kuralı reddedilir
 ama `en_az_ust = 0` eklenir, kesin bağlantısı olan ilişkiye kural eklenemez,
-tanım değiştiren / silen işlev yoktur, yeni sürüm açılır ve kendi
+kullanılan türe zaten var olan zorunlu özellik "kilitli" değil "zaten var"
+ile reddedilir (mükerrerlik denetimi kilitten önce), tanım değiştirme / silme
+API'si yoktur, yeni sürüm açılır ve kendi
 tanımlarını taşır, eski nesnenin anlamı yeni sürümle değişmez.
 
 **Bilinçli kapsam dışı (Aşama 4.3'te yok):** belge ve arşiv, kaynak izi, işlem

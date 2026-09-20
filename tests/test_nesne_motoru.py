@@ -1212,8 +1212,25 @@ def test_kesin_baglantisi_olan_iliskiye_hiyerarsi_kurali_eklenemez(
     assert _sayi(veritabani, tt.HIYERARSI_KURALI) == 3
 
 
-def test_mevcut_tanim_degistirilemez_ve_silinemez() -> None:
-    """Tanım sistemi güncelleme / silme işlevi sunmaz; kural yazılıdır."""
+def test_kullanilan_ture_var_olan_zorunlu_ozellik_mukerrer_sayilir(
+    veritabani: vt.Veritabani, env: Envanter
+) -> None:
+    """Regresyon (2026-09-20): kullanılan türe zaten var olan zorunlu özellik
+    ikinci kez verilirse sebep "zaten var"dır, "kilitli" değil."""
+    _depo(veritabani, env)
+    with pytest.raises(ti.MukerrerTanim, match="'ad'.*zaten var"):
+        with veritabani.islem() as o:
+            ti.ozellik_tanimla(
+                o, env.depo_id, "ad", "Ad", DegerTuru.METIN, zorunlu=True
+            )
+    with veritabani.islem() as o:
+        assert [t.kod for t in ti.ozellik_tanimlarini_listele(o, env.depo_id)] == ["ad"]
+
+
+def test_tanim_degistirme_ve_silme_apisi_yok() -> None:
+    """Tanım sistemi güncelleme / silme işlevi sunmaz. Bu API düzeyinde
+    korumadır: oturuma doğrudan erişen kod ORM alanını değiştirebilir, o
+    kapsam dışıdır (bilinçli sınır)."""
     yasak = ("sil", "guncelle", "degistir", "kaldir")
     assert [
         ad
