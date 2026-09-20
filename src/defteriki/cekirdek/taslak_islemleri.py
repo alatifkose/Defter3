@@ -20,7 +20,9 @@ denetler; yalnız ``calisiyor`` pakette yazılır. ``bekliyor`` paket
 sorgulanır, okunur, devam ettirilir ya da iptal edilir ama içeriği
 değişmez; ``iptal`` paket sorgulanır ve okunur, değiştirilemez, devam
 ettirilemez. Devam edildiğinde aynı paket aynı taslaklarla sürer; yeni paket
-açılıp içerik kopyalanmaz. İptal fiziksel silme değildir: hiçbir aday satır,
+açılıp içerik kopyalanmaz. Aşama 4.6'dan beri devam etmenin ek şartı vardır:
+pakette açık karar talebi kaldıysa devam edilemez (durum açık talep sayısından
+türer, ``mukerrerlik_islemleri``). İptal fiziksel silme değildir: hiçbir aday satır,
 kaynak, okuma, belge ya da arşiv dosyası silinmez; paket ve içeriği
 sorgulanabilir kalır. Durum geçişi koşullu güncellemedir (``UPDATE ... WHERE
 durum = eski``): aynı bağlantıda araya giren başka bir değişiklik satır
@@ -77,10 +79,11 @@ anahtar). Kaynak kimliği JSON içine değil gerçek dış anahtara yazılır. A
 kayıt düzeyinde ve en azından paket (okuma) düzeyindedir.
 
 **Taslak silme.** Çalışan pakette aday nesne, ilişki, kayıt ve bağ
-kaldırılabilir. Aday nesnenin kendi özellikleri onun parçasıdır ve nesneyle
-birlikte silinir; aday nesne bir aday ilişkide ya da kayıt-nesne bağında
-kullanılıyorsa silme açıkça reddedilir (``AdayKullanimda``), sessiz cascade
-yoktur. Aday kaydın kendi kayıt-nesne bağları kaydın ekidir ve kayıtla
+kaldırılabilir. Aday nesnenin kendi özellikleri ve mükerrerlik şartları onun
+parçasıdır ve nesneyle birlikte silinir; aday nesne bir aday ilişkide,
+kayıt-nesne bağında, bir karar talebinde ya da çözümlenmiş durumdaysa (Aşama
+4.6) silme açıkça reddedilir (``AdayKullanimda``), sessiz cascade yoktur.
+Aday kaydın kendi kayıt-nesne bağları kaydın ekidir ve kayıtla
 birlikte silinir; bağlı aday nesneler kalır. Aday özellik, zorunlu olsa da,
 silinebilir (tamlık 4.8'de aranır).
 
@@ -138,6 +141,12 @@ from defteriki.cekirdek.deger_kodlama import (
     DegerKodlamaHatasi,
     degeri_coz,
     degeri_kodla,
+)
+from defteriki.cekirdek.mukerrerlik_tablolari import (
+    AdayNesneCozumlemesi,
+    AdayNesneMukerrerlikSarti,
+    KararTalebi,
+    TalepDurumu,
 )
 from defteriki.cekirdek.tanim_sorgulari import (
     iliski_tanimi_getir,
@@ -454,7 +463,19 @@ def paketi_beklet(oturum: Session, paket_id: int) -> IslemPaketi:
 
 def paketi_devam_et(oturum: Session, paket_id: int) -> IslemPaketi:
     """``bekliyor → calisiyor``: aynı paket, aynı taslaklarla sürer.
-    ``iptal`` paket yeniden açılamaz."""
+    ``iptal`` paket yeniden açılamaz; açık karar talebi varken devam edilemez
+    (Aşama 4.6: paket durumu açık talep sayısından türer)."""
+    acik = oturum.execute(
+        select(KararTalebi.id).where(
+            KararTalebi.islem_paketi_id == paket_id,
+            KararTalebi.durum == TalepDurumu.ACIK.value,
+        )
+    ).first()
+    if acik is not None:
+        raise PaketDurumuGecersiz(
+            f"işlem paketi {paket_id}: açık karar talebi var; bütün talepler "
+            "çözülmeden devam edilemez."
+        )
     return _durumu_degistir(oturum, paket_id, PaketDurumu.CALISIYOR)
 
 
@@ -560,9 +581,9 @@ def aday_nesne_ekle(
 
 
 def aday_nesne_sil(oturum: Session, aday_nesne_id: int) -> None:
-    """Aday nesneyi kendi özellikleriyle birlikte kaldırır. Bir aday ilişkide
-    ya da kayıt-nesne bağında kullanılıyorsa ``AdayKullanimda``; sessiz
-    cascade yoktur."""
+    """Aday nesneyi kendi özellikleri ve mükerrerlik şartlarıyla birlikte
+    kaldırır. Bir aday ilişkide, kayıt-nesne bağında, karar talebinde ya da
+    çözümlenmiş durumdaysa ``AdayKullanimda``; sessiz cascade yoktur."""
     aday = aday_nesne_getir(oturum, aday_nesne_id)
     _yazilabilir_paket(oturum, aday.islem_paketi_id)
     iliski = oturum.execute(
@@ -582,11 +603,34 @@ def aday_nesne_sil(oturum: Session, aday_nesne_id: int) -> None:
         raise AdayKullanimda(
             f"aday nesne {aday.id} aday kayda bağlı; önce bağ çözülür."
         )
+    talep = oturum.execute(
+        select(KararTalebi.id).where(KararTalebi.aday_nesne_id == aday.id)
+    ).first()
+    if talep is not None:
+        raise AdayKullanimda(
+            f"aday nesne {aday.id} bir karar talebine konu; mükerrerlik kaydı "
+            "duruyorken silinemez."
+        )
+    cozumleme = oturum.execute(
+        select(AdayNesneCozumlemesi.id).where(
+            AdayNesneCozumlemesi.aday_nesne_id == aday.id
+        )
+    ).first()
+    if cozumleme is not None:
+        raise AdayKullanimda(
+            f"aday nesne {aday.id} mevcut bir nesneye çözümlenmiş; silinemez."
+        )
     with _yazma_siniri(oturum):
         for ozellik in oturum.execute(
             select(AdayNesneOzelligi).where(AdayNesneOzelligi.aday_nesne_id == aday.id)
         ).scalars():
             oturum.delete(ozellik)
+        for sart in oturum.execute(
+            select(AdayNesneMukerrerlikSarti).where(
+                AdayNesneMukerrerlikSarti.aday_nesne_id == aday.id
+            )
+        ).scalars():
+            oturum.delete(sart)
         oturum.flush()
         oturum.delete(aday)
         oturum.flush()

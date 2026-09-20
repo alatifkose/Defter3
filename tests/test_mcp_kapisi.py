@@ -117,7 +117,7 @@ def test_sistem_durumu_goc_uygulanmis_veritabaninin_gercek_surumunu_verir(
 
     durum = mcp_kapisi.sistem_durumu(ayarlar)
 
-    assert durum.sema_surumu == "0007" == gocler.beklenen_sema_surumu()
+    assert durum.sema_surumu == gocler.beklenen_sema_surumu()
     metin = json.dumps(dataclasses.asdict(durum), ensure_ascii=False)
     assert str(test_koku) not in metin and "DEFTERIKI_" not in metin
 
@@ -303,7 +303,7 @@ def test_stdio_sistem_durumu_goc_uygulanmis_veritabaninin_surumunu_verir(
 
     assert sonuc.cikis_kodu == 0, sonuc.stderr
     cagri = sonuc.yanitlar[3]["result"]
-    assert cagri["structuredContent"]["sema_surumu"] == "0007"
+    assert cagri["structuredContent"]["sema_surumu"] == gocler.beklenen_sema_surumu()
     assert all(str(test_koku) not in satir for satir in sonuc.stdout_satirlari)
 
 

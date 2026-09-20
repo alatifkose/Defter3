@@ -51,6 +51,18 @@ Sözleşmeler:
   üzerinden, üst bağlantılarını izleyerek yapılır.
 * **Yaşam durumu**: ``etkin`` / ``kapali``; geçiş yalnız
   ``yasam_durumunu_degistir`` ile ve hiyerarşi kurallarını bozamaz.
+* **İlişki devri** (``iliskileri_devret``, Aşama 4.6): bir nesnenin bütün
+  ilişkileri başka bir nesneye taşınır. İkinci bir ilişki motoru değildir:
+  taşıma aynı ``_iliski_yaz`` doğrulamalarından (tür, sürüm, mükerrerlik,
+  üst durumu, en çok üst, çevrim) geçer ve sonunda hedefin ve üstü değişen
+  çocukların en az üst kuralı yeniden doğrulanır. Tek fark, adım adım değil
+  **son durum** doğrulanmasıdır: bütün satırlar önce kaldırılır, sonra
+  yeniden kurulur. Kaynağın kendi en az üst kuralı bilerek aranmaz; devir
+  sonrası kaynak bağımsız bir nesne olmaktan çıkar ve çağıran (Aşama 4.6
+  birleştirmesi) onu ``kapali`` yapıp kalıcı birleşim kaydıyla hedefe bağlar.
+  Hedefe taşınınca kendine dönecek bağlantı (kaynak ↔ hedef arasındaki
+  ilişki) yeniden kurulmaz; aynı ilişki hedefte zaten varsa ikinci satır
+  oluşmaz. Özet sayılarla döner.
 
 Hata modeli (``NesneHatasi`` altında; tanım hataları ``tanim_sorgulari``'ndan
 olduğu gibi gelir):
@@ -142,6 +154,16 @@ class UstBaglanti:
 
     iliski_tanimi_id: int
     hedef_nesne_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class DevirOzeti:
+    """``iliskileri_devret`` sonucu: kaç ilişki taşındı, kaçı hedefte zaten
+    vardı (ikinci satır yazılmadı), kaçı kendine döneceği için düştü."""
+
+    tasinan: int
+    birlesen: int
+    dusen: int
 
 
 # --- değer kodlama --------------------------------------------------------------------
@@ -642,3 +664,74 @@ def iliskileri_listele(oturum: Session, nesne_id: int) -> list[NesneIliskisi]:
             .order_by(NesneIliskisi.id)
         ).scalars()
     )
+
+
+def iliskileri_devret(
+    oturum: Session, kaynak_nesne_id: int, hedef_nesne_id: int
+) -> DevirOzeti:
+    """Kaynağın bütün ilişkilerini hedefe taşır (Aşama 4.6 birleştirmesi).
+
+    İki nesne aynı türde ve aynı tanım sürümünde olmalıdır. Sıra: bütün
+    satırlar kaldırılır → her biri hedef üzerinden ``_iliski_yaz`` ile
+    yeniden kurulur (bütün 4.3 doğrulamaları burada çalışır) → hedefin ve
+    üstü değişen çocukların en az üst kuralı doğrulanır. Kendine dönecek
+    bağlantı düşer, hedefte zaten olan ilişki ikinci kez yazılmaz.
+
+    Her şey tek SAVEPOINT içindedir: herhangi bir doğrulama düşerse hiçbir
+    ilişki taşınmaz, hiçbiri kaybolmaz. Kaynağın kendi en az üst kuralı
+    bilerek aranmaz (modül açıklaması).
+    """
+    kaynak = nesne_getir(oturum, kaynak_nesne_id)
+    hedef = nesne_getir(oturum, hedef_nesne_id)
+    if kaynak.id == hedef.id:
+        raise GecersizIliski("bir nesnenin ilişkileri kendisine devredilemez.")
+    if kaynak.nesne_turu_id != hedef.nesne_turu_id:
+        raise GecersizIliski(
+            f"devir: nesne {kaynak.id} türü {kaynak.nesne_turu_id}, nesne "
+            f"{hedef.id} türü {hedef.nesne_turu_id}; türler aynı olmalı."
+        )
+    if kaynak.tanim_surumu_id != hedef.tanim_surumu_id:
+        raise GecersizIliski(
+            f"devir: nesne {kaynak.id} ve {hedef.id} aynı tanım sürümünde değil "
+            f"({kaynak.tanim_surumu_id}, {hedef.tanim_surumu_id})."
+        )
+    satirlar = list(
+        oturum.execute(
+            select(NesneIliskisi)
+            .where(
+                (NesneIliskisi.kaynak_nesne_id == kaynak.id)
+                | (NesneIliskisi.hedef_nesne_id == kaynak.id)
+            )
+            .order_by(NesneIliskisi.id)
+        ).scalars()
+    )
+    kayitlar = [
+        (s.iliski_tanimi_id, s.kaynak_nesne_id, s.hedef_nesne_id) for s in satirlar
+    ]
+    etkilenen = {k for _, k, h in kayitlar if h == kaynak.id and k != kaynak.id}
+    tasinan = birlesen = dusen = 0
+    with oturum.begin_nested():
+        for satir in satirlar:
+            oturum.delete(satir)
+        oturum.flush()
+        for tanim_id, eski_kaynak, eski_hedef in kayitlar:
+            yeni_kaynak_id = hedef.id if eski_kaynak == kaynak.id else eski_kaynak
+            yeni_hedef_id = hedef.id if eski_hedef == kaynak.id else eski_hedef
+            if yeni_kaynak_id == yeni_hedef_id:
+                dusen += 1
+                continue
+            try:
+                _iliski_yaz(
+                    oturum,
+                    iliski_tanimi_getir(oturum, tanim_id),
+                    nesne_getir(oturum, yeni_kaynak_id),
+                    nesne_getir(oturum, yeni_hedef_id),
+                )
+            except MukerrerIliski:
+                birlesen += 1
+            else:
+                tasinan += 1
+        _cocugu_dogrula(oturum, hedef)
+        for cocuk_id in sorted(etkilenen):
+            _cocugu_dogrula(oturum, nesne_getir(oturum, cocuk_id))
+    return DevirOzeti(tasinan=tasinan, birlesen=birlesen, dusen=dusen)

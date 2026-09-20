@@ -16,6 +16,8 @@ from sqlalchemy import Connection
 from defteriki.ayarlar import ayarlari_yukle
 from defteriki.cekirdek import (
     belge_tablolari,
+    denetim_tablolari,
+    mukerrerlik_tablolari,
     nesne_tablolari,
     tanim_tablolari,
     taslak_tablolari,
@@ -30,6 +32,8 @@ assert set(tanim_tablolari.TANIM_TABLOLARI) <= set(hedef_metadata.tables)
 assert set(nesne_tablolari.NESNE_TABLOLARI) <= set(hedef_metadata.tables)
 assert set(belge_tablolari.BELGE_TABLOLARI) <= set(hedef_metadata.tables)
 assert set(taslak_tablolari.TASLAK_TABLOLARI) <= set(hedef_metadata.tables)
+assert set(mukerrerlik_tablolari.MUKERRERLIK_TABLOLARI) <= set(hedef_metadata.tables)
+assert set(denetim_tablolari.DENETIM_TABLOLARI) <= set(hedef_metadata.tables)
 
 
 def _gocleri_calistir(baglanti: Connection) -> None:

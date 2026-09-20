@@ -20,7 +20,11 @@ kodlaması; kesin ve aday özellik ortak), ``taslak_tablolari`` (işlem paketi,
 aday nesne / özellik / ilişki / kayıt, kayıt-nesne bağı; kesin nesne
 tablolarından fiziksel olarak ayrı) ve ``taslak_islemleri`` (paket yaşam
 döngüsü calisiyor / bekliyor / iptal, taslak yazma, silme, sorgulama;
-"yazmak ≠ kaydetmek", kesin kaydetme yok). Tanımlar veridir; çekirdek hangi
-türlerin var olacağını, ne anlama geldiğini ve bir belgenin ne belgesi
-olduğunu bilmez.
+"yazmak ≠ kaydetmek", kesin kaydetme yok). Aşama 4.6: ``mukerrerlik_tablolari``
+(mükerrerlik şartı, karar talebi, aday çözümlemesi, nesne birleşimi),
+``mukerrerlik_islemleri`` (şart seçimi, iki yönlü tarama, şüphe ve kalıcı
+karar talebi, AYNI / AYRI / KARARSIZ, birleştirme, zincirleme denetim),
+``denetim_tablolari`` ve ``denetim_islemleri`` (aktörlü iş denetim izi;
+teknik günlükten ayrıdır). Tanımlar veridir; çekirdek hangi türlerin var
+olacağını, ne anlama geldiğini ve bir belgenin ne belgesi olduğunu bilmez.
 """
