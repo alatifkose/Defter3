@@ -30,9 +30,9 @@ Bitenler:
 * MCP kapısı iskeleti: `uv run defteriki-mcp`, tek araç `sistem_durumu`
   (`src/defteriki/mcp_kapisi.py`); Cowork ile bağlantı, dosya erişimi ve
   çok adımlı protokol gerçek istemciyle ölçüldü
-* Mimari sınır: `src/defteriki/cekirdek/` ve `src/defteriki/finans/`
-  paketleri (henüz boş) ve bağımlılık yönünü koruyan AST testi
-  (`tests/test_mimari_sinir.py`)
+* Mimari sınır: `src/defteriki/cekirdek/` (Aşama 4.1'den beri dolu) ve
+  `src/defteriki/finans/` (henüz boş) paketleri ve bağımlılık yönünü koruyan
+  AST testi (`tests/test_mimari_sinir.py`)
 * İnceleme düzeltmeleri (2026-09-18): SDK günlüğü gizlilik kuralına bağlandı
   ("Teknik hata günlüğü"), mimari sınır denetimi genişletildi, başlangıç
   testleri gelen dizini değişkenini temizler, test ortamı yol sınırı fiziksel
@@ -1242,6 +1242,51 @@ motoru" bölümü). Bütün finans tanımları silinip yerine envanter gibi baş
 bir alanın tanımları konsa çekirdek kaynak kodu değişmez; nötr `ENVANTER`
 testleri bunun kanıtıdır. `finans/` hâlâ boştur (`__init__.py` yalnız
 docstring taşır). Eski hattan modül taşınmamış, iş modeli yazılmamıştır.
+
+## Bilinen teknik borç
+
+2026-09-19 incelemesinde tespit edildi; kararla ertelendi. Bu bölüm borç
+kapanınca silinir.
+
+**1. Göç kaynakları kaynak dizini düzenine bağlı; paketlenmiş uygulamada
+çalışmaz.** Üç yer birlikte bu varsayımı taşır:
+
+* `src/defteriki/cekirdek/gocler.py`: `PROJE_KOKU = Path(__file__).resolve().parents[3]`
+  ile `alembic.ini` ve `alembic/` dizini modül konumundan üç klasör yukarıda
+  aranır; bu yalnız düzenlenebilir (editable) kaynak kurulumunda doğrudur.
+* `alembic.ini` içindeki `prepend_sys_path = src`: paketi kaynak ağacından
+  yükler.
+* Depo kökündeki `alembic/env.py` ve `alembic/versions/`: kurulu paketin
+  parçası değildir.
+
+Yürütme planındaki Windows masaüstü paketi ve "önceki sürümden yükseltme"
+adımında `parents[3]` yanlış yere düşer ve şema yükseltme çalışmaz. Hedef
+çözüm (paketleme aşamasından önce, kod o zaman yazılır): göç betikleri
+`src/defteriki/` altında paket kaynağı olarak dağıtılır; yol `importlib.resources`
+ya da paketleme biçimine uygun eşdeğer mekanizmayla, dizin varsayımı
+olmadan bulunur; `alembic.ini` gerekliliği kalkar, yapılandırma programda
+üretilir; şema yükseltmesi uygulamanın kendi komutuyla yapılır (örneğin
+`defteriki sema-yukselt`). Korunacak karar: şema yükseltmesi uygulama
+başlangıcında otomatik yapılmaz, açık bir işlem olarak çalıştırılır.
+`uv run alembic upgrade head` biçiminin aynen korunması ürün gereksinimi
+değildir.
+
+**2. Eşzamanlı yazma eşlemesi yalnız taslak modülünde.** SQLite iki bağlantı
+aynı anda yazmaya kalkınca birini durdurur; bu güvence her modülde geçerlidir.
+Ama yalnız `taslak_islemleri` bu ham hatayı (`database is locked` / `busy`,
+yarışan benzersizlik ihlali) `TaslakYazmaCakismasi` gibi anlamlı hataya
+çevirir ve `belge_al` kendi içinde yeniden dener; tanım, nesne ve okuma
+servisleri ham `OperationalError` / `IntegrityError` yükseltir (örnek: iki
+bağlantı aynı belgede `okuma_baslat` çağırırsa ikisi de aynı sürüm numarasını
+hesaplar, ikincisi benzersizlik hatası alır; ekleme-yalnız kilit sayımı ile
+ilk nesne yazımı yarışırsa biri kilit hatası alır). Tek kullanıcılı
+masaüstünde kabul edilir. Çok istemci (GUI açıkken Cowork yazıyor) ya da çok
+kullanıcı gündeme gelince taslak modülündeki yazma sınırı kalıbı
+(`_yazma_siniri`) diğer modüllere yayılır ve yeniden deneme noktası çağıranda
+(MCP aracı, GUI) kurulur. Çok kullanıcı duruşu (2026-09-19): bugün ek mimari
+kurulmaz; SQLite'a özgü SQL (`typeof`, `json_valid` gibi) şema ve göç
+sınırında kalır, servis katmanına yayılmaz; Aşama 4.6 denetim izine "kim
+yaptı" (aktör) alanı baştan konur.
 
 ## Kurulum
 
