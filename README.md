@@ -19,7 +19,8 @@ veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de, Aşama 4.
 mükerrerlik) 2026-09-20'de bitti; 4.6'nın bağımsız inceleme bulguları aynı gün
 üçüncü tur düzeltmeleriyle tamamlandı (göç `0010`, "Aday kararları ve ortak
 paket beklemesi"; dördüncü tur göç `0011`, "Bağımsız köken ve tarama
-atomikliği"). Aşama 4.7 (kesin kayıt)
+atomikliği"; beşinci tur şemaya dokunmadan, "Köken devri, toplu tarama ve
+şart kapıları"). Aşama 4.7 (kesin kayıt)
 sırada.
 Bitenler:
 
@@ -86,6 +87,14 @@ Bitenler:
   birleşen nesnenin kimlik geçmişi mükerrerlik korumasından düşmez, aday
   kimlikleri yeniden dağıtılmaz (`AUTOINCREMENT`) ("Karar kaynağı, iptal ve
   kanonik kimlik")
+* Aşama 4.6 beşinci inceleme turu (2026-09-20, şema değişmedi): bağımsız köken
+  zincirleme denetimin açtığı sorulara da devredilir (sonuç artık paket
+  iptalinin sırasına bağlı değil), `paketin_adaylarini_denetle` tek dış
+  SAVEPOINT altına alındı ve `bekleyen_paketler` ile birlikte ilk kez
+  sınandı, aday şartı taslak yazma kapısından geçer
+  (`taslak_islemleri.yazilabilir_paket` açıldı), mükerrerlik şartı yalnız
+  kanonik nesneye seçilir (`NesneBirlesmis`) — böylece iki yönlü tarama sözü
+  birleşmeden sonra da tutulur ("Köken devri, toplu tarama ve şart kapıları")
 * Aşama 4.6 ikinci inceleme turu (2026-09-20, şema değişmedi): geçmiş `AYRI`
   kararları kimlikler birleşmelerle değişse de korunur (iki kanonik kümenin
   bütün üyeleri denetlenir), birleşmeden sonra bayat kalan açık talepler
@@ -1610,6 +1619,61 @@ bağlanır, yani ortak soru etkin paketleri bekletmeye devam eder; etkilenen
 paket durumları aynı işlemde eşitlenir. Kanonikleri ayrı olan sorular
 dokunulmadan açık kalır.
 
+### Köken devri, toplu tarama ve şart kapıları
+
+Beşinci inceleme turu (2026-09-20, şema değişmedi). Dört davranış düzeltildi;
+önceki turların güvenceleri korundu. Hiçbiri göç gerektirmedi: hepsi servis
+sözleşmesi düzeyinde.
+
+**Bağımsız köken bir kuşak sonra düşmüyor.** Dördüncü tur kökeni kanonik
+halefe taşıyordu ama birleşmeden **doğan** sorulara devretmiyordu. Bağımsız
+kökenli bir soruya `AYNI` denince zincirleme denetim alt seviyede yeni soru
+açıyor, bu soru pakete ait sayılıyor ve paket iptal edilince cevapsız
+`gecersiz` oluyordu. Sonuç iptalin sırasına bağlıydı: karardan **sonra** iptal
+edilirse alt soru düşüyor, karardan **önce** iptal edilirse (`karar_ver`
+paketsiz karara düştüğü için) bağımsız doğup açık kalıyordu — aynı soru, aynı
+karar, iki farklı sonuç. `_zincirleme_denetle` artık kararın verildiği
+sorunun kökenini kendi açtığı taleplere devreder (`_kokeni_devret`); mevcut
+bir soruya yalnız paket bağı eklemek (`_talebi_pakete_bagla`) kökenini
+değiştirmez ve halefin tarihsel açılış paketi korunur. Test iki sırayı da
+sınar.
+
+**Toplu aday taraması da tek dış SAVEPOINT altında.** Dördüncü tur
+`adayi_denetle` ve `nesneyi_denetle`yi atomik yapmıştı; onları çağıran
+`paketin_adaylarini_denetle` sınır almamıştı. İkinci aday taranırken hata
+çıkarsa ilk adayın talepleri, denetim izleri ve paketin `bekliyor` durumu,
+çağıran hatayı yutup dış işlemi commit ettiğinde kalıcı oluyordu. Artık ya
+bütün adaylar taranır ya hiçbiri. Bu işlev ve `bekleyen_paketler` o güne
+kadar hiç sınanmamıştı; ikisinin de testi var.
+
+**Aday şartı taslak yazma kapısından geçer.** Aday nesnenin mükerrerlik şartı
+aday veridir — aday nesneyle birlikte silinir — ama `aday_sarti_ekle` paket
+durumunu denetlemiyordu; `bekliyor` ve terminal `iptal` pakete kalıcı şart
+satırı yazılabiliyordu ve şart kaldırma işlevi olmadığı için satır orada
+kalırdı. Denetim artık taslak modülünün tek kapısından alınır: bu yüzden
+`_yazilabilir_paket` `yazilabilir_paket` adıyla açıldı; kuralın ikinci bir
+kopyası yazılmadı.
+
+**Şart yalnız kanonik nesneye seçilir.** `nesne_sarti_ekle` birleşmiş
+(kanonik olmayan, `kapali`) bir nesneye şart yazabiliyordu ve sonuç tek yönlü
+bir koruma oluyordu: taranan uç kendi kimlik geçmişinin şartlarını kullanır
+(`_kimlik_sartlari`), ama karşı ucun şartı `_eslesen_nesneler` içinde kanonik
+nesne üzerinden aranır. Şart birleşmiş nesnede kalınca kanonik nesne
+tarandığında şüphe doğuyor, yeni gelen nesne tarandığında doğmuyordu — yani
+"iki yönlü tarama" sözü, korumanın en çok gerektiği yönde tutulmuyordu.
+Birleşme sırasında kaynağın şartları hedefe kopyalandığından birleşmeden
+**önce** seçilen şartlar bundan etkilenmiyordu; sorun yalnız birleşmeden sonra
+eklemekti. Artık `NesneBirlesmis` ile reddedilir ve hata kanonik nesnenin
+kimliğini söyler; çekirdek hedefi kendiliğinden değiştirmez, şartı kanonik
+nesneye eklemek çağıranın işidir.
+
+Bilinçli sınır: aynı kökten gelen bir durum düzeltilmedi. `nesne_islemleri`
+birleşmeyi bilmez (mükerrerlik nesne motorunu import eder, tersi yasaktır),
+dolayısıyla `ozellik_yaz` birleşmiş bir nesneye hâlâ yeni değer yazabilir ve o
+değer kanonik nesnenin tarihsel kimliğine katılır. Bunu kapatmak nesne
+motoruna mükerrerlik bilgisi taşımak olurdu; mimari sınır bundan önce gelir.
+Gerekirse kapıyı çağıran katman (MCP aracı, GUI) koyar.
+
 ## Mimari sınır: çekirdek ve finans
 
 Karar (2026-09-18, Abdüllatif). Önceki geliştirme hattında genel mekanik ile
@@ -1733,18 +1797,20 @@ başlangıcında otomatik yapılmaz, açık bir işlem olarak çalıştırılır
 `uv run alembic upgrade head` biçiminin aynen korunması ürün gereksinimi
 değildir.
 
-**2. Eşzamanlı yazma eşlemesi yalnız taslak modülünde.** SQLite iki bağlantı
+**2. Eşzamanlı yazma eşlemesi taslak ve mükerrerlik modüllerinde; tanım, nesne
+ve belge servislerinde yok.** SQLite iki bağlantı
 aynı anda yazmaya kalkınca birini durdurur; bu güvence her modülde geçerlidir.
-Ama yalnız `taslak_islemleri` bu ham hatayı (`database is locked` / `busy`,
-yarışan benzersizlik ihlali) `TaslakYazmaCakismasi` gibi anlamlı hataya
-çevirir ve `belge_al` kendi içinde yeniden dener; tanım, nesne ve okuma
+Ama bu ham hatayı (`database is locked` / `busy`, yarışan benzersizlik ihlali)
+anlamlı bir hataya yalnız `taslak_islemleri` (`TaslakYazmaCakismasi`) ve
+`mukerrerlik_islemleri` (`MukerrerlikYazmaCakismasi`, Aşama 4.6) çevirir;
+`belge_al` kendi içinde yeniden dener. Tanım, nesne ve okuma
 servisleri ham `OperationalError` / `IntegrityError` yükseltir (örnek: iki
 bağlantı aynı belgede `okuma_baslat` çağırırsa ikisi de aynı sürüm numarasını
 hesaplar, ikincisi benzersizlik hatası alır; ekleme-yalnız kilit sayımı ile
 ilk nesne yazımı yarışırsa biri kilit hatası alır). Tek kullanıcılı
 masaüstünde kabul edilir. Çok istemci (GUI açıkken Cowork yazıyor) ya da çok
-kullanıcı gündeme gelince taslak modülündeki yazma sınırı kalıbı
-(`_yazma_siniri`) diğer modüllere yayılır ve yeniden deneme noktası çağıranda
+kullanıcı gündeme gelince aynı yazma sınırı kalıbı
+(`_yazma_siniri`) kalan modüllere de yayılır ve yeniden deneme noktası çağıranda
 (MCP aracı, GUI) kurulur. Çok kullanıcı duruşu (2026-09-19): bugün ek mimari
 kurulmaz; SQLite'a özgü SQL (`typeof`, `json_valid` gibi) şema ve göç
 sınırında kalır, servis katmanına yayılmaz; Aşama 4.6 denetim izine "kim
@@ -2013,8 +2079,8 @@ src/defteriki/    uygulama paketi
     denetim_islemleri.py denetim olayı yazma ve okuma
   finans/         finansal domain; çekirdeği kullanabilir (henüz boş)
 alembic.ini       Alembic yapılandırması (veritabanı adresi yok)
-alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı, 0004 nesne motoru, 0005 kendine dönüş serbest, 0006 belge zinciri, 0007 işlem paketi ve taslak)
-tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı, finansal ad denetimi, taslak / kesin ayrımı; test_nesne_motoru.py: ENVANTER dünyası; test_arsiv.py ve test_belge_zinciri.py: belge zinciri; test_islem_paketi.py: işlem paketi ve taslak)
+alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı, 0004 nesne motoru, 0005 kendine dönüş serbest, 0006 belge zinciri, 0007 işlem paketi ve taslak, 0008 onay ve mükerrerlik, 0009 karar yaşam döngüsü ve kanonik kimlik, 0010 karar talebi paketleri, 0011 bağımsız köken)
+tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı, finansal ad denetimi, taslak / kesin ayrımı; test_nesne_motoru.py: ENVANTER dünyası; test_arsiv.py ve test_belge_zinciri.py: belge zinciri; test_islem_paketi.py: işlem paketi ve taslak; test_mukerrerlik.py: onay ve mükerrerlik; test_gocler.py: göç zinciri ve ORM metadata birebirliği)
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
 kavramlar_sozlugu.md   ortak kavram tanımları; ekleme ve değişiklik yalnız Abdüllatif'in onayıyla

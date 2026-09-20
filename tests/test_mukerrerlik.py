@@ -2851,3 +2851,191 @@ def test_veritabani_butunlugu_akis_sonrasi_temiz(ortam: Ortam, env: Envanter) ->
     with ortam.veritabani.islem() as o:
         assert o.execute(text("PRAGMA foreign_key_check")).all() == []
         assert o.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+
+
+# --- 2026-09-20 beşinci turu: köken devri, toplu tarama, şart kapıları ----------------
+
+
+def _iki_rafli_bagimsiz_soru(ortam: Ortam, env: Envanter) -> tuple[int, int, int, int]:
+    """Paketli ama bağımsız kökenli bir soru ve altında eşleşecek iki raf.
+
+    ``_uc_esit_depo_paketsiz`` + ``_n3_n2_birlestir`` zinciri, tarihsel açılış
+    paketi dolu olduğu hâlde bağımsız kökenli bir halef soru bırakır (üçüncü tur
+    testleri). Raflar birleşmeden **sonra** eklenir ki ilk birleşmenin zincirleme
+    denetimi onları görmesin; eşleşme ikinci karardan doğsun.
+    """
+    n1, n2, n3, _ = _uc_esit_depo_paketsiz(ortam, env)
+    p = _paket(ortam)
+    _n3_n2_birlestir(ortam, env, n2, n3, p)
+    [(halef, kaynak_ucu, hedef_ucu)] = _acik_talepler(ortam)
+    assert (kaynak_ucu, hedef_ucu) == (n2, n1)
+    assert _koken(ortam, halef) == (TalepDurumu.ACIK.value, p, True)
+    r1 = _raf(ortam, env, n1, "A1", seri_no="SN")
+    r2 = _raf(ortam, env, n2, "A2", seri_no="SN")
+    _sart(ortam, r1, ["seri_no"])
+    _sart(ortam, r2, ["seri_no"])
+    return p, halef, r1, r2
+
+
+@pytest.mark.parametrize("once_iptal", [False, True])
+def test_bagimsiz_koken_zincirleme_soruya_da_gecer(
+    ortam: Ortam, env: Envanter, once_iptal: bool
+) -> None:
+    """Bağımsız bir sorunun kararından doğan alt soru da bağımsızdır.
+
+    Devir olmadan sonuç, paketin karardan önce mi sonra mı iptal edildiğine
+    bağlıydı: karardan **sonra** iptalde alt soru pakete ait sayılıp cevapsız
+    ``gecersiz`` oluyor, karardan **önce** iptalde bağımsız doğup açık
+    kalıyordu. Aynı soru, aynı karar, iki farklı sonuç. İki sıra da artık aynı
+    sonucu verir.
+    """
+    p, halef, r1, r2 = _iki_rafli_bagimsiz_soru(ortam, env)
+    if once_iptal:
+        _iptal_et(ortam, p)
+
+    sonuc = _karar(ortam, halef, Karar.AYNI)
+    [alt] = sonuc.yeni_talepler
+    assert (alt.hedef_nesne_id, alt.kaynak_nesne_id) == (min(r1, r2), max(r1, r2))
+
+    if not once_iptal:
+        _iptal_et(ortam, p)
+
+    durum, _acilis, koken = _koken(ortam, alt.id)
+    assert durum == TalepDurumu.ACIK.value
+    assert koken is True
+    assert _karar(ortam, alt.id, Karar.AYRI).cozuldu  # hâlâ cevaplanabilir
+    _butunluk_temiz(ortam)
+
+
+def _iki_adayli_paket(ortam: Ortam, env: Envanter) -> int:
+    """İkisi de mevcut birer kesin nesneyle eşleşen iki adaylı çalışan paket."""
+    for deger in ("X1", "X2"):
+        _sart(ortam, _depo(ortam, env, harici_kimlik=deger), ["harici_kimlik"])
+    paket_id = _paket(ortam)
+    for ad, deger in (("A", "X1"), ("B", "X2")):
+        _aday(
+            ortam,
+            paket_id,
+            env.depo_id,
+            {"ad": ad, "harici_kimlik": deger},
+            ["harici_kimlik"],
+        )
+    return paket_id
+
+
+def test_toplu_aday_taramasi_butun_adaylari_tarar(ortam: Ortam, env: Envanter) -> None:
+    paket_id = _iki_adayli_paket(ortam, env)
+    with ortam.veritabani.islem() as o:
+        talepler = mu.paketin_adaylarini_denetle(o, paket_id, KULLANICI)
+    assert len(talepler) == 2
+    assert _paket_durumu(ortam, paket_id) == BEKLIYOR.value
+    _butunluk_temiz(ortam)
+
+
+def test_toplu_aday_taramasi_duserse_ilk_adayin_yazmalari_da_kalmaz(
+    ortam: Ortam, env: Envanter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tekil tarama üçüncü turda atomik yapılmıştı; onu çağıran toplu işlev
+    değildi. İkinci aday düşerse ilkinin talepleri, denetim izleri ve paketin
+    ``bekliyor`` durumu da kalmaz — çağıran hatayı yutup commit etse bile."""
+    paket_id = _iki_adayli_paket(ortam, env)
+    onceki_olaylar = _olaylar(ortam)
+    gercek = mu.adayi_denetle
+    sayac = 0
+
+    def ikincide_patla(
+        oturum: Session, aday_nesne_id: int, aktor: Aktor
+    ) -> list[mt.KararTalebi]:
+        nonlocal sayac
+        sayac += 1
+        if sayac == 2:
+            raise EnjekteHata("ikinci aday taranırken")
+        return gercek(oturum, aday_nesne_id, aktor)
+
+    with ortam.veritabani.islem() as o:
+        monkeypatch.setattr(mu, "adayi_denetle", ikincide_patla)
+        with pytest.raises(EnjekteHata):
+            mu.paketin_adaylarini_denetle(o, paket_id, KULLANICI)
+        monkeypatch.undo()
+    # dış transaction commit edildi; kalıcı durum yeni oturumdan okunur
+
+    assert sayac == 2
+    assert _sayi(ortam, mt.KARAR_TALEBI) == 0
+    assert _olaylar(ortam) == onceki_olaylar
+    assert _paket_durumu(ortam, paket_id) == CALISIYOR.value
+    _butunluk_temiz(ortam)
+
+
+def test_bekleyen_paketler_yalniz_acik_sorusu_olanlari_verir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    bos = _paket(ortam)
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    bekleyen = _paket(ortam)
+    [talep] = _denetle(ortam, kaynak, bekleyen)
+
+    with ortam.veritabani.islem() as o:
+        assert [p.id for p in mu.bekleyen_paketler(o)] == [bekleyen]
+
+    _karar(ortam, talep, Karar.AYRI)
+    with ortam.veritabani.islem() as o:
+        assert mu.bekleyen_paketler(o) == []
+    assert _paket_durumu(ortam, bos) == CALISIYOR.value
+
+
+def test_aday_sarti_yalniz_calisiyor_pakette_secilir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Aday şartı aday veridir (aday nesneyle birlikte silinir), dolayısıyla
+    taslak yazma kapısına tabidir: bekleyen ve terminal iptal pakette yazılamaz.
+    Şart kaldırma işlevi olmadığı için böyle bir satır orada kalıcı olurdu."""
+    _sart(ortam, _depo(ortam, env, harici_kimlik="X1"), ["harici_kimlik"])
+    paket_id = _paket(ortam)
+    aday = _aday(
+        ortam,
+        paket_id,
+        env.depo_id,
+        {"ad": "A", "harici_kimlik": "X1"},
+        ["harici_kimlik"],
+    )
+    _adayi_denetle(ortam, aday)
+    assert _paket_durumu(ortam, paket_id) == BEKLIYOR.value
+    with ortam.veritabani.islem() as o:
+        with pytest.raises(tsi.PaketDurumuGecersiz):
+            mu.aday_sarti_ekle(o, aday, ["sehir"], KULLANICI)
+
+    _iptal_et(ortam, paket_id)
+    with ortam.veritabani.islem() as o:
+        with pytest.raises(tsi.PaketDurumuGecersiz):
+            mu.aday_sarti_ekle(o, aday, ["sehir"], KULLANICI)
+
+    assert _sayi(ortam, mt.ADAY_NESNE_MUKERRERLIK_SARTI) == 1
+    _butunluk_temiz(ortam)
+
+
+def test_birlesmis_nesneye_sart_secilemez_koruma_tek_yonlu_kalmaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Şart birleşmiş nesnede kalırsa tarama tek yönlü olurdu: taranan uç kendi
+    kimlik geçmişinin şartlarını kullanır, ama karşı ucun şartı kanonik nesne
+    üzerinden aranır. Kanonik nesneye seçilince koruma iki yönlü çalışır."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    [talep] = _denetle(ortam, kaynak)
+    _karar(ortam, talep, Karar.AYNI)
+
+    with ortam.veritabani.islem() as o:
+        assert mu.kanonik_nesneyi_bul(o, kaynak) == hedef
+        with pytest.raises(mu.NesneBirlesmis):
+            mu.nesne_sarti_ekle(o, kaynak, ["sehir"], KULLANICI)
+    assert _sayi(ortam, mt.NESNE_MUKERRERLIK_SARTI) == 1
+
+    with ortam.veritabani.islem() as o:
+        ni.ozellik_yaz(o, hedef, "sehir", "Edirne")
+    _sart(ortam, hedef, ["sehir"])
+    sartsiz_yeni = _depo(ortam, env, sehir="Edirne")
+    assert len(_denetle(ortam, sartsiz_yeni)) == 1  # şartsız uç korumadan kaçamaz
+    _butunluk_temiz(ortam)

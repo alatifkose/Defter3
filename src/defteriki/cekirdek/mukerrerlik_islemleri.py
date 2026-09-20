@@ -15,7 +15,9 @@ da birden fazla özelliği mükerrerlik şartı seçer (``nesne_sarti_ekle`` /
 ``aday_sarti_ekle``; seçim eklenir, geri alma işlevi yoktur). Birden fazla
 şart **VEYA** mantığındadır: herhangi biri eşleşirse şüphe doğar. Seçilmemiş
 bir özelliğin eşitliği şüphe üretmez. Başka türün özelliği şart seçilemez
-(servis ve bileşik dış anahtar).
+(servis ve bileşik dış anahtar). Şart yalnız **kanonik** kesin nesneye
+seçilir (``NesneBirlesmis``); aday şartı aday veridir ve yalnız ``calisiyor``
+pakette seçilir (``taslak_islemleri.yazilabilir_paket``).
 
 **İki yönlü tarama.** Karşılaştırma tek yönlü değildir: taranan ucun kendi
 şartları karşı ucun aynı özelliğindeki değerle, karşı ucun şartları da taranan
@@ -121,7 +123,10 @@ yeniden denetlenir; yeni eşleşme yeni talep açar ve paket bütün talepler
 çözülene kadar ``BEKLIYOR`` kalır. Döngü olamaz: aynı çift için ikinci talep
 açılmaz (açık talep kısmi benzersiz indeksle, çözülmüş talep servis
 denetimiyle engellenir; "ayrı" kararı verilmiş çift aynı kanıtla yeniden
-durdurulmaz). ``gecersiz`` talep bu denetimde sayılmaz.
+durdurulmaz). ``gecersiz`` talep bu denetimde sayılmaz. Burada doğan sorular
+kararın verildiği sorunun **bağımsız kökenini devralır**: paketten bağımsız
+bir sorunun çocuğu da paket iptaliyle cevapsız kapanmaz
+(``_zincirleme_denetle``).
 
 **İşlem sınırı ve eşzamanlılık.** Her servis açık bir ``Session`` alır;
 çağıran ``Veritabani.islem`` transaction'ının sahibidir, burada ``commit`` ya
@@ -183,6 +188,7 @@ from defteriki.cekirdek.taslak_islemleri import (
     paket_getir,
     paketi_beklet,
     paketi_devam_et,
+    yazilabilir_paket,
 )
 from defteriki.cekirdek.taslak_tablolari import (
     AdayNesne,
@@ -206,6 +212,10 @@ class KararTalebiKapali(MukerrerlikHatasi):
 
 class GecersizSart(MukerrerlikHatasi, ValueError):
     """Nesnenin türünde böyle özellik yok ya da şart listesi geçersiz."""
+
+
+class NesneBirlesmis(MukerrerlikHatasi):
+    """Nesne başka bir nesneye birleşmiş; şart yalnız kanonik nesneye seçilir."""
 
 
 class BirlestirmeGecersiz(MukerrerlikHatasi, ValueError):
@@ -449,8 +459,25 @@ def nesne_sarti_ekle(
 
     Şart kaldırma işlevi yoktur (koruma zayıflatılamaz). Şartların anlamını
     çekirdek bilmez.
+
+    **Nesne kanonik olmalı** (2026-09-20 beşinci inceleme turu). Birleşmiş bir
+    nesneye şart eklemek koruma sağlamıyor, tek yönlü bir tarama bırakıyordu:
+    taranan uç kendi kimlik geçmişinin şartlarını kullanır
+    (``_kimlik_sartlari``), ama karşı ucun şartı ``_eslesen_nesneler`` içinde
+    **kanonik** nesne üzerinden aranır. Şart birleşmiş nesnede kalırsa kanonik
+    nesne tarandığında şüphe doğar, yeni gelen nesne tarandığında doğmaz —
+    yani modülün "iki yönlü tarama" sözü tutulmaz. Birleşme sırasında kaynağın
+    şartları hedefe kopyalandığı için birleşmeden **önce** seçilen şartlar bu
+    durumdan etkilenmez; sorun yalnız birleşmeden sonra eklemekti. Çağıran
+    kanonik nesneyi ``kanonik_nesneyi_bul`` ile bulup şartı oraya ekler;
+    çekirdek hedefi kendiliğinden değiştirmez.
     """
     nesne = nesne_getir(oturum, nesne_id)
+    if (kanonik := kanonik_nesneyi_bul(oturum, nesne.id)) != nesne.id:
+        raise NesneBirlesmis(
+            f"nesne {nesne.id} kanonik nesne {kanonik} ile birleşmiş; mükerrerlik "
+            f"şartı yalnız kanonik nesneye seçilir. Şartı {kanonik} için ekleyin."
+        )
     tanimlar = _ozellik_tanimlari(oturum, nesne.nesne_turu_id, ozellik_kodlari)
     mevcut = {s.ozellik_tanimi_id for s in nesne_sartlarini_listele(oturum, nesne.id)}
     eklenen: list[NesneMukerrerlikSarti] = []
@@ -480,8 +507,17 @@ def nesne_sarti_ekle(
 def aday_sarti_ekle(
     oturum: Session, aday_nesne_id: int, ozellik_kodlari: Sequence[str], aktor: Aktor
 ) -> list[AdayNesneMukerrerlikSarti]:
-    """Aday nesneye mükerrerlik şartı ekler (kesin nesneyle aynı kurallar)."""
+    """Aday nesneye mükerrerlik şartı ekler (kesin nesneyle aynı kurallar).
+
+    Aday şartı **aday veridir**: aday nesneyle birlikte silinir. Bu yüzden
+    taslak yazma kuralına tabidir ve paket ``taslak_islemleri.yazilabilir_paket``
+    ile denetlenir: yalnız ``calisiyor`` pakette şart seçilir (2026-09-20 beşinci
+    inceleme turu). Önceden bu denetim yoktu ve ``bekliyor`` ya da terminal
+    ``iptal`` pakete kalıcı şart satırı yazılabiliyordu; şart kaldırma işlevi de
+    olmadığından satır orada kalırdı.
+    """
     aday = aday_nesne_getir(oturum, aday_nesne_id)
+    yazilabilir_paket(oturum, aday.islem_paketi_id)
     tanimlar = _ozellik_tanimlari(oturum, aday.nesne_turu_id, ozellik_kodlari)
     mevcut = {s.ozellik_tanimi_id for s in aday_sartlarini_listele(oturum, aday.id)}
     eklenen: list[AdayNesneMukerrerlikSarti] = []
@@ -1070,7 +1106,7 @@ def _karari_uygula(
         if birlestirme is not None:
             yeni_talepler = tuple(
                 _zincirleme_denetle(
-                    oturum, birlestirme.birlesim.hedef_nesne_id, paket_id, aktor
+                    oturum, birlestirme.birlesim.hedef_nesne_id, paket_id, talep, aktor
                 )
             )
     else:
@@ -1080,7 +1116,7 @@ def _karari_uygula(
             oturum, talep, kaynak_id, talep.hedef_nesne_id, aktor
         )
         yeni_talepler = tuple(
-            _zincirleme_denetle(oturum, talep.hedef_nesne_id, paket_id, aktor)
+            _zincirleme_denetle(oturum, talep.hedef_nesne_id, paket_id, talep, aktor)
         )
 
     gecersiz = list(() if birlestirme is None else birlestirme.gecersiz_talepler)
@@ -1092,7 +1128,7 @@ def _karari_uygula(
             if paket_getir(oturum, p).durum != PaketDurumu.IPTAL.value:
                 yeni_talepler += tuple(
                     _zincirleme_denetle(
-                        oturum, birlestirme.birlesim.hedef_nesne_id, p, aktor
+                        oturum, birlestirme.birlesim.hedef_nesne_id, p, talep, aktor
                     )
                 )
     for eski in gecersiz:
@@ -1688,7 +1724,11 @@ def _nesneleri_birlestir(
 
 
 def _zincirleme_denetle(
-    oturum: Session, hedef_nesne_id: int, islem_paketi_id: int | None, aktor: Aktor
+    oturum: Session,
+    hedef_nesne_id: int,
+    islem_paketi_id: int | None,
+    karar_talebi: KararTalebi,
+    aktor: Aktor,
 ) -> list[KararTalebi]:
     """Birleşimden sonra hedefin hiyerarşik çocuklarını yeniden denetler.
 
@@ -1697,6 +1737,17 @@ def _zincirleme_denetle(
     taranır: kaynağın şartlarını devraldığından artık başka bir nesneyle
     eşleşebilir. Döngü olamaz: yeni talep yalnız daha önce talebi olmayan çift
     için açılır ve bu adım birleştirme yapmaz.
+
+    **Bağımsız köken bir kuşak sonra düşmez** (2026-09-20 beşinci inceleme
+    turu). Burada doğan sorular ``karar_talebi``nin kararından doğar; o soru
+    paketten bağımsızsa çocukları da bağımsızdır. Devir olmadan sonuç paketin
+    ne zaman iptal edildiğine bağlı kalıyordu: karardan **sonra** iptal
+    edilirse çocuk soru pakete ait sayılıp cevapsız ``gecersiz`` oluyor,
+    karardan **önce** iptal edilirse (``karar_ver`` paketsiz karara düşer)
+    bağımsız doğup açık kalıyordu. Aynı soru, aynı karar, farklı sonuç.
+    Devir yalnız bu çağrının **yeni açtığı** taleplere uygulanır; mevcut bir
+    soruya bağlanmak (``_talebi_pakete_bagla``) onun kökenini değiştirmez.
+    Halefin tarihsel açılış paketi korunur (``_kokeni_devret``).
     """
     cocuk_idleri = list(
         oturum.execute(
@@ -1715,13 +1766,23 @@ def _zincirleme_denetle(
     )
     for cocuk_id in cocuk_idleri:
         yeni.extend(nesneyi_denetle(oturum, cocuk_id, aktor, islem_paketi_id))
+    for soru in yeni:
+        _kokeni_devret(oturum, karar_talebi, soru, aktor)
     return yeni
 
 
 def paketin_adaylarini_denetle(
     oturum: Session, islem_paketi_id: int, aktor: Aktor
 ) -> list[KararTalebi]:
-    """Paketteki bütün aday nesneleri sırayla denetler (kolaylık işlevi)."""
+    """Paketteki bütün aday nesneleri sırayla denetler.
+
+    Bütün adayların yazmaları **tek bir dış SAVEPOINT** içindedir (2026-09-20
+    beşinci inceleme turu). Tekil ``adayi_denetle`` üçüncü turda bu sınıra
+    alınmıştı ama onu çağıran bu işlev alınmamıştı: ikinci aday taranırken hata
+    çıkarsa ilk adayın açtığı talepler, denetim izleri ve paketin ``bekliyor``
+    durumu, çağıran hatayı yakalayıp dış transaction'ı commit ettiğinde kalıcı
+    oluyordu. Artık ya bütün adaylar taranır ya hiçbiri.
+    """
     paket = paket_getir(oturum, islem_paketi_id)
     aday_idleri = list(
         oturum.execute(
@@ -1731,8 +1792,9 @@ def paketin_adaylarini_denetle(
         ).scalars()
     )
     talepler: list[KararTalebi] = []
-    for aday_id in aday_idleri:
-        talepler.extend(adayi_denetle(oturum, aday_id, aktor))
+    with _yazma_siniri(oturum):  # dış SAVEPOINT: ya hepsi ya hiçbiri
+        for aday_id in aday_idleri:
+            talepler.extend(adayi_denetle(oturum, aday_id, aktor))
     return talepler
 
 

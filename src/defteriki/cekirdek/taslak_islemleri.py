@@ -15,7 +15,7 @@ tamlık kapısı, atomik finalizasyon) Aşama 4.8'in işidir; burada yoktur.
 
 Paket yalnız ``tamamlandi`` durumundaki okumadan oluşturulur (``basladi``
 okuma için ``OkumaDurumuGecersiz``). Paket durumu yazma yetkisini belirler:
-aday veriyi değiştiren her servis paketi merkezi ``_yazilabilir_paket`` ile
+aday veriyi değiştiren her servis paketi merkezi ``yazilabilir_paket`` ile
 denetler; yalnız ``calisiyor`` pakette yazılır. ``bekliyor`` paket
 sorgulanır, okunur, devam ettirilir ya da iptal edilir ama içeriği
 değişmez; ``iptal`` paket sorgulanır ve okunur, değiştirilemez, devam
@@ -399,8 +399,15 @@ def _yazma_siniri(
 # --- paket durumu (merkezi) -----------------------------------------------------------
 
 
-def _yazilabilir_paket(oturum: Session, paket_id: int) -> IslemPaketi:
-    """Aday veriyi değiştiren her servisin tek kapısı: paket var ve ``calisiyor``."""
+def yazilabilir_paket(oturum: Session, paket_id: int) -> IslemPaketi:
+    """Aday veriyi değiştiren her servisin tek kapısı: paket var ve ``calisiyor``.
+
+    Açıktır (2026-09-20 beşinci inceleme turu): aday veriyi bu modülün dışından
+    değiştiren servisler de aynı kapıdan geçer. Aday nesnenin mükerrerlik şartı
+    (``mukerrerlik_islemleri.aday_sarti_ekle``) aday verinin parçasıdır — aday
+    nesneyle birlikte silinir — ve kuralın ikinci bir kopyası yazılmasın diye
+    denetimi buradan alır.
+    """
     paket = paket_getir(oturum, paket_id)
     if paket.durum != PaketDurumu.CALISIYOR.value:
         raise PaketDurumuGecersiz(
@@ -632,7 +639,7 @@ def aday_nesne_ekle(
     bağlı ve eksik olabilir (zorunlu özellik aranmaz). Kesin ``nesne`` satırı
     oluşmaz, tanım sürümü kilitlenmez. Doğrulama yazmadan önce, yazma
     SAVEPOINT içinde."""
-    paket = _yazilabilir_paket(oturum, paket_id)
+    paket = yazilabilir_paket(oturum, paket_id)
     tur = nesne_turu_getir(oturum, nesne_turu_id)
     tanimlar = _tur_tanimlari(oturum, tur.id)
     kodlanmis: dict[str, str] = {}
@@ -673,7 +680,7 @@ def aday_nesne_sil(oturum: Session, aday_nesne_id: int) -> None:
     kaldırır. Bir aday ilişkide, kayıt-nesne bağında, karar talebinde ya da
     çözümlenmiş durumdaysa ``AdayKullanimda``; sessiz cascade yoktur."""
     aday = aday_nesne_getir(oturum, aday_nesne_id)
-    _yazilabilir_paket(oturum, aday.islem_paketi_id)
+    yazilabilir_paket(oturum, aday.islem_paketi_id)
     iliski = oturum.execute(
         select(AdayNesneIliskisi.id).where(
             (AdayNesneIliskisi.kaynak_aday_nesne_id == aday.id)
@@ -734,7 +741,7 @@ def aday_ozellik_yaz(
     (aynı özellik iki satır olmaz). Tür ve değer türü kesin özellikle aynı
     kuralla doğrulanır."""
     aday = aday_nesne_getir(oturum, aday_nesne_id)
-    _yazilabilir_paket(oturum, aday.islem_paketi_id)
+    yazilabilir_paket(oturum, aday.islem_paketi_id)
     tur = nesne_turu_getir(oturum, aday.nesne_turu_id)
     tanim = _ozellik_tanimi_bul(oturum, tur, kod)
     metin = _degeri_kodla(tur, tanim, deger)
@@ -769,7 +776,7 @@ def aday_ozellik_sil(oturum: Session, aday_nesne_id: int, kod: str) -> None:
     """Yazılı aday özelliği kaldırır (zorunlu olsa da; tamlık 4.8'de aranır).
     Yazılmamış özellik için ``GecersizAdayOzellik``."""
     aday = aday_nesne_getir(oturum, aday_nesne_id)
-    _yazilabilir_paket(oturum, aday.islem_paketi_id)
+    yazilabilir_paket(oturum, aday.islem_paketi_id)
     tur = nesne_turu_getir(oturum, aday.nesne_turu_id)
     tanim = _ozellik_tanimi_bul(oturum, tur, kod)
     satir = oturum.execute(
@@ -826,7 +833,7 @@ def aday_iliski_ekle(
             f"{hedef.id} paket {hedef.islem_paketi_id} içinde; aday ilişki tek "
             "paket içinde kurulur."
         )
-    paket = _yazilabilir_paket(oturum, kaynak.islem_paketi_id)
+    paket = yazilabilir_paket(oturum, kaynak.islem_paketi_id)
     _iliski_turlerini_dogrula(iliski, kaynak, hedef)
     var = oturum.execute(
         select(AdayNesneIliskisi.id).where(
@@ -883,7 +890,7 @@ def _iliski_turlerini_dogrula(
 def aday_iliski_kaldir(oturum: Session, aday_iliski_id: int) -> None:
     """Aday ilişkiyi kaldırır; en az üst kuralı aranmaz (taslak eksik olabilir)."""
     satir = _aday_iliski_getir(oturum, aday_iliski_id)
-    _yazilabilir_paket(oturum, satir.islem_paketi_id)
+    yazilabilir_paket(oturum, satir.islem_paketi_id)
     with _yazma_siniri(oturum):
         oturum.delete(satir)
         oturum.flush()
@@ -912,7 +919,7 @@ def aday_kayit_ekle(
     bağımsız JSON nesnesidir (``{}`` dahil; eksik olabilir), kanonik metin
     olarak saklanır; kesin kayıt alanı değildir ve kesin ``kayit`` satırı
     oluşmaz. Kaynak isteğe bağlı, paketin okumasına ait olmalı."""
-    paket = _yazilabilir_paket(oturum, paket_id)
+    paket = yazilabilir_paket(oturum, paket_id)
     tur = kayit_turu_getir(oturum, kayit_turu_id)
     metin = _icerigi_kodla(icerik)
     if kaynak_id is not None:
@@ -936,7 +943,7 @@ def aday_kayit_icerigini_degistir(
 ) -> AdayKayit:
     """Aday kaydın içeriğini yeni JSON nesnesiyle değiştirir (taslak düzeltilebilir)."""
     aday = aday_kayit_getir(oturum, aday_kayit_id)
-    _yazilabilir_paket(oturum, aday.islem_paketi_id)
+    yazilabilir_paket(oturum, aday.islem_paketi_id)
     metin = _icerigi_kodla(icerik)
     with _yazma_siniri(oturum):
         aday.icerik = metin
@@ -953,7 +960,7 @@ def aday_kayit_sil(oturum: Session, aday_kayit_id: int) -> None:
     """Aday kaydı kendi kayıt-nesne bağlarıyla birlikte kaldırır; bağlı aday
     nesneler kalır."""
     aday = aday_kayit_getir(oturum, aday_kayit_id)
-    _yazilabilir_paket(oturum, aday.islem_paketi_id)
+    yazilabilir_paket(oturum, aday.islem_paketi_id)
     with _yazma_siniri(oturum):
         for bag in oturum.execute(
             select(AdayKayitNesne).where(AdayKayitNesne.aday_kayit_id == aday.id)
@@ -980,7 +987,7 @@ def aday_kayit_nesne_bagla(
             f"{nesne.id} paket {nesne.islem_paketi_id} içinde; bağ tek paket "
             "içinde kurulur."
         )
-    paket = _yazilabilir_paket(oturum, kayit.islem_paketi_id)
+    paket = yazilabilir_paket(oturum, kayit.islem_paketi_id)
     var = oturum.execute(
         select(AdayKayitNesne.id).where(
             AdayKayitNesne.aday_kayit_id == kayit.id,
@@ -1010,7 +1017,7 @@ def aday_kayit_nesne_coz(
 ) -> None:
     """Kayıt-nesne bağını kaldırır; yoksa ``AdayBulunamadi``."""
     kayit = aday_kayit_getir(oturum, aday_kayit_id)
-    _yazilabilir_paket(oturum, kayit.islem_paketi_id)
+    yazilabilir_paket(oturum, kayit.islem_paketi_id)
     bag = oturum.execute(
         select(AdayKayitNesne).where(
             AdayKayitNesne.aday_kayit_id == kayit.id,
