@@ -3148,29 +3148,56 @@ def test_ajan_sart_secemez_ama_tarayip_suphe_acabilir(
     assert _karar(ortam, talep_id, Karar.AYNI).cozuldu
 
 
-def test_bekleyen_paketler_elle_duraklatilani_saymaz(
-    ortam: Ortam, env: Envanter
-) -> None:
-    """``paketi_beklet`` açık soru olmadan da çağrılabilir; işlev "açık karar
-    talebi yüzünden bekleyen" dediği için elle duraklatılmış paketi saymamalı."""
-    elle = _paket(ortam)
+def test_paket_yalniz_acik_soru_yuzunden_bekler(ortam: Ortam, env: Envanter) -> None:
+    """``bekliyor`` tek anlamlıdır (karar 2026-09-20).
+
+    Önceden ``paketi_beklet`` sebepsiz çağrılabiliyordu ve
+    ``_paket_durumunu_esitle`` iki bekleme nedenini ayırt edemediği için
+    eşleşmesiz bir tarama bile paketi kendiliğinden ``calisiyor`` yapıyordu.
+    Artık sebepsiz bekletme reddedilir; soru varken bekleme kurulur, soru
+    çözülünce kalkar.
+    """
+    bos = _paket(ortam)
     with ortam.veritabani.islem() as o:
-        tsi.paketi_beklet(o, elle)
-    assert _paket_durumu(ortam, elle) == BEKLIYOR.value
+        with pytest.raises(tsi.PaketDurumuGecersiz, match="Elle duraklatma yoktur"):
+            tsi.paketi_beklet(o, bos)
+    assert _paket_durumu(ortam, bos) == CALISIYOR.value
 
     hedef = _depo(ortam, env, harici_kimlik="X1")
     _sart(ortam, hedef, ["harici_kimlik"])
     kaynak = _depo(ortam, env, harici_kimlik="X1")
     soruyla = _paket(ortam)
     [talep] = _denetle(ortam, kaynak, soruyla)
+    assert _paket_durumu(ortam, soruyla) == BEKLIYOR.value
 
     with ortam.veritabani.islem() as o:
         assert [p.id for p in mu.bekleyen_paketler(o)] == [soruyla]
 
     _karar(ortam, talep, Karar.AYRI)
+    assert _paket_durumu(ortam, soruyla) == CALISIYOR.value
     with ortam.veritabani.islem() as o:
         assert mu.bekleyen_paketler(o) == []
-    assert _paket_durumu(ortam, elle) == BEKLIYOR.value  # elle duraklatma sürüyor
+
+
+def test_eslesmesiz_tarama_bekleyen_paketi_calistirmaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Açık sorusu olan paket, başka bir nesnenin eşleşmesiz taramasıyla
+    kendiliğinden çalışmaya dönmez."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    paket_id = _paket(ortam)
+    [talep] = _denetle(ortam, kaynak, paket_id)
+    assert _paket_durumu(ortam, paket_id) == BEKLIYOR.value
+
+    yalniz = _depo(ortam, env, harici_kimlik="Z9")  # hiçbir şeyle eşleşmez
+    assert _denetle(ortam, yalniz, paket_id) == []
+    assert _paket_durumu(ortam, paket_id) == BEKLIYOR.value  # soru hâlâ açık
+
+    _karar(ortam, talep, Karar.AYNI)
+    assert _paket_durumu(ortam, paket_id) == CALISIYOR.value
+    _butunluk_temiz(ortam)
 
 
 @pytest.mark.parametrize("adayli", [False, True])
@@ -3186,3 +3213,47 @@ def test_toplu_tarama_iptal_paketi_her_durumda_reddeder(
     with ortam.veritabani.islem() as o:
         with pytest.raises(tsi.PaketDurumuGecersiz):
             mu.paketin_adaylarini_denetle(o, paket_id, KULLANICI)
+
+
+def test_denetim_izinde_talep_acildi_yalniz_gercek_acilisi_anlatir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Köken devri ve paket bağlama artık kendi adlarıyla yazılır (göç ``0012``).
+
+    Üçü de ``karar_talebi_acildi`` yazdığı sürece denetim izinden "kaç karar
+    talebi açıldı" diye saymak yanlış sonuç veriyordu; altıncı tur köken
+    devrini mevcut açık sorulara da uygulayınca sapma büyüdü.
+    """
+    _p, halef, _r1, r2 = _iki_rafli_bagimsiz_soru(ortam, env)
+    p2 = _paket(ortam)
+    [alt] = _denetle(ortam, r2, p2)
+    talep_once = _sayi(ortam, mt.KARAR_TALEBI)
+    once = _olaylar(ortam)  # kurulumdaki birleşme de köken devretmişti
+
+    _karar(ortam, halef, Karar.AYNI)  # yeni talep açılmaz: köken devri + paket bağı
+
+    eklenen = _olaylar(ortam)[len(once) :]
+    assert _sayi(ortam, mt.KARAR_TALEBI) == talep_once
+    assert DenetimOlayi.KARAR_TALEBI_ACILDI.value not in eklenen
+    assert eklenen.count(DenetimOlayi.KARAR_TALEBI_KOKENI_DEVREDILDI.value) == 1
+    assert eklenen.count(DenetimOlayi.KARAR_TALEBI_PAKETE_BAGLANDI.value) == 1
+    assert _koken(ortam, alt)[2] is True
+    _butunluk_temiz(ortam)
+
+
+def test_acilan_talep_sayisi_denetim_izinden_dogru_sayilir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """İki paket aynı soruyu sorarsa talep bir tanedir; iz de bir açılış der."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    p1, p2 = _paket(ortam), _paket(ortam)
+    [talep] = _denetle(ortam, kaynak, p1)
+    assert _denetle(ortam, kaynak, p2) == []  # aynı soru, ikinci talep yok
+
+    olaylar = _olaylar(ortam)
+    assert _sayi(ortam, mt.KARAR_TALEBI) == 1
+    assert olaylar.count(DenetimOlayi.KARAR_TALEBI_ACILDI.value) == 1
+    assert olaylar.count(DenetimOlayi.KARAR_TALEBI_PAKETE_BAGLANDI.value) == 1
+    assert _talep_durumu(ortam, talep) == TalepDurumu.ACIK.value

@@ -20,7 +20,8 @@ mükerrerlik) 2026-09-20'de bitti; 4.6'nın bağımsız inceleme bulguları ayn�
 üçüncü tur düzeltmeleriyle tamamlandı (göç `0010`, "Aday kararları ve ortak
 paket beklemesi"; dördüncü tur göç `0011`, "Bağımsız köken ve tarama
 atomikliği"; beşinci ve altıncı tur şemaya dokunmadan, "Köken devri, toplu
-tarama ve şart kapıları" ve "Köken devrinin tamamlanması ve iki kapı daha").
+tarama ve şart kapıları" ve "Köken devrinin tamamlanması ve iki kapı daha";
+yedinci tur göç `0012`, "Bekleme tek anlamlı, denetim izi ayrık").
 Aşama 4.7 (kesin kayıt)
 sırada.
 Bitenler:
@@ -88,6 +89,12 @@ Bitenler:
   birleşen nesnenin kimlik geçmişi mükerrerlik korumasından düşmez, aday
   kimlikleri yeniden dağıtılmaz (`AUTOINCREMENT`) ("Karar kaynağı, iptal ve
   kanonik kimlik")
+* Aşama 4.6 yedinci inceleme turu (2026-09-20, göç `0012`): `bekliyor` tek
+  anlamlı oldu — elle duraklatma kaldırıldı (karar: Abdüllatif), `paketi_beklet`
+  açık karar talebi ister; denetim izinde `karar_talebi_acildi` yalnız gerçek
+  açılışı anlatır, paket bağlama ve köken devri kendi olay adlarını aldı;
+  GitHub'da kalite kapısı (`.github/workflows/kontrol.yml`)
+  ("Bekleme tek anlamlı, denetim izi ayrık")
 * Aşama 4.6 altıncı inceleme turu (2026-09-20, şema değişmedi): bağımsız köken
   zincirleme denetimin **dokunduğu** mevcut açık sorulara da devredilir
   (beşinci tur yalnız yeni açılanları kapsıyordu), mükerrerlik şartını yalnız
@@ -188,7 +195,7 @@ kökenini bir paketten devralmış satır varsa geri alma reddedilir)
 "Belge zinciri", "İşlem paketi ve taslak" ve "Onay ve mükerrerlik"
 bölümlerinde).
 **Kalıcı geliştirme veritabanı** (`C:\dev\Defter3-veri\gelistirme\
-defteriki.sqlite3`) bilinçli olarak hâlâ `0003` sürümündedir; `0004`–`0011`
+defteriki.sqlite3`) bilinçli olarak hâlâ `0003` sürümündedir; `0004`–`0012`
 ona uygulanmamıştır ve yalnız Abdüllatif'in açık talimatıyla uygulanır. Göç
 testleri yalnız `tmp_path` altındaki geçici veritabanlarında çalışır. `0003`
 tabloyu açık SQL adımlarıyla yeniden kurar,
@@ -1726,6 +1733,54 @@ paket durumunu denetlemiyordu: paketin adayı varsa ilk `adayi_denetle` çağrı
 `[]` dönüyordu. Aynı geçersiz durum iki farklı davranış üretmesin diye denetim
 `adayi_denetle` ile aynı mesaja bağlandı.
 
+### Bekleme tek anlamlı, denetim izi ayrık
+
+Yedinci inceleme turu (2026-09-20, göç `0012`).
+
+**`bekliyor` tek bir anlama gelir: cevaplanmamış sorusu var.** Karar
+Abdüllatif'in (2026-09-20): bir çalışmayı elle dondurma işlemi **yoktur**.
+Önceden `paketi_beklet` sebepsiz çağrılabiliyordu, yani `bekliyor` iki ayrı
+şeyi anlatıyordu — "soru bekliyor" ve "elle duraklatıldı" — ama veritabanında
+ikisi de aynı tek değerdi, neden bilgisi yoktu.
+`_paket_durumunu_esitle` ikisini ayırt edemediği için "bekliyor ve açık soru
+yok → çalıştır" kuralını elle duraklatılmış pakete de uyguluyordu: eşleşme
+bulmayan bir tarama bile paketi kendiliğinden `calisiyor` yapıyor, elle
+duraklatma bilgisi kayboluyordu. Kural artık servis sınırında zorlanır:
+`paketi_beklet` açık karar talebi yokken, `paketi_devam_et` açık karar talebi
+varken reddeder. İkisi birlikte durumu açık talep varlığına bağlar, geçişi
+kimin çağırdığından bağımsız olarak. Durum makinesinin kendisini sınayan
+testler geçiş mekanizmasını (`_durumu_degistir`) doğrudan kullanır; kapının
+kendisi ayrıca sınanır.
+
+Çok kullanıcılı bir üründe "bu çalışmaya şimdi dokunmayın" düğmesi
+gerekebilir (kurumsal kullanım). O gün bekleme **nedeni** ayrı bir alanda
+saklanır ve bu kapı ona göre genişler; bugün öyle bir düğme olmadığı için
+ikinci anlam da yok. Kararın gerekçesi: iki anlamlı bir durumu bırakıp üstüne
+inşa etmek pahalı, sonradan neden alanı eklemek ise ekleme yönünde küçük bir
+iştir.
+
+**`karar_talebi_acildi` yalnız gerçek açılışı anlatır.** Olay üç yerde
+yazılıyordu ve yalnız biri talep açıyordu: `_talep_ac` (açılış),
+`_talebi_pakete_bagla` (mevcut talebe bir paket daha bağlandı) ve
+`_kokeni_devret` (mevcut talep bağımsız kökeni devraldı). Denetim izinden
+"kaç karar talebi açıldı" diye saymak yanlış sonuç veriyordu; altıncı tur
+köken devrini mevcut açık sorulara da uygulayınca sapma büyüdü. İki yeni olay
+adı eklendi ve o iki yer kendi adını kullanır:
+`karar_talebi_pakete_baglandi`, `karar_talebi_kokeni_devredildi`. Olay listesi
+veritabanında kontrol kısıtıdır, bu yüzden göç gerekti (`0012`); `denetim_izi`
+yeniden kurulur. Tabloya dış anahtarla bağlanan başka tablo olmadığından
+`0003` / `0011`in taşıma tablosu kalıbına gerek kalmadı. **Mevcut satırlar
+dönüştürülmez:** geçmişte yazılmış `karar_talebi_acildi` satırlarının
+hangisinin gerçek açılış olduğunu bilmek gerekçe metnini yorumlamayı
+gerektirirdi; denetim izi yorumla değiştirilmez. Ayrım bu göçten sonra yazılan
+satırlarda geçerlidir. Geri alma, yeni adlardan satır varsa uygulanmaz.
+
+Bilinçli sınır: `paketi_beklet` / `paketi_devam_et` hâlâ aktör almaz ve kendi
+denetim olaylarını yazmaz; olayı çağıran (`_paket_durumunu_esitle`) yazar. Bu,
+elle duraklatma olmadığı için bugün bir boşluk değil — geçişi yapan tek yer
+mükerrerlik motoru ve o aktörünü zaten biliyor. Elle duraklatma bir gün
+gelirse aktör ve olay o kapıyla birlikte eklenir.
+
 ## Mimari sınır: çekirdek ve finans
 
 Karar (2026-09-18, Abdüllatif). Önceki geliştirme hattında genel mekanik ile
@@ -2033,6 +2088,13 @@ Aynı kontrol her `git commit` öncesinde pre-commit kancasıyla otomatik
 çalışır (`.pre-commit-config.yaml`, tek kanca: `scripts/kontrol.py`);
 bir adım düşerse commit yapılmaz. Kanca kaynak dosyalarını değiştirmez.
 
+Aynı betik her push ve pull request'te GitHub'da da çalışır
+(`.github/workflows/kontrol.yml`, `windows-latest`, bağımlılıklar
+`uv sync --frozen` ile kilitten kurulur). 2026-09-20'ye kadar uzak bir kalite
+kapısı yoktu; depoya dışarıdan bakan biri testlerin geçtiğini göremiyordu.
+Ürün hedefi Windows masaüstü olduğu için koşu orada; Linux koşusu gerekirse
+matrise eklenir.
+
 ## Ayarlar
 
 Bütün yollar `defteriki.ayarlar` modülünden gelir; uygulamanın nereden
@@ -2131,10 +2193,11 @@ src/defteriki/    uygulama paketi
     denetim_islemleri.py denetim olayı yazma ve okuma
   finans/         finansal domain; çekirdeği kullanabilir (henüz boş)
 alembic.ini       Alembic yapılandırması (veritabanı adresi yok)
-alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı, 0004 nesne motoru, 0005 kendine dönüş serbest, 0006 belge zinciri, 0007 işlem paketi ve taslak, 0008 onay ve mükerrerlik, 0009 karar yaşam döngüsü ve kanonik kimlik, 0010 karar talebi paketleri, 0011 bağımsız köken)
+alembic/          env.py (yol merkezi ayarlardan), versions/ (0001 boş, 0002 tanım tabloları, 0003 sürüm no kısıtı, 0004 nesne motoru, 0005 kendine dönüş serbest, 0006 belge zinciri, 0007 işlem paketi ve taslak, 0008 onay ve mükerrerlik, 0009 karar yaşam döngüsü ve kanonik kimlik, 0010 karar talebi paketleri, 0011 bağımsız köken, 0012 denetim olayları ayrılır)
 tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı, finansal ad denetimi, taslak / kesin ayrımı; test_nesne_motoru.py: ENVANTER dünyası; test_arsiv.py ve test_belge_zinciri.py: belge zinciri; test_islem_paketi.py: işlem paketi ve taslak; test_mukerrerlik.py: onay ve mükerrerlik; test_gocler.py: göç zinciri ve ORM metadata birebirliği)
 scripts/          geliştirme betikleri (kontrol.py)
 .pre-commit-config.yaml  commit öncesi kanca; kontrol.py'yi çalıştırır
+.github/workflows/kontrol.yml  her push ve PR'da aynı kontrol (windows-latest)
 kavramlar_sozlugu.md   ortak kavram tanımları; ekleme ve değişiklik yalnız Abdüllatif'in onayıyla
 ```
 

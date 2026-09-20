@@ -68,6 +68,21 @@ def _iptal_et(oturum: Session, paket_id: int) -> tst.IslemPaketi:
     return tsi.paketi_iptal_et(oturum, paket_id, KULLANICI)
 
 
+def _beklet(oturum: Session, paket_id: int) -> tst.IslemPaketi:
+    """Durum makinesini mekanik olarak ``bekliyor``a alir.
+
+    ``_beklet`` 2026-09-20 kararindan beri acik karar talebi ister
+    (elle duraklatma yoktur, bkz. ``taslak_islemleri``). Bu modulun testleri
+    mukerrerlik motorunu kurmadan ``bekliyor`` durumunun kendisini sinayabilsin
+    diye gecis mekanizmasi dogrudan cagrilir; kapinin kendisi
+    ``test_paket_acik_soru_olmadan_bekletilemez`` ile sinanir.
+    """
+    # Bilerek ic mekanizma: kapiyi degil durumun kendisini siniyoruz.
+    return tsi._durumu_degistir(  # pyright: ignore[reportPrivateUsage]
+        oturum, paket_id, tst.PaketDurumu.BEKLIYOR
+    )
+
+
 KESIN_NESNE_TABLOLARI = nt.NESNE_TABLOLARI
 
 
@@ -293,11 +308,11 @@ def test_olmayan_paket_bulunamaz(ortam: Ortam) -> None:
 @pytest.mark.parametrize(
     ("adimlar", "beklenen"),
     [
-        ((tsi.paketi_beklet,), BEKLIYOR),
-        ((tsi.paketi_beklet, tsi.paketi_devam_et), CALISIYOR),
+        ((_beklet,), BEKLIYOR),
+        ((_beklet, tsi.paketi_devam_et), CALISIYOR),
         ((_iptal_et,), IPTAL),
-        ((tsi.paketi_beklet, _iptal_et), IPTAL),
-        ((tsi.paketi_beklet, tsi.paketi_devam_et, tsi.paketi_beklet), BEKLIYOR),
+        ((_beklet, _iptal_et), IPTAL),
+        ((_beklet, tsi.paketi_devam_et, _beklet), BEKLIYOR),
     ],
 )
 def test_izinli_gecisler(
@@ -321,9 +336,9 @@ def test_izinli_gecisler(
     ("hazirlik", "adim"),
     [
         ((), tsi.paketi_devam_et),  # calisiyor → calisiyor
-        ((tsi.paketi_beklet,), tsi.paketi_beklet),  # bekliyor → bekliyor
+        ((_beklet,), _beklet),  # bekliyor → bekliyor
         ((_iptal_et,), tsi.paketi_devam_et),  # iptal → calisiyor
-        ((_iptal_et,), tsi.paketi_beklet),  # iptal → bekliyor
+        ((_iptal_et,), _beklet),  # iptal → bekliyor
         ((_iptal_et,), _iptal_et),  # iptal → iptal
     ],
 )
@@ -381,7 +396,7 @@ def test_ayni_islemde_araya_giren_durum_degisikligi_reddedilir(
             {"p": paket_id},
         )
         with pytest.raises(tsi.PaketDurumuGecersiz, match="eşzamanlı"):
-            tsi.paketi_beklet(oturum, paket_id)
+            _beklet(oturum, paket_id)
         assert tsi.paket_getir(oturum, paket_id).durum == IPTAL.value
         oturum.execute(text("UPDATE tanim_paketi SET kod = 'ENVANTER2'"))
     assert _durum(ortam, paket_id) == IPTAL.value
@@ -427,7 +442,7 @@ def test_bekleyen_ve_iptal_pakette_aday_veri_degistirilemez(
     paket_id = _paket(ortam)
     islevler = _yazma_islevleri(ortam, env, paket_id)
     with ortam.veritabani.islem() as o:
-        (tsi.paketi_beklet if hedef is BEKLIYOR else _iptal_et)(o, paket_id)
+        (_beklet if hedef is BEKLIYOR else _iptal_et)(o, paket_id)
         once = tsi.paket_ayrinti(o, paket_id)
     taslak_once = _taslak_sayilar(ortam)
 
@@ -454,7 +469,7 @@ def test_devam_edilen_pakette_ayni_taslaklarla_yazilir(
     paket_id = _paket(ortam)
     islevler = _yazma_islevleri(ortam, env, paket_id)
     with ortam.veritabani.islem() as o:
-        tsi.paketi_beklet(o, paket_id)
+        _beklet(o, paket_id)
         once = tsi.paket_ayrinti(o, paket_id)
     with ortam.veritabani.islem() as o:
         tsi.paketi_devam_et(o, paket_id)
@@ -1255,7 +1270,7 @@ def test_yazmak_kaydetmek_degildir(ortam: Ortam, env: Envanter) -> None:
     assert taslak_tam().durum is CALISIYOR
 
     with ortam.veritabani.islem() as o:  # BEKLIYOR: korunur, yazma durur
-        tsi.paketi_beklet(o, paket_id)
+        _beklet(o, paket_id)
     assert taslak_tam().durum is BEKLIYOR
     with pytest.raises(tsi.PaketDurumuGecersiz):
         with ortam.veritabani.islem() as o:
@@ -1416,7 +1431,7 @@ def test_hatalar_ayni_islemde_yakalanir_sonraki_is_commit_olur(
         iliski = tsi.aday_iliski_ekle(o, env.depoda_id, raf.id, depo.id)
         tsi.aday_kayit_nesne_bagla(o, kayit.id, raf.id)
         tsi.aday_kayit_icerigini_degistir(o, kayit.id, {"adet": 5})
-        tsi.paketi_beklet(o, birinci)
+        _beklet(o, birinci)
     with ortam.veritabani.islem() as o:
         a = tsi.paket_ayrinti(o, birinci)
         assert a.durum is BEKLIYOR
@@ -1443,10 +1458,10 @@ def test_paket_durum_degisimi_yazma_hatasi_durumu_korur(
     with ortam.veritabani.islem() as o:
         monkeypatch.setattr(tsi, "simdi_utc", patla)
         with pytest.raises(RuntimeError, match="sentetik"):
-            tsi.paketi_beklet(o, paket_id)
+            _beklet(o, paket_id)
         monkeypatch.undo()
         assert tsi.paket_getir(o, paket_id).durum == CALISIYOR.value
-        tsi.paketi_beklet(o, paket_id)
+        _beklet(o, paket_id)
     assert _durum(ortam, paket_id) == BEKLIYOR.value
 
 
@@ -1593,7 +1608,7 @@ def test_yaris_d_paket_durumu_tek_gecis(ortam: Ortam) -> None:
         ortam,
         _hazirlik(paket_id),
         [
-            lambda o: tsi.paketi_beklet(o, paket_id),
+            lambda o: _beklet(o, paket_id),
             lambda o: _iptal_et(o, paket_id),
         ],
     )
@@ -1606,7 +1621,7 @@ def test_yaris_d_paket_durumu_tek_gecis(ortam: Ortam) -> None:
     if kazanan.durum == IPTAL.value:  # kaybeden yeniden denerse terminal red
         with pytest.raises(tsi.PaketDurumuGecersiz):
             with ortam.veritabani.islem() as o:
-                tsi.paketi_beklet(o, paket_id)
+                _beklet(o, paket_id)
         assert _durum(ortam, paket_id) == IPTAL.value
 
 
@@ -1770,3 +1785,15 @@ def test_yazma_siniri_yalniz_kendi_tablosunun_benzersizligini_esler(
         assert tsi.aday_ozellikleri_oku(o, raf.id) == {"kod": "A1"}
     assert _sayi(ortam, tst.ADAY_NESNE_ILISKISI) == 1
     assert _sayi(ortam, tst.ADAY_KAYIT_NESNE) == 1
+
+
+def test_paket_acik_soru_olmadan_bekletilemez(ortam: Ortam) -> None:
+    """Elle duraklatma yoktur (karar 2026-09-20): ``bekliyor`` tek bir anlama
+    gelir, cevaplanmamis bir karar talebi var. Acik soru olmadan bekletme
+    reddedilir ve durum degismez; mukerrerlik motoru soruyu yazdiktan sonra
+    ayni kapidan gecer (``test_mukerrerlik``)."""
+    paket_id = _paket(ortam)
+    with pytest.raises(tsi.PaketDurumuGecersiz, match="Elle duraklatma yoktur"):
+        with ortam.veritabani.islem() as oturum:
+            tsi.paketi_beklet(oturum, paket_id)
+    assert _durum(ortam, paket_id) == CALISIYOR.value

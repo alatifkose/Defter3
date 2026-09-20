@@ -56,7 +56,7 @@ DEFTERIKI_DEGISKENLERI = (
 )
 BEKLEME_SANIYE = 120
 BASLANGIC_SURUMU = "0001"
-GUNCEL_SURUM = "0011"
+GUNCEL_SURUM = "0012"
 ORTAK_PAKET_SURUMU = "0010"
 ONAY_SURUMU = "0008"
 TASLAK_SURUMU = "0007"
@@ -2028,6 +2028,125 @@ def test_0010_0011_bos_veritabani_dongusu_semayi_degistirmez(
         goc(GUNCEL_SURUM)
         son = _sema(v)
         goc(ORTAK_PAKET_SURUMU, geri=True)
+        assert _sema_sade(v) == on
+        goc(GUNCEL_SURUM)
+        assert _sema(v) == son
+        assert not any(ad.endswith(("_yeni", "_tasima")) for _, ad, _ in son)
+        with v.islem() as oturum:
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+    finally:
+        v.kapat()
+
+
+def test_0011_0012_denetim_satirlarini_korur_ve_dolu_geri_alinmaz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0012`` yalnız kontrol kısıtını genişletir: mevcut denetim satırları
+    olduğu gibi kalır, hiçbiri dönüştürülmez (geçmiş yorumla değiştirilmez).
+    Yeni olay adlarından satır varken geri alma uygulanmaz; satır silinince
+    geri alınır ve ``head`` sıfırdan kurulanla aynı şemayı verir."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    def olaylar() -> list[tuple[int, str]]:
+        with v.islem() as oturum:
+            return [
+                (int(k), str(o))
+                for k, o in oturum.execute(
+                    text("SELECT id, olay FROM denetim_izi ORDER BY id")
+                ).all()
+            ]
+
+    try:
+        goc("0011")
+        with v.islem() as oturum:
+            baslangic = (
+                (1, "karar_talebi_acildi"),
+                (2, "nesne_birlestirildi"),
+            )
+            for kimlik, olay in baslangic:
+                oturum.execute(
+                    text(
+                        "INSERT INTO denetim_izi "
+                        "(id, olay, olay_zamani, aktor_turu, aktor_kimligi) VALUES "
+                        f"({kimlik}, '{olay}', '2026-09-20 10:00:00', "
+                        "'kullanici', 'test')"
+                    )
+                )
+            # 0011'de yeni ad kontrol kısıtına takılır
+            with pytest.raises(IntegrityError):
+                oturum.execute(
+                    text(
+                        "INSERT INTO denetim_izi "
+                        "(id, olay, olay_zamani, aktor_turu, aktor_kimligi) VALUES "
+                        "(3, 'karar_talebi_pakete_baglandi', "
+                        "'2026-09-20 10:00:00', 'kullanici', 'test')"
+                    )
+                )
+        onceki = olaylar()
+
+        goc(GUNCEL_SURUM)
+        assert olaylar() == onceki  # satırlar dönüştürülmedi
+        with v.islem() as oturum:  # yeni adlar artık yazılabilir
+            for kimlik, olay in (
+                (3, "karar_talebi_pakete_baglandi"),
+                (4, "karar_talebi_kokeni_devredildi"),
+            ):
+                oturum.execute(
+                    text(
+                        "INSERT INTO denetim_izi "
+                        "(id, olay, olay_zamani, aktor_turu, aktor_kimligi) VALUES "
+                        f"({kimlik}, '{olay}', '2026-09-20 10:00:00', "
+                        "'kullanici', 'test')"
+                    )
+                )
+        dolu_sema = _sema(v)
+
+        with pytest.raises(RuntimeError, match="0012 ile gelen olay"):
+            goc("0011", geri=True)
+        assert _sema(v) == dolu_sema  # başarısız geri alma şemayı bozmadı
+        assert len(olaylar()) == 4
+
+        with v.islem() as oturum:
+            oturum.execute(text("DELETE FROM denetim_izi WHERE id IN (3, 4)"))
+        goc("0011", geri=True)
+        assert olaylar() == onceki
+        goc(GUNCEL_SURUM)
+        assert not any(ad.endswith("_yeni") for _, ad, _ in _sema(v))
+        with v.islem() as oturum:
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+    finally:
+        v.kapat()
+
+
+def test_0011_0012_bos_veritabani_dongusu_semayi_degistirmez(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0011 → 0012 → 0011 → 0012``: ``denetim_izi``nin yeniden kurulması
+    şemayı kaydırmaz, geçici tablo ve indeks bırakmaz."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    try:
+        goc("0011")
+        on = _sema_sade(v)
+        goc(GUNCEL_SURUM)
+        son = _sema(v)
+        goc("0011", geri=True)
         assert _sema_sade(v) == on
         goc(GUNCEL_SURUM)
         assert _sema(v) == son

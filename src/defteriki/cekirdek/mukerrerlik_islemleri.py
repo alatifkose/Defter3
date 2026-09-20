@@ -781,7 +781,7 @@ def _talebi_pakete_bagla(
         oturum.flush()
         olay_yaz(
             oturum,
-            DenetimOlayi.KARAR_TALEBI_ACILDI,
+            DenetimOlayi.KARAR_TALEBI_PAKETE_BAGLANDI,
             aktor,
             islem_paketi_id=paket_id,
             karar_talebi_id=talep.id,
@@ -1576,7 +1576,7 @@ def _kokeni_devret(
         oturum.flush()
         olay_yaz(
             oturum,
-            DenetimOlayi.KARAR_TALEBI_ACILDI,
+            DenetimOlayi.KARAR_TALEBI_KOKENI_DEVREDILDI,
             aktor,
             islem_paketi_id=yeni.islem_paketi_id,
             karar_talebi_id=yeni.id,

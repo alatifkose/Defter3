@@ -91,6 +91,15 @@ class DenetimOlayi(StrEnum):
     BIRLESIM_YENIDEN_BAGLANDI = "birlesim_yeniden_baglandi"
     """Eski bir birleşimin kanonik hedefi, hedefin kendisi birleşince yeni
     kanonik nesneye bağlandı (zincir düzleştirildi)."""
+    KARAR_TALEBI_PAKETE_BAGLANDI = "karar_talebi_pakete_baglandi"
+    """Mevcut bir talebe bir paket daha bağlandı; yeni talep açılmadı."""
+    KARAR_TALEBI_KOKENI_DEVREDILDI = "karar_talebi_kokeni_devredildi"
+    """Mevcut bir talep bağımsız kökeni devraldı; yeni talep açılmadı.
+
+    Bu ikisi 2026-09-20 bağımsız denetiminin 2. bulgusuyla ayrıldı (göç
+    ``0012``): üçü de ``KARAR_TALEBI_ACILDI`` yazdığı için denetim izinden
+    "kaç karar talebi açıldı" diye saymak yanlış sonuç veriyordu. Artık o ad
+    yalnız gerçekten açılan talebi anlatır (``_talep_ac``)."""
 
 
 @dataclass(frozen=True, slots=True)

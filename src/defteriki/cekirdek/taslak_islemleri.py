@@ -13,6 +13,13 @@ tamlık kapısı, atomik finalizasyon) Aşama 4.8'in işidir; burada yoktur.
     CALISIYOR → BEKLIYOR → CALISIYOR      (beklet / devam et)
     CALISIYOR → IPTAL,  BEKLIYOR → IPTAL  (iptal; terminal)
 
+``bekliyor`` **tek bir anlama gelir**: paketin cevaplanmamış bir karar talebi
+var (karar 2026-09-20, Abdüllatif). Elle duraklatma diye bir işlem yoktur;
+``paketi_beklet`` açık talep yokken reddeder, ``paketi_devam_et`` açık talep
+varken reddeder. İkisi birlikte durumu açık talep varlığına bağlar, yani
+geçişi kimin çağırdığından bağımsız olarak ``bekliyor`` ile "açık sorusu var"
+aynı şeydir.
+
 Paket yalnız ``tamamlandi`` durumundaki okumadan oluşturulur (``basladi``
 okuma için ``OkumaDurumuGecersiz``). Paket durumu yazma yetkisini belirler:
 aday veriyi değiştiren her servis paketi merkezi ``yazilabilir_paket`` ile
@@ -469,29 +476,57 @@ def paket_olustur(oturum: Session, okuma_id: int) -> IslemPaketi:
     return paket
 
 
+def _acik_talebi_var_mi(oturum: Session, paket_id: int) -> bool:
+    """Paketin açık karar talebi var mı (açılış paketi ya da sonradan bağlanan)?"""
+    return (
+        oturum.execute(
+            select(KararTalebi.id).where(
+                or_(
+                    KararTalebi.islem_paketi_id == paket_id,
+                    KararTalebi.id.in_(
+                        select(KararTalebiPaketi.karar_talebi_id).where(
+                            KararTalebiPaketi.islem_paketi_id == paket_id
+                        )
+                    ),
+                ),
+                KararTalebi.durum == TalepDurumu.ACIK.value,
+            )
+        ).first()
+        is not None
+    )
+
+
 def paketi_beklet(oturum: Session, paket_id: int) -> IslemPaketi:
-    """``calisiyor → bekliyor``: taslak korunur, yazma durur."""
-    return _durumu_degistir(oturum, paket_id, PaketDurumu.BEKLIYOR)
+    """``calisiyor → bekliyor``: taslak korunur, yazma durur.
+
+    **Yalnız açık karar talebi varken** (karar 2026-09-20, Abdüllatif). Elle
+    duraklatma diye bir işlem yoktur: ``bekliyor`` tek bir anlama gelir —
+    cevaplanmamış bir soru var. Sebepsiz bekletilebildiği sürece ``bekliyor``
+    iki anlam taşıyordu ve ``mukerrerlik_islemleri._paket_durumunu_esitle``
+    ikisini ayırt edemediği için sebepsiz bekletmeyi kendiliğinden kaldırıyordu
+    (eşleşmesiz bir tarama bile paketi ``calisiyor`` yapıyordu). Kural artık
+    servis sınırında zorlanır, çağıranın kim olduğundan bağımsız.
+
+    Çok kullanıcılı bir üründe "bu çalışmaya şimdi dokunmayın" düğmesi
+    gerekebilir; o gün bekleme **nedeni** ayrı bir alanda saklanır ve bu kapı
+    ona göre genişler. Bugün öyle bir düğme yok, o yüzden ikinci anlam da yok.
+    Durum makinesinin kendisini sınayan testler ``_durumu_degistir``i doğrudan
+    kullanır.
+    """
+    paket = paket_getir(oturum, paket_id)  # olmayan paket önce bulunamaz
+    if not _acik_talebi_var_mi(oturum, paket.id):
+        raise PaketDurumuGecersiz(
+            f"işlem paketi {paket.id}: açık karar talebi yok; paket yalnız "
+            "cevaplanmamış bir soru varken bekler. Elle duraklatma yoktur."
+        )
+    return _durumu_degistir(oturum, paket.id, PaketDurumu.BEKLIYOR)
 
 
 def paketi_devam_et(oturum: Session, paket_id: int) -> IslemPaketi:
     """``bekliyor → calisiyor``: aynı paket, aynı taslaklarla sürer.
     ``iptal`` paket yeniden açılamaz; açık karar talebi varken devam edilemez
     (Aşama 4.6: paket durumu açık talep sayısından türer)."""
-    acik = oturum.execute(
-        select(KararTalebi.id).where(
-            or_(
-                KararTalebi.islem_paketi_id == paket_id,
-                KararTalebi.id.in_(
-                    select(KararTalebiPaketi.karar_talebi_id).where(
-                        KararTalebiPaketi.islem_paketi_id == paket_id
-                    )
-                ),
-            ),
-            KararTalebi.durum == TalepDurumu.ACIK.value,
-        )
-    ).first()
-    if acik is not None:
+    if _acik_talebi_var_mi(oturum, paket_id):
         raise PaketDurumuGecersiz(
             f"işlem paketi {paket_id}: açık karar talebi var; bütün talepler "
             "çözülmeden devam edilemez."
