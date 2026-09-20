@@ -34,8 +34,11 @@ terminal ``GECERSIZ`` duruma geçer (``taslak_islemleri.paketi_iptal_et``).
 ``GECERSIZ`` bir ``AYRI`` kararı değildir — ``karar`` boş kalır, satır
 geçmişte durur — ama açık talep sayılmaz: aynı çift başka bir pakette yeniden
 değerlendirilebilir, yoksa iptal edilen bir paket o çifti sonsuza kadar
-kilitlerdi. Bekleyen karar yalnız ilgili paketi ve şüpheli ucu durdurur;
-sistem genelinde kilit yoktur.
+kilitlerdi. Aynı durum ikinci bir nedenle daha kullanılır: bir birleşmeden
+sonra uçları kanonik olmaktan çıkan açık kesin çift talepleri de hükümsüz
+kalır ve soru kanonik uçlarla yeniden sorulur (bkz. "Kanonik kimlik ve
+tarihsel kimlik"). Bekleyen karar yalnız ilgili paketi ve şüpheli ucu
+durdurur; sistem genelinde kilit yoktur.
 
 **Kararı yalnız kullanıcı verir.** ``karar_ver`` aktörü ``KULLANICI``
 olmayan çağrıyı ``KararKaynagiGecersiz`` ile reddeder ve hiçbir şey yazmaz;
@@ -43,8 +46,12 @@ veritabanında da ``karar_aktor_turu`` yalnız ``kullanici`` olabilir. Ajan ve
 sistem tarama yapar, şüphe açar, denetim olayı üretir; kullanıcı yerine karar
 veremez. Güvenli otomatik karar motoru (Aşama 4.9) henüz yoktur.
 
-**Karar.** ``AYRI`` şüpheyi kapatır. ``AYNI`` çözümlemeyi / birleştirmeyi tek
-transaction içinde uygular. ``KARARSIZ`` şüpheyi çözmez: talep açık kalır,
+**Karar.** ``AYRI`` şüpheyi kapatır ve bu karar kimlikler sonraki
+birleşmelerle değişse de korunur. ``AYNI`` çözümlemeyi / birleştirmeyi
+uygular. ``karar_ver``in bütün yazmaları **tek bir dış SAVEPOINT**
+içindedir: bir adım düşerse çağrının hiçbir değişikliği kalmaz, çağıran
+hatayı yakalayıp dış transaction'ı commit etse bile. ``KARARSIZ`` şüpheyi
+çözmez: talep açık kalır,
 paket ``BEKLIYOR`` kalır, karar yalnız denetim izine yazılır. Aynı talebe
 ikinci kez karar uygulanmaz: kapatma koşullu güncellemedir (``UPDATE ...
 WHERE durum = 'acik'``), iki bağlantı aynı anda cevaplarsa yalnız biri
@@ -79,6 +86,17 @@ tek bir **kanonik** kesin nesnedir; ``kanonik_nesneyi_bul`` onu **tek
 sıçramada** verir, ``adayin_kesin_nesnesi`` aynı şeyi aday için yapar. Buna iki
 kural hizmet eder:
 
+* *Geçmiş ``AYRI`` kararı aşılmaz.* Birleşmeden önce iki kanonik kümenin
+  bütün üyeleri (önceki birleşmelerle katılanlar dahil) karşılaştırılır;
+  herhangi iki üye arasında kullanıcının verdiği bir ``AYRI`` varsa birleşme
+  ``KararCelismesi`` ile reddedilir ve hiçbir kalıcı değişiklik kalmaz. Eski
+  karar silinmez, değiştirilmez; çelişkiyi çekirdek çözmez.
+* *Bayat talep kalmaz.* Birleşen nesneyi gösteren açık kesin çift talepleri
+  terminal ``GECERSIZ`` olur ve soru, hâlâ geçerliyse, aynı işlem içinde
+  zincirleme denetimle kanonik uçlarla yeniden açılır: ne kalıcı bekleme, ne
+  mükerrer karar, ne benzersizlik ihlali. İki ucu aynı kanonik nesneye düşen
+  talep yeniden sorulmaz. Aday talepleri bu uzlaştırmaya girmez; kesin uçları
+  zaten karar anında kanonik nesneye çözülür.
 * *Birleşim zinciri kurulmaz.* ``nesne_birlesimi.hedef_nesne_id`` kullanıcının
   o günkü kararıdır ve değişmez; ``kanonik_nesne_id`` ise bugünkü kanonik
   nesnedir. Hedef sonradan başka bir nesneye birleşirse eski satırların
@@ -121,7 +139,7 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from sqlalchemy import and_, func, select, tuple_, update
+from sqlalchemy import and_, func, or_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -218,6 +236,18 @@ class KararSonucu:
     devir: DevirOzeti | None = None
     yeni_talepler: tuple[KararTalebi, ...] = field(default_factory=tuple)
     """Zincirleme denetimin açtığı yeni talepler."""
+    gecersiz_kalan_talepler: tuple[KararTalebi, ...] = field(default_factory=tuple)
+    """Birleşme yüzünden uçları kanonik olmaktan çıktığı için hükümsüz kalan
+    açık talepler; karar taşımazlar, geçmişte dururlar."""
+
+
+@dataclass(frozen=True, slots=True)
+class _Birlestirme:
+    """``_nesneleri_birlestir`` çıktısı."""
+
+    birlesim: NesneBirlesimi
+    devir: DevirOzeti
+    gecersiz_talepler: tuple[KararTalebi, ...]
 
 
 # --- yazma sınırı ---------------------------------------------------------------------
@@ -815,10 +845,19 @@ def karar_ver(
     """Açık karar talebine kullanıcı kararını uygular.
 
     ``AYRI`` talebi kapatır. ``AYNI`` çözümlemeyi (aday → kesin nesne) ya da
-    birleştirmeyi (kesin → kesin) aynı transaction içinde uygular; herhangi
-    bir doğrulama düşerse hiçbiri kalmaz. ``KARARSIZ`` talebi açık bırakır.
+    birleştirmeyi (kesin → kesin) uygular. ``KARARSIZ`` talebi açık bırakır.
     Kapalı talebe ikinci karar ``KararTalebiKapali`` verir; iki bağlantı aynı
     anda cevaplarsa yalnız biri kazanır.
+
+    **Bütün yazmalar tek bir dış SAVEPOINT içindedir** (2026-09-20 ikinci
+    incelemesi, bulgu 2). Talebin kapatılması, denetim olayları, çözümleme,
+    birleştirme, kanonik yeniden bağlama, açık talep uzlaştırması ve paket
+    durumu aynı atomiklik sınırındadır: herhangi bir adım düşerse bu çağrının
+    yaptığı **hiçbir** değişiklik kalmaz — çağıran hatayı yakalayıp dış
+    transaction'ı commit etse bile. Eskiden talebi kapatan SAVEPOINT kendi
+    başına tamamlandığı için "talep ``cozuldu/ayni`` ama birleşim yok" gibi
+    yarım bir durum kalıcı olabiliyordu. Servis dış transaction'a dokunmaz:
+    çağıranın bu çağrıdan **önce** yaptığı bağımsız değişiklikler korunur.
     """
     karar = Karar(karar)
     _karar_kaynagini_dogrula(aktor)
@@ -826,9 +865,10 @@ def karar_ver(
     talep = karar_talebi_getir(oturum, karar_talebi_id)
     if talep.durum == TalepDurumu.GECERSIZ.value:
         raise KararTalebiKapali(
-            f"karar talebi {talep.id} geçersiz: paketi iptal edildiği için "
-            "hükümsüz kaldı. Geçersizlik bir kullanıcı kararı değildir ve talep "
-            "yeniden karara açılmaz; aynı çift yeni bir pakette değerlendirilir."
+            f"karar talebi {talep.id} geçersiz: hükümsüz kaldı (paketi iptal "
+            "edildi ya da bir ucu birleşme sonucu kanonik olmaktan çıktı). "
+            "Geçersizlik bir kullanıcı kararı değildir ve talep yeniden karara "
+            "açılmaz; soru hâlâ geçerliyse kanonik uçlarla yeniden sorulur."
         )
     if talep.durum != TalepDurumu.ACIK.value:
         raise KararTalebiKapali(
@@ -842,7 +882,20 @@ def karar_ver(
                 f"işlem paketi {paket.id} iptal (terminal); talebine karar "
                 "verilmez ve paket diriltilmez."
             )
+    with _yazma_siniri(oturum):  # dış SAVEPOINT: ya hepsi ya hiçbiri
+        return _karari_uygula(oturum, talep, karar, aktor, gerekce, paket_id)
 
+
+def _karari_uygula(
+    oturum: Session,
+    talep: KararTalebi,
+    karar: Karar,
+    aktor: Aktor,
+    gerekce: str | None,
+    paket_id: int | None,
+) -> KararSonucu:
+    """``karar_ver``in yazan gövdesi; çağıranın açtığı dış SAVEPOINT içinde
+    çalışır ve kendi başına işlem sınırı açmaz."""
     if karar is Karar.KARARSIZ:
         olay_yaz(
             oturum,
@@ -870,8 +923,7 @@ def karar_ver(
     )
 
     cozumleme: AdayNesneCozumlemesi | None = None
-    birlesim: NesneBirlesimi | None = None
-    devir: DevirOzeti | None = None
+    birlestirme: _Birlestirme | None = None
     yeni_talepler: tuple[KararTalebi, ...] = ()
     if karar is Karar.AYRI:
         olay_yaz(
@@ -885,21 +937,31 @@ def karar_ver(
             aday_nesne_id=talep.aday_nesne_id,
         )
     elif talep.aday_nesne_id is not None:
-        cozumleme, birlesim, devir = _adayi_cozumle(oturum, talep, aktor)
-        if birlesim is not None:
+        cozumleme, birlestirme = _adayi_cozumle(oturum, talep, aktor)
+        if birlestirme is not None:
             yeni_talepler = tuple(
-                _zincirleme_denetle(oturum, birlesim.hedef_nesne_id, paket_id, aktor)
+                _zincirleme_denetle(
+                    oturum, birlestirme.birlesim.hedef_nesne_id, paket_id, aktor
+                )
             )
     else:
         kaynak_id = talep.kaynak_nesne_id
         assert kaynak_id is not None  # kontrol kısıtı: uçlardan tam biri dolu
-        birlesim, devir = _nesneleri_birlestir(
+        birlestirme = _nesneleri_birlestir(
             oturum, talep, kaynak_id, talep.hedef_nesne_id, aktor
         )
         yeni_talepler = tuple(
             _zincirleme_denetle(oturum, talep.hedef_nesne_id, paket_id, aktor)
         )
 
+    gecersiz = () if birlestirme is None else birlestirme.gecersiz_talepler
+    # Hükümsüz kalan talep başka bir pakete aitse o paket de artık beklemiyor
+    # olabilir; durum açık talep sayısından türediği için hepsi eşitlenir.
+    for diger_paket_id in sorted(
+        {t.islem_paketi_id for t in gecersiz if t.islem_paketi_id is not None}
+        - {paket_id}
+    ):
+        _paket_durumunu_esitle(oturum, diger_paket_id, aktor)
     durum = (
         None if paket_id is None else _paket_durumunu_esitle(oturum, paket_id, aktor)
     )
@@ -908,9 +970,10 @@ def karar_ver(
         cozuldu=True,
         paket_durumu=durum,
         cozumleme=cozumleme,
-        birlesim=birlesim,
-        devir=devir,
+        birlesim=None if birlestirme is None else birlestirme.birlesim,
+        devir=None if birlestirme is None else birlestirme.devir,
         yeni_talepler=yeni_talepler,
+        gecersiz_kalan_talepler=gecersiz,
     )
 
 
@@ -976,16 +1039,37 @@ def _talebi_kapat(
 
 
 def _ayri_karari(
-    oturum: Session, hedef_nesne_id: int, kaynak_nesne_id: int
+    oturum: Session, kume: Sequence[int], karsi_kume: Sequence[int]
 ) -> KararTalebi | None:
-    """Bu kesin çift için kullanıcının verdiği ``AYRI`` kararı; yoksa ``None``."""
+    """İki kanonik kümenin **herhangi iki üyesi** arasındaki ``AYRI`` kararı.
+
+    Kümeler ``_kimlik_gecmisi_idleri`` ile bulunur: kanonik nesnenin kendisi ve
+    ona daha önce birleşmiş bütün nesneler. Kimlikler birleşmelerle değiştiği
+    için doğrudan çifte bakmak yetmez (2026-09-20 ikinci incelemesi, bulgu 1):
+    kullanıcı ``N1 ≠ N3`` demişse ve ``N3`` sonradan ``N2``ye birleşmişse
+    ``N1 = N2`` kararı eski kararı aşar. Zincir ne kadar uzun olursa olsun
+    düzleştirme sayesinde küme tek sorguda bulunur.
+
+    Karar satırının yönü sonucu değiştirmez: kesin çift ``kaynak > hedef``
+    sırasına normalleştirildiğinden AYRI kararı hangi kümenin üyesini hedef
+    yazdıysa o yazılmıştır, iki yön de aranır.
+    """
+    bu, karsi = sorted(set(kume)), sorted(set(karsi_kume))
     return (
         oturum.execute(
             select(KararTalebi)
             .where(
-                KararTalebi.hedef_nesne_id == hedef_nesne_id,
-                KararTalebi.kaynak_nesne_id == kaynak_nesne_id,
                 KararTalebi.karar == Karar.AYRI.value,
+                or_(
+                    and_(
+                        KararTalebi.hedef_nesne_id.in_(bu),
+                        KararTalebi.kaynak_nesne_id.in_(karsi),
+                    ),
+                    and_(
+                        KararTalebi.hedef_nesne_id.in_(karsi),
+                        KararTalebi.kaynak_nesne_id.in_(bu),
+                    ),
+                ),
             )
             .order_by(KararTalebi.id)
         )
@@ -996,7 +1080,7 @@ def _ayri_karari(
 
 def _adayi_cozumle(
     oturum: Session, talep: KararTalebi, aktor: Aktor
-) -> tuple[AdayNesneCozumlemesi, NesneBirlesimi | None, DevirOzeti | None]:
+) -> tuple[AdayNesneCozumlemesi, _Birlestirme | None]:
     """Aday nesneyi mevcut kesin nesneye kalıcı olarak çözümler.
 
     Aday satır kesin tabloya taşınmaz; adayın özellikleri, ilişkileri ve kayıt
@@ -1011,11 +1095,12 @@ def _adayi_cozumle(
     İkisi aynı kanonik nesneye çıkıyorsa yapılacak yeni bir şey yoktur; karar
     yine denetim izine yazılır.
 
-    Kullanıcı o iki kesin nesne için daha önce ``AYRI`` demişse çelişki
-    sessizce çözülmez: ``KararCelismesi`` yükselir, işlem tamamen geri alınır,
-    talep açık kalır. Eski kullanıcı kararını ezmek de yeni kullanıcı kararını
-    yok saymak da çekirdeğin işi değildir; kullanıcı ya bu talebe ``AYRI`` der
-    ya da iki kesin nesneyi kendisi ele alır.
+    Kullanıcı o iki kesin nesnenin (ya da onlara birleşmiş eski kimliklerin)
+    herhangi bir çifti için daha önce ``AYRI`` demişse çelişki sessizce
+    çözülmez: ``_nesneleri_birlestir`` ``KararCelismesi`` yükseltir, işlem
+    tamamen geri alınır, talep açık kalır. Eski kullanıcı kararını ezmek de
+    yeni kullanıcı kararını yok saymak da çekirdeğin işi değildir; kullanıcı
+    ya bu talebe ``AYRI`` der ya da iki kesin nesneyi kendisi ele alır.
     """
     aday_id = talep.aday_nesne_id
     assert aday_id is not None  # kontrol kısıtı: uçlardan tam biri dolu
@@ -1043,7 +1128,7 @@ def _adayi_cozumle(
                 nesne_id=hedef_id,
                 aday_nesne_id=aday_id,
             )
-        return cozumleme, None, None
+        return cozumleme, None
 
     onceki_id = kanonik_nesneyi_bul(oturum, mevcut.nesne_id)
     if onceki_id == hedef_id:
@@ -1057,21 +1142,10 @@ def _adayi_cozumle(
             aday_nesne_id=aday_id,
             gerekce=f"aday zaten kanonik nesne {hedef_id} olarak çözümlü",
         )
-        return mevcut, None, None
+        return mevcut, None
 
     yeni_hedef_id, kaynak_id = min(onceki_id, hedef_id), max(onceki_id, hedef_id)
-    celisen = _ayri_karari(oturum, yeni_hedef_id, kaynak_id)
-    if celisen is not None:
-        raise KararCelismesi(
-            f"aday nesne {aday_id} hem {onceki_id} hem {hedef_id} kesin "
-            f"nesnesi kabul edilirse bu iki nesne aynı olur; oysa karar talebi "
-            f"{celisen.id} ile {yeni_hedef_id} ve {kaynak_id} için "
-            "'ayrı' denmişti. Çelişkiyi çekirdek çözmez: bu talebe 'ayrı' deyin "
-            "ya da iki kesin nesneyi önce kendiniz ele alın."
-        )
-    birlesim, devir = _nesneleri_birlestir(
-        oturum, talep, kaynak_id, yeni_hedef_id, aktor
-    )
+    birlestirme = _nesneleri_birlestir(oturum, talep, kaynak_id, yeni_hedef_id, aktor)
     olay_yaz(
         oturum,
         DenetimOlayi.ADAY_NESNEYE_COZUMLENDI,
@@ -1085,7 +1159,7 @@ def _adayi_cozumle(
             f"nesnesini {yeni_hedef_id} ile birleştirdi"
         ),
     )
-    return mevcut, birlesim, devir
+    return mevcut, birlestirme
 
 
 def _sartlari_hedefe_kopyala(oturum: Session, kaynak: Nesne, hedef: Nesne) -> None:
@@ -1155,13 +1229,73 @@ def _birlesimleri_kanonige_bagla(
     return [satir.kaynak_nesne_id for satir in satirlar]
 
 
+def _acik_talepleri_uzlastir(
+    oturum: Session, birlesen_nesne_id: int, talep: KararTalebi, aktor: Aktor
+) -> list[KararTalebi]:
+    """Birleşen nesneyi gösteren açık **kesin çift** taleplerini hükümsüz kılar.
+
+    Birleşmeden sonra o talepler artık kanonik olmayan bir kimliği anlatır:
+    ``N1 ?= N3`` talebi ``N3 → N2`` olduktan sonra fiilen ``N1 ?= N2``dir. Açık
+    bırakılırsa üç şey olur: ``AYNI`` cevabı ``BirlestirmeGecersiz`` ile
+    reddedilir (kalıcı bekleme), zincirleme denetimin kanonik uçlarla açtığı
+    talep aynı soruyu ikinci kez sorar (mükerrer karar) ve iki açık talep aynı
+    kanonik çifte düşerse kısmi benzersiz indeks ihlal edilebilir.
+
+    Bu yüzden eski talep terminal ``GECERSIZ`` duruma geçer — ``AYRI`` kararı
+    **değildir**, ``karar`` boş kalır ve satır geçmişte durur — ve soru,
+    doğruysa, birleşmenin hemen ardından çalışan zincirleme denetimle kanonik
+    uçlarla yeniden açılır. İki ucu aynı kanonik nesneye düşen talep yeniden
+    açılmaz: tarama nesneyi kendisiyle karşılaştırmaz.
+
+    Yeni bir durum ya da şema gerekmedi: ``GECERSIZ`` zaten "karar verilmeden
+    hükümsüz kalan talep" demektir (paket iptalinden beri), burada hükümsüzlük
+    nedeni farklıdır ve denetim izinin gerekçesinde yazar.
+
+    Aday talepleri bu uzlaştırmaya girmez: onların kesin ucu zaten karar anında
+    ``kanonik_nesneyi_bul`` ile çözülür, bayat kalmazlar.
+    """
+    with _yazma_siniri(oturum):
+        satirlar = list(
+            oturum.execute(
+                select(KararTalebi)
+                .where(
+                    KararTalebi.durum == TalepDurumu.ACIK.value,
+                    KararTalebi.kaynak_nesne_id.is_not(None),
+                    or_(
+                        KararTalebi.kaynak_nesne_id == birlesen_nesne_id,
+                        KararTalebi.hedef_nesne_id == birlesen_nesne_id,
+                    ),
+                )
+                .order_by(KararTalebi.id)
+            ).scalars()
+        )
+        simdi = simdi_utc()
+        for satir in satirlar:
+            satir.durum = TalepDurumu.GECERSIZ.value
+            satir.gecersizlik_zamani = simdi
+        oturum.flush()
+        for satir in satirlar:
+            olay_yaz(
+                oturum,
+                DenetimOlayi.KARAR_TALEBI_GECERSIZ_KALDI,
+                aktor,
+                islem_paketi_id=satir.islem_paketi_id,
+                karar_talebi_id=satir.id,
+                gerekce=(
+                    f"nesne {birlesen_nesne_id} karar talebi {talep.id} ile "
+                    "birleşti; bu talebin ucu artık kanonik değil"
+                ),
+            )
+    return satirlar
+
+
 def _nesneleri_birlestir(
     oturum: Session,
     talep: KararTalebi,
     kaynak_nesne_id: int,
     hedef_nesne_id: int,
     aktor: Aktor,
-) -> tuple[NesneBirlesimi, DevirOzeti]:
+) -> _Birlestirme:
     """İki kesin nesneyi birleştirir: ilişkiler hedefe taşınır, şartlar hedefe
     kopyalanır, kaynak ``kapali`` olur ve kalıcı birleşim kaydı yazılır.
 
@@ -1169,6 +1303,12 @@ def _nesneleri_birlestir(
     talebinde ise ``Z = X`` ve ``Z = Y`` kararlarının doğurduğu ``X = Y``
     çiftidir. İkisi de kanonik nesne olmalıdır; birleşmiş bir nesne ne kaynak
     ne hedef olabilir.
+
+    **Geçmiş ``AYRI`` kararları korunur.** Birleşecek iki kanonik kümenin
+    herhangi iki üyesi (önceki birleşmelerle kümeye katılanlar dahil) arasında
+    kullanıcının verdiği bir ``AYRI`` kararı varsa birleşme ``KararCelismesi``
+    ile reddedilir. Eski karar silinmez, değiştirilmez, bağlantısı kopmaz;
+    reddedilen işlem hiçbir kalıcı değişiklik bırakmaz.
 
     Bütün adımlar çağıranın transaction'ı içindedir; ilişki devrinde bir
     hiyerarşi ya da çevrim ihlali çıkarsa hiçbiri uygulanmaz.
@@ -1181,6 +1321,19 @@ def _nesneleri_birlestir(
                 f"nesne {nesne.id} zaten başka bir nesneye birleştirilmiş; "
                 "birleşim zinciri kurulmaz."
             )
+    kaynak_kimlikleri = _kimlik_gecmisi_idleri(oturum, kaynak.id)
+    hedef_kimlikleri = _kimlik_gecmisi_idleri(oturum, hedef.id)
+    celisen = _ayri_karari(oturum, kaynak_kimlikleri, hedef_kimlikleri)
+    if celisen is not None:
+        raise KararCelismesi(
+            f"nesne {kaynak.id} ile {hedef.id} birleştirilemez: karar talebi "
+            f"{celisen.id} ile {celisen.hedef_nesne_id} ve "
+            f"{celisen.kaynak_nesne_id} için 'ayrı' denmişti ve bu nesneler "
+            f"bugün {hedef.id} ile {kaynak.id} kimliklerinin geçmişinde. "
+            "Çelişkiyi çekirdek çözmez: kullanıcı kararı silinmez ya da "
+            "ezilmez; bu talebe 'ayrı' deyin ya da eski kararı önce kendiniz "
+            "ele alın."
+        )
     devir = iliskileri_devret(oturum, kaynak.id, hedef.id)
     with _yazma_siniri(oturum):
         _sartlari_hedefe_kopyala(oturum, kaynak, hedef)
@@ -1217,7 +1370,8 @@ def _nesneleri_birlestir(
             ),
         )
     _birlesimleri_kanonige_bagla(oturum, kaynak.id, hedef.id, talep, aktor)
-    return birlesim, devir
+    gecersiz = _acik_talepleri_uzlastir(oturum, kaynak.id, talep, aktor)
+    return _Birlestirme(birlesim, devir, tuple(gecersiz))
 
 
 def _zincirleme_denetle(

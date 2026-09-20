@@ -496,9 +496,17 @@ def paketi_iptal_et(oturum: Session, paket_id: int, aktor: Aktor) -> IslemPaketi
     talebi reddeder). ``gecersiz`` talep ``AYRI`` kararı **değildir**: ``karar``
     boş kalır, satır geçmişte durur, denetim izine ``karar_talebi_gecersiz_kaldi``
     yazılır; kullanıcının vermediği bir karar kimseye yazılmaz.
+
+    Durum geçişi ve talep hükümsüzleştirmesi **tek bir dış SAVEPOINT**
+    içindedir (2026-09-20 ikinci incelemesi, bulgu 2): ikisinden biri düşerse
+    hiçbiri kalmaz, çağıran hatayı yakalayıp dış transaction'ı commit etse
+    bile "paket iptal ama talebi hâlâ açık" gibi yarım bir iptal oluşmaz.
+    Servis dış transaction'a dokunmaz; çağıranın bu çağrıdan önce yaptığı
+    bağımsız değişiklikler korunur.
     """
-    paket = _durumu_degistir(oturum, paket_id, PaketDurumu.IPTAL)
-    _acik_talepleri_gecersiz_kil(oturum, paket, aktor)
+    with _yazma_siniri(oturum):  # dış SAVEPOINT: ya hepsi ya hiçbiri
+        paket = _durumu_degistir(oturum, paket_id, PaketDurumu.IPTAL)
+        _acik_talepleri_gecersiz_kil(oturum, paket, aktor)
     return paket
 
 

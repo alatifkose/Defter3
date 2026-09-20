@@ -30,11 +30,13 @@ kanonik değerleri birebir karşılaştırır.
   ``durum`` ``acik`` iken ``karar`` boştur; ``cozuldu`` iken ``karar``
   ``ayni`` ya da ``ayri``dır (kontrol kısıtı). ``kararsiz`` kararı satıra
   yazılmaz: şüphe çözülmüş sayılmadığından talep açık kalır, karar yalnız
-  denetim izinde görünür. Üçüncü ve terminal durum ``gecersiz``tir: paketi
-  iptal edilen açık talep buraya geçer. ``karar`` yine boş kalır — iptal bir
-  kullanıcı kararı değildir; satır silinmez, geçmişte görünür, ama açık talep
-  kısmi benzersiz indeksinden ve "bu çift zaten değerlendirildi" denetiminden
-  çıkar, böylece aynı çift başka bir pakette yeniden değerlendirilebilir.
+  denetim izinde görünür. Üçüncü ve terminal durum ``gecersiz``tir: karar
+  verilmeden hükümsüz kalan talep. İki nedenle olur — paketi iptal edilmiştir
+  ya da bir ucu birleşme sonucu kanonik olmaktan çıkmıştır; neden denetim
+  izinin gerekçesindedir. ``karar`` yine boş kalır — ikisi de kullanıcı kararı
+  değildir; satır silinmez, geçmişte görünür, ama açık talep kısmi benzersiz
+  indeksinden ve "bu çift zaten değerlendirildi" denetiminden çıkar, böylece
+  aynı çift yeniden değerlendirilebilir.
   ``gecersizlik_zamani`` yalnız bu durumda doludur (kontrol kısıtı).
 
   Kararı **yalnız kullanıcı** verir: ``karar_aktor_turu`` veritabanı düzeyinde
@@ -116,8 +118,9 @@ class TalepDurumu(StrEnum):
     ACIK = "acik"
     COZULDU = "cozuldu"
     GECERSIZ = "gecersiz"
-    """Paketi iptal edildiği için hükümsüz kalan talep: karar verilmedi, satır
-    geçmişte durur, açık talep sayılmaz."""
+    """Karar verilmeden hükümsüz kalan talep: paketi iptal edilmiştir ya da bir
+    ucu birleşme sonucu kanonik olmaktan çıkmıştır. Satır geçmişte durur, açık
+    talep sayılmaz; neden denetim izindedir."""
 
 
 ACIK_OLMAYAN_DURUMLAR: tuple[TalepDurumu, ...] = (

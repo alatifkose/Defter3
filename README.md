@@ -17,8 +17,9 @@ veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de, Aşama 4.
 (nesne motoru), Aşama 4.4 (belge, arşiv, okuma ve kaynak) ve Aşama 4.5
 (işlem paketi ve taslak durumu) 2026-09-19'da, Aşama 4.6 (onay ve
 mükerrerlik) 2026-09-20'de bitti; 4.6'nın bağımsız inceleme bulguları aynı gün
-kapandı (göç `0009`, "Karar kaynağı, iptal ve kanonik kimlik"). Aşama 4.7
-(kesin kayıt) sırada.
+iki turda kapandı (göç `0009`, "Karar kaynağı, iptal ve kanonik kimlik";
+ikinci tur "AYRI geçmişi ve karar atomikliği"). Aşama 4.7 (kesin kayıt)
+sırada.
 Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
@@ -84,6 +85,11 @@ Bitenler:
   birleşen nesnenin kimlik geçmişi mükerrerlik korumasından düşmez, aday
   kimlikleri yeniden dağıtılmaz (`AUTOINCREMENT`) ("Karar kaynağı, iptal ve
   kanonik kimlik")
+* Aşama 4.6 ikinci inceleme turu (2026-09-20, şema değişmedi): geçmiş `AYRI`
+  kararları kimlikler birleşmelerle değişse de korunur (iki kanonik kümenin
+  bütün üyeleri denetlenir), birleşmeden sonra bayat kalan açık talepler
+  kanonik uçlara uzlaştırılır, `karar_ver` ve `paketi_iptal_et` tek bir dış
+  SAVEPOINT ile bütünüyle atomiktir ("AYRI geçmişi ve karar atomikliği")
 
 Henüz yok: kesin kayıt (hareket) verisi (Aşama 4.7), kesin kaydetme / paketi
 kesinleştirme (4.8), genel kural motoru (4.9), finans tanım paketi
@@ -1227,8 +1233,9 @@ Bekleyen karar yalnız ilgili paketi ve şüpheli ucu durdurur; mevcut kesin
 nesneler sistem genelinde kilitlenmez.
 
 **Karar kalıcıdır.** `AYRI` şüpheyi kapatır ve aynı çift aynı kanıtla yeniden
-durdurulmaz. `AYNI` çözümlemeyi ya da birleştirmeyi tek transaction içinde
-uygular. `KARARSIZ` şüpheyi çözmez: talep açık kalır, paket `BEKLIYOR` kalır,
+durdurulmaz; kimlikler sonraki birleşmelerle değişse de bu karar korunur
+("AYRI geçmişi ve karar atomikliği"). `AYNI` çözümlemeyi ya da birleştirmeyi
+tek transaction içinde uygular. `KARARSIZ` şüpheyi çözmez: talep açık kalır, paket `BEKLIYOR` kalır,
 karar yalnız denetim izine yazılır (bu yüzden `karar` sütununa `kararsiz`
 yazılmaz). Aynı talebe ikinci kez karar uygulanmaz: kapatma koşullu
 güncellemedir (`UPDATE ... WHERE durum = 'acik'`), iki bağlantı aynı anda
@@ -1370,6 +1377,57 @@ testle korunur); böylece `taslak_islemleri` iptal ederken denetim izine
 yazabilir ve taslak → kesin nesne import zinciri kurulmaz. Aktör türü tek
 yerde tanımlıdır ve `mukerrerlik_tablolari` onu denetim modülünden alır.
 
+### AYRI geçmişi ve karar atomikliği
+
+2026-09-20 ikinci inceleme turunun kapattığı iki bulgu. Şema değişmedi; göç
+zincirinin başı `0009`da kaldı.
+
+**Geçmiş `AYRI` kararı birleşmelerle aşılamaz.** Eskiden çelişki denetimi
+yalnız doğrudan kimlik çiftine bakıyordu, kesin ↔ kesin birleştirme yolunda
+ise hiç yoktu. Kimlikler birleşmelerle değiştiği için bu yetmiyordu: kullanıcı
+`N1 ≠ N3` dedikten sonra `N3 → N2` olunca `N1 = N2` kararı eski kararı sessizce
+aşıyordu. Artık birleşmeden **önce** iki kanonik kümenin bütün üyeleri
+karşılaştırılır — kümeye önceki birleşmelerle katılanlar dahil, zincir kaç adım
+derin olursa olsun, `AYRI` satırının yönü ne olursa olsun. Herhangi iki üye
+arasında kullanıcının verdiği bir `AYRI` varsa birleşme `KararCelismesi` ile
+reddedilir. Eski karar silinmez, değiştirilmez, bağlantısı koparılmaz;
+reddedilen işlem hiçbir kalıcı değişiklik bırakmaz. Kullanıcının çıkış yolu
+açıktır: bu talebe `AYRI` der ya da eski kararı kendisi ele alır. Çelişki
+çekirdek tarafından çözülmez, çünkü hangi kararın geçerli olduğu bir kullanıcı
+kararıdır.
+
+**Birleşmeden sonra açık talepler kanonik uçlara uzlaştırılır.** `N1 ?= N3`
+talebi `N3 → N2` olduktan sonra fiilen `N1 ?= N2`dir. Açık bırakılsaydı üç
+sorun çıkardı: `AYNI` cevabı `BirlestirmeGecersiz` ile reddedilirdi (kalıcı
+bekleme), zincirleme denetimin kanonik uçlarla açtığı talep aynı soruyu ikinci
+kez sorardı (mükerrer karar) ve iki açık talep aynı kanonik çifte düşünce kısmi
+benzersiz indeks ihlal edilebilirdi. Bu yüzden birleşen nesneyi gösteren açık
+**kesin çift** talepleri terminal `gecersiz` duruma geçer ve soru, hâlâ
+geçerliyse, aynı işlem içinde çalışan zincirleme denetimle kanonik uçlarla
+yeniden açılır. İki ucu aynı kanonik nesneye düşen talep yeniden açılmaz:
+soru kendiliğinden yanıtlanmıştır, kullanıcıdan ikinci bir karar beklenmez.
+Hükümsüz kalan talep başka bir pakete aitse o paketin durumu da eşitlenir.
+Aday talepleri bu uzlaştırmaya girmez; onların kesin ucu zaten karar anında
+kanonik nesneye çözülür. **Yeni bir durum ya da şema gerekmedi:** `gecersiz`
+zaten "karar verilmeden hükümsüz kalan talep" demektir, hükümsüzlük nedeni
+denetim izinin gerekçesinde yazar (`karar_talebi_gecersiz_kaldi`). Talep
+geçmişi bozulmaz: satırın eski uçları ve açılış bilgisi yerinde kalır, `karar`
+boş kalır.
+
+**`karar_ver` ve `paketi_iptal_et` bütünüyle atomiktir.** Yardımcıların kendi
+SAVEPOINT'leri yetmiyordu: talebi kapatan SAVEPOINT kendi başına tamamlandığı
+için, sonraki adım düşer ve çağıran hatayı yakalayıp dış transaction'ı commit
+ederse "talep `cozuldu/ayni` ama birleşim yok" ya da "paket `iptal` ama talebi
+hâlâ açık" gibi yarım bir durum kalıcı olabiliyordu. İki servis de artık
+bütün yazmalarını **tek bir dış SAVEPOINT** içinde yapar: talebin kapatılması,
+denetim olayları, çözümleme, birleştirme, kanonik yeniden bağlama, açık talep
+uzlaştırması ve paket durumu aynı atomiklik sınırındadır. Servis dış
+transaction'a dokunmaz (ne commit ne rollback), dolayısıyla çağıranın bu
+çağrıdan **önce** yaptığı bağımsız değişiklikler korunur. Gerçek veritabanıyla
+hata enjeksiyonu testleri bunu kanıtlar: ilk değişiklikten sonraki ve sonraki
+kritik adımlardaki hatalar çağıran tarafında yakalanır, dış transaction commit
+edilir, kalıcı durum yeni bir oturumdan okunur.
+
 **Eşzamanlılık.** Her yazma kendi SAVEPOINT'inde çalışır ve dar hata
 eşlemesinden geçer (4.5 kalıbı): kilit / anlık görüntü çakışması
 `MukerrerlikYazmaCakismasi`, aynı çift için eşzamanlı ikinci açık talep
@@ -1390,7 +1448,7 @@ değil, mevcut dünya üzerinde çözer: aday kayıt bağları hiç ellenmez, ad
 kesin nesne çözümlemesi ayrı bir köprü tabloda ilişkisel durur. Kesinleştirme
 4.8'dedir. `finans/` hâlâ boştur.
 
-**Testler** (`tests/test_mukerrerlik.py`, 76 test): sıfır şart protokolü
+**Testler** (`tests/test_mukerrerlik.py`, 91 test): sıfır şart protokolü
 çalıştırmaz; tek şart eşleşince şüphe; iki şartta yalnız birincisi ya da
 yalnız ikincisi eşleşse de şüphe (VEYA); hiçbiri eşleşmezse şüphe yok;
 seçilmemiş özellik eşleşse de şüphe yok; iki yönlü tarama şartsız ucu yakalar;
@@ -1431,6 +1489,20 @@ kesin nesneleri birleştirir ve adayın kesin hedefi belirsiz kalmaz, önceki
 `AYRI` kararına çarpan ikinci `AYNI` reddedilir ve her şey geri alınır,
 çözümlenmiş adayın hedefi birleşimden sonra tek adımda bulunur; silinen aday
 kimliği yeniden kullanılmaz (aynı paket içinde de).
+
+İkinci inceleme turunun regresyon testleri: birleşmiş eski kimlik üzerindeki
+`AYRI` kararı korunur ve işlem iz bırakmadan reddedilir, `AYRI` satırının ters
+yönü de (hedef ucu kaynak kümesinde) birleşmeyi durdurur, çok adımlı zincirin
+iki merge derinindeki üyesi de sayılır ve kullanıcıya `AYRI` çıkışı kalır,
+ilgisiz bir `AYRI` geçerli birleşmeyi engellemez; bayat açık talep hükümsüz
+kalır ve soru kanonik uçlarla tek talep olarak yeniden sorulur, hükümsüz
+talebe karar verilemez, iki ucu aynı kanonik nesneye düşen talep yeniden
+sorulmaz, başka pakete ait bayat talep o paketi de serbest bırakır; `karar_ver`
+dört ayrı kesme noktasında (ilk değişiklikten hemen sonrası, birleşim satırı
+yazıldıktan sonrası, uzlaştırma ve servisin son adımı) hiçbir kalıcı değişiklik
+bırakmaz ve çağıranın önceki bağımsız değişikliği korunur, aday çözümlemesi
+yolunda da yarım satır kalmaz, `paketi_iptal_et` iki kesme noktasında yarım
+iptal bırakmaz ve yeniden denenince olağan biçimde çalışır.
 
 Göç testleri (`tests/test_gocler.py`): `0007 → 0008 → 0007 → 0008` ve
 `0008 → 0009 → 0008 → 0009` döngüleri, satır varken geri almanın reddi
