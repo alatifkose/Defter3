@@ -149,7 +149,7 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from sqlalchemy import and_, func, or_, select, tuple_, update
+from sqlalchemy import Select, and_, func, or_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -218,6 +218,10 @@ class NesneBirlesmis(MukerrerlikHatasi):
     """Nesne başka bir nesneye birleşmiş; şart yalnız kanonik nesneye seçilir."""
 
 
+class SartKaynagiGecersiz(MukerrerlikHatasi):
+    """Mükerrerlik şartını kullanıcı dışında bir aktör seçmeye çalıştı."""
+
+
 class BirlestirmeGecersiz(MukerrerlikHatasi, ValueError):
     """Birleştirme bu uçlar için uygulanamaz."""
 
@@ -255,6 +259,20 @@ class KararSonucu:
     gecersiz_kalan_talepler: tuple[KararTalebi, ...] = field(default_factory=tuple)
     """Birleşme yüzünden uçları kanonik olmaktan çıktığı için hükümsüz kalan
     açık talepler; karar taşımazlar, geçmişte dururlar."""
+
+
+@dataclass(frozen=True, slots=True)
+class _TaramaSonucu:
+    """``_nesneyi_tara`` çıktısı: bu çağrının açtığı ve dokunduğu açık talepler.
+
+    ``dokunulan`` zaten açık olan, bu taramanın yeniden sorduğu talepleri
+    taşır. Köken devri ikisini birden kapsar (2026-09-20 altıncı tur): soruyu
+    bu tarama açmış olmasa da, bağımsız bir kararın yeniden sorduğu soru artık
+    yalnız bir paket tarafından ayakta tutulmuyordur.
+    """
+
+    acilan: tuple[KararTalebi, ...]
+    dokunulan: tuple[KararTalebi, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,27 +421,59 @@ def _kimlik_gecmisi_idleri(oturum: Session, nesne_id: int) -> list[int]:
     return [nesne_id, *sorted(birlesenler)]
 
 
+def _paketin_acik_talepleri(paket_id: int) -> Select[tuple[int]]:
+    """Bir paketin açık taleplerinin kimlikleri: açılış paketi ya da bağlanan."""
+    return (
+        select(KararTalebi.id)
+        .where(
+            or_(
+                KararTalebi.islem_paketi_id == paket_id,
+                KararTalebi.id.in_(
+                    select(KararTalebiPaketi.karar_talebi_id).where(
+                        KararTalebiPaketi.islem_paketi_id == paket_id
+                    )
+                ),
+            ),
+            KararTalebi.durum == TalepDurumu.ACIK.value,
+        )
+        .order_by(KararTalebi.id)
+    )
+
+
 def _acik_talep_sayisi(oturum: Session, islem_paketi_id: int) -> int:
     return int(
         oturum.execute(
-            select(func.count())
-            .select_from(KararTalebi)
-            .where(
-                or_(
-                    KararTalebi.islem_paketi_id == islem_paketi_id,
-                    KararTalebi.id.in_(
-                        select(KararTalebiPaketi.karar_talebi_id).where(
-                            KararTalebiPaketi.islem_paketi_id == islem_paketi_id
-                        )
-                    ),
-                ),
-                KararTalebi.durum == TalepDurumu.ACIK.value,
+            select(func.count()).select_from(
+                _paketin_acik_talepleri(islem_paketi_id).order_by(None).subquery()
             )
         ).scalar_one()
     )
 
 
 # --- şart seçimi ----------------------------------------------------------------------
+
+
+def _sart_kaynagini_dogrula(aktor: Aktor) -> None:
+    """Şartı yalnız kullanıcı seçer (2026-09-20 altıncı tur).
+
+    Kavramlar sözlüğü ("Mükerrerlik protokolü", 1. madde, Abdüllatif'in
+    onayıyla 2026-09-11) ve bu modülün açıklaması şartı **kullanıcının**
+    seçtiğini söylüyordu; kod ise aktör türüne bakmıyordu, ajan ve sistem de
+    kalıcı şart ekleyebiliyordu. Şart geri alınamadığı için yanlış seçim
+    kalıcı bir yanlış şüphe kaynağı olurdu. Kapı ``karar_ver``inkiyle aynı
+    yerdedir: en başta, hiçbir şey okunmadan ve yazılmadan.
+
+    Ajan ve sistem tarama yapar, şüphe açar, denetim olayı üretir; neyin
+    kimlik sayılacağına karar veremez. ``karar_aktor_turu`` gibi bir
+    veritabanı kısıtı burada yoktur: şart satırı aktör taşımaz, aktör yalnız
+    denetim izine yazılır. Kısıt gerekirse şart tablolarına aktör sütunu
+    eklemek gerekir; bugün servis kapısı yeterli sayıldı.
+    """
+    if aktor.tur is not AktorTuru.KULLANICI:
+        raise SartKaynagiGecersiz(
+            f"mükerrerlik şartını yalnız kullanıcı seçer; {aktor.tur.value!r} "
+            "aktörü tarama yapabilir ve şüphe açabilir ama şart ekleyemez."
+        )
 
 
 def _ozellik_tanimlari(
@@ -472,6 +522,7 @@ def nesne_sarti_ekle(
     kanonik nesneyi ``kanonik_nesneyi_bul`` ile bulup şartı oraya ekler;
     çekirdek hedefi kendiliğinden değiştirmez.
     """
+    _sart_kaynagini_dogrula(aktor)
     nesne = nesne_getir(oturum, nesne_id)
     if (kanonik := kanonik_nesneyi_bul(oturum, nesne.id)) != nesne.id:
         raise NesneBirlesmis(
@@ -516,6 +567,7 @@ def aday_sarti_ekle(
     ``iptal`` pakete kalıcı şart satırı yazılabiliyordu; şart kaldırma işlevi de
     olmadığından satır orada kalırdı.
     """
+    _sart_kaynagini_dogrula(aktor)
     aday = aday_nesne_getir(oturum, aday_nesne_id)
     yazilabilir_paket(oturum, aday.islem_paketi_id)
     tanimlar = _ozellik_tanimlari(oturum, aday.nesne_turu_id, ozellik_kodlari)
@@ -885,7 +937,7 @@ def nesneyi_denetle(
     aktor: Aktor,
     islem_paketi_id: int | None = None,
 ) -> list[KararTalebi]:
-    """Kesin nesneyi diğer kesin nesnelere karşı denetler.
+    """Kesin nesneyi diğer kesin nesnelere karşı denetler; **açılan** talepler.
 
     Çift normalleştirilir: küçük kimlikli (önce oluşturulan) nesne hedeftir ve
     ``AYNI`` kararında korunur. Birleştirilmiş nesneler taramaya girmez.
@@ -896,14 +948,30 @@ def nesneyi_denetle(
     bekletme adımı düşerse ne talep ne bağ kalır; açık sorusu olan bir pakete
     ``calisiyor`` sanılıp yeni aday yazılamaz. ``karar_ver`` bu işlevi kendi
     dış SAVEPOINT'i içinden çağırır; iç içe SAVEPOINT olağan davranıştır.
+
+    Dönen liste yalnız bu çağrının **açtığı** talepleri taşır; zaten açık olan
+    bir soruya yalnız paket bağı eklenir. Kökeni de ilgilendiren çağıran
+    (``_zincirleme_denetle``) ikisini birden ``_nesneyi_tara`` ile alır.
     """
+    return list(_nesneyi_tara(oturum, nesne_id, aktor, islem_paketi_id).acilan)
+
+
+def _nesneyi_tara(
+    oturum: Session,
+    nesne_id: int,
+    aktor: Aktor,
+    islem_paketi_id: int | None = None,
+) -> _TaramaSonucu:
+    """``nesneyi_denetle``in gövdesi; açılan **ve** dokunulan açık talepler."""
     nesne = nesne_getir(oturum, nesne_id)
     if islem_paketi_id is not None:
         paket = paket_getir(oturum, islem_paketi_id)
         if paket.durum == PaketDurumu.IPTAL.value:
             raise PaketDurumuGecersiz(f"işlem paketi {paket.id} iptal; taranamaz.")
     if nesne_birlesimini_bul(oturum, nesne.id) is not None:
-        return []
+        return _TaramaSonucu((), ())
+    acilan: list[KararTalebi] = []
+    dokunulan: list[KararTalebi] = []
     with _yazma_siniri(oturum):  # dış SAVEPOINT: ya hepsi ya hiçbiri
         kimlik_idleri = _kimlik_gecmisi_idleri(oturum, nesne.id)
         eslesmeler = _eslesen_nesneler(
@@ -913,20 +981,18 @@ def nesneyi_denetle(
             _kimlik_sartlari(oturum, kimlik_idleri),
             haric={nesne.id},
         )
-        talepler: list[KararTalebi] = []
         for karsi_id in sorted(eslesmeler):
             hedef_id, kaynak_id = min(nesne.id, karsi_id), max(nesne.id, karsi_id)
             mevcut = _cift_talebi(
                 oturum, hedef_nesne_id=hedef_id, kaynak_nesne_id=kaynak_id
             )
             if mevcut is not None:
-                if (
-                    mevcut.durum == TalepDurumu.ACIK.value
-                    and islem_paketi_id is not None
-                ):
-                    _talebi_pakete_bagla(oturum, mevcut, islem_paketi_id, aktor)
+                if mevcut.durum == TalepDurumu.ACIK.value:
+                    dokunulan.append(mevcut)
+                    if islem_paketi_id is not None:
+                        _talebi_pakete_bagla(oturum, mevcut, islem_paketi_id, aktor)
                 continue
-            talepler.append(
+            acilan.append(
                 _talep_ac(
                     oturum,
                     aktor,
@@ -939,7 +1005,7 @@ def nesneyi_denetle(
             )
         if islem_paketi_id is not None:
             _paket_durumunu_esitle(oturum, islem_paketi_id, aktor)
-    return talepler
+    return _TaramaSonucu(tuple(acilan), tuple(dokunulan))
 
 
 # --- paket durumu ---------------------------------------------------------------------
@@ -1739,15 +1805,20 @@ def _zincirleme_denetle(
     için açılır ve bu adım birleştirme yapmaz.
 
     **Bağımsız köken bir kuşak sonra düşmez** (2026-09-20 beşinci inceleme
-    turu). Burada doğan sorular ``karar_talebi``nin kararından doğar; o soru
+    turu). Burada sorulan sorular ``karar_talebi``nin kararından doğar; o soru
     paketten bağımsızsa çocukları da bağımsızdır. Devir olmadan sonuç paketin
     ne zaman iptal edildiğine bağlı kalıyordu: karardan **sonra** iptal
     edilirse çocuk soru pakete ait sayılıp cevapsız ``gecersiz`` oluyor,
     karardan **önce** iptal edilirse (``karar_ver`` paketsiz karara düşer)
     bağımsız doğup açık kalıyordu. Aynı soru, aynı karar, farklı sonuç.
-    Devir yalnız bu çağrının **yeni açtığı** taleplere uygulanır; mevcut bir
-    soruya bağlanmak (``_talebi_pakete_bagla``) onun kökenini değiştirmez.
-    Halefin tarihsel açılış paketi korunur (``_kokeni_devret``).
+
+    Devir **açılan ve dokunulan** açık taleplerin ikisini de kapsar (2026-09-20
+    altıncı tur). Beşinci turda yalnız yeni açılan talepler devralıyordu; alt
+    soru başka bir paket tarafından daha önce açılmışsa tarama onu yeniden
+    soruyor ama kökenini almıyordu, paketler iptal edilince soru cevapsız
+    ``gecersiz`` oluyordu. Bu, ``_kanonik_soruyu_koru``nun kuralıyla da
+    çelişiyordu: orada köken mevcut açık halefe zaten devrediliyor. Halefin
+    tarihsel açılış paketi her iki yolda da korunur (``_kokeni_devret``).
     """
     cocuk_idleri = list(
         oturum.execute(
@@ -1761,13 +1832,15 @@ def _zincirleme_denetle(
             .order_by(NesneIliskisi.kaynak_nesne_id)
         ).scalars()
     )
-    yeni: list[KararTalebi] = list(
-        nesneyi_denetle(oturum, hedef_nesne_id, aktor, islem_paketi_id)
+    taramalar = [_nesneyi_tara(oturum, hedef_nesne_id, aktor, islem_paketi_id)]
+    taramalar.extend(
+        _nesneyi_tara(oturum, cocuk_id, aktor, islem_paketi_id)
+        for cocuk_id in cocuk_idleri
     )
-    for cocuk_id in cocuk_idleri:
-        yeni.extend(nesneyi_denetle(oturum, cocuk_id, aktor, islem_paketi_id))
-    for soru in yeni:
-        _kokeni_devret(oturum, karar_talebi, soru, aktor)
+    yeni: list[KararTalebi] = [t for tarama in taramalar for t in tarama.acilan]
+    for tarama in taramalar:
+        for soru in (*tarama.acilan, *tarama.dokunulan):
+            _kokeni_devret(oturum, karar_talebi, soru, aktor)
     return yeni
 
 
@@ -1782,8 +1855,18 @@ def paketin_adaylarini_denetle(
     çıkarsa ilk adayın açtığı talepler, denetim izleri ve paketin ``bekliyor``
     durumu, çağıran hatayı yakalayıp dış transaction'ı commit ettiğinde kalıcı
     oluyordu. Artık ya bütün adaylar taranır ya hiçbiri.
+
+    İptal paket **baştan** reddedilir (2026-09-20 altıncı tur). Önceden durum
+    denetimi yoktu: paketin adayı varsa ilk ``adayi_denetle`` çağrısı
+    ``PaketDurumuGecersiz`` veriyor, adayı yoksa döngü hiç dönmediği için
+    sessizce ``[]`` dönüyordu. Aynı geçersiz durum iki farklı davranış
+    üretmesin diye denetim ``adayi_denetle`` ile aynı mesaja bağlandı.
     """
     paket = paket_getir(oturum, islem_paketi_id)
+    if paket.durum == PaketDurumu.IPTAL.value:
+        raise PaketDurumuGecersiz(
+            f"işlem paketi {paket.id} iptal; mükerrerlik denetimi yapılmaz."
+        )
     aday_idleri = list(
         oturum.execute(
             select(AdayNesne.id)
@@ -1799,11 +1882,34 @@ def paketin_adaylarini_denetle(
 
 
 def bekleyen_paketler(oturum: Session) -> list[IslemPaketi]:
-    """Açık karar talebi yüzünden bekleyen paketler, kimlik sırasıyla."""
+    """Açık karar talebi yüzünden bekleyen paketler, kimlik sırasıyla.
+
+    Açık soru şartı gerçekten aranır (2026-09-20 altıncı tur). Önceden yalnız
+    ``durum == bekliyor`` bakılıyordu; ``taslak_islemleri.paketi_beklet`` açık
+    soru olmadan da çağrılabildiği için elle duraklatılmış paketler de bu
+    listeye giriyor, işlev adının ve açıklamasının verdiği sözü tutmuyordu.
+    Elle duraklatılmış paket bu listede yoktur; ``paketleri_listele`` ile
+    duruma göre sorgulanır.
+    """
+    acilis_paketi = select(KararTalebi.islem_paketi_id).where(
+        KararTalebi.durum == TalepDurumu.ACIK.value,
+        KararTalebi.islem_paketi_id.is_not(None),
+    )
+    baglanan_paket = (
+        select(KararTalebiPaketi.islem_paketi_id)
+        .join(KararTalebi, KararTalebi.id == KararTalebiPaketi.karar_talebi_id)
+        .where(KararTalebi.durum == TalepDurumu.ACIK.value)
+    )
     return list(
         oturum.execute(
             select(IslemPaketi)
-            .where(IslemPaketi.durum == PaketDurumu.BEKLIYOR.value)
+            .where(
+                IslemPaketi.durum == PaketDurumu.BEKLIYOR.value,
+                or_(
+                    IslemPaketi.id.in_(acilis_paketi),
+                    IslemPaketi.id.in_(baglanan_paket),
+                ),
+            )
             .order_by(IslemPaketi.id)
         ).scalars()
     )

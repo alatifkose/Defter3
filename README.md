@@ -19,8 +19,9 @@ veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de, Aşama 4.
 mükerrerlik) 2026-09-20'de bitti; 4.6'nın bağımsız inceleme bulguları aynı gün
 üçüncü tur düzeltmeleriyle tamamlandı (göç `0010`, "Aday kararları ve ortak
 paket beklemesi"; dördüncü tur göç `0011`, "Bağımsız köken ve tarama
-atomikliği"; beşinci tur şemaya dokunmadan, "Köken devri, toplu tarama ve
-şart kapıları"). Aşama 4.7 (kesin kayıt)
+atomikliği"; beşinci ve altıncı tur şemaya dokunmadan, "Köken devri, toplu
+tarama ve şart kapıları" ve "Köken devrinin tamamlanması ve iki kapı daha").
+Aşama 4.7 (kesin kayıt)
 sırada.
 Bitenler:
 
@@ -87,6 +88,13 @@ Bitenler:
   birleşen nesnenin kimlik geçmişi mükerrerlik korumasından düşmez, aday
   kimlikleri yeniden dağıtılmaz (`AUTOINCREMENT`) ("Karar kaynağı, iptal ve
   kanonik kimlik")
+* Aşama 4.6 altıncı inceleme turu (2026-09-20, şema değişmedi): bağımsız köken
+  zincirleme denetimin **dokunduğu** mevcut açık sorulara da devredilir
+  (beşinci tur yalnız yeni açılanları kapsıyordu), mükerrerlik şartını yalnız
+  kullanıcı seçer (`SartKaynagiGecersiz`; ajan tarar ve şüphe açar),
+  `bekleyen_paketler` elle duraklatılmış paketi saymaz, toplu tarama iptal
+  paketi adayı olsa da olmasa da aynı hatayla reddeder ("Köken devrinin
+  tamamlanması ve iki kapı daha")
 * Aşama 4.6 beşinci inceleme turu (2026-09-20, şema değişmedi): bağımsız köken
   zincirleme denetimin açtığı sorulara da devredilir (sonuç artık paket
   iptalinin sırasına bağlı değil), `paketin_adaylarini_denetle` tek dış
@@ -1633,10 +1641,10 @@ açıyor, bu soru pakete ait sayılıyor ve paket iptal edilince cevapsız
 edilirse alt soru düşüyor, karardan **önce** iptal edilirse (`karar_ver`
 paketsiz karara düştüğü için) bağımsız doğup açık kalıyordu — aynı soru, aynı
 karar, iki farklı sonuç. `_zincirleme_denetle` artık kararın verildiği
-sorunun kökenini kendi açtığı taleplere devreder (`_kokeni_devret`); mevcut
-bir soruya yalnız paket bağı eklemek (`_talebi_pakete_bagla`) kökenini
-değiştirmez ve halefin tarihsel açılış paketi korunur. Test iki sırayı da
-sınar.
+sorunun kökenini devreder (`_kokeni_devret`); halefin tarihsel açılış paketi
+korunur. Test iki sırayı da sınar. (Bu tur devri yalnız **yeni açılan**
+taleplerle sınırlamıştı; altıncı tur bunu mevcut açık talepleri de kapsayacak
+şekilde düzeltti, aşağıya bakın.)
 
 **Toplu aday taraması da tek dış SAVEPOINT altında.** Dördüncü tur
 `adayi_denetle` ve `nesneyi_denetle`yi atomik yapmıştı; onları çağıran
@@ -1673,6 +1681,50 @@ dolayısıyla `ozellik_yaz` birleşmiş bir nesneye hâlâ yeni değer yazabilir
 değer kanonik nesnenin tarihsel kimliğine katılır. Bunu kapatmak nesne
 motoruna mükerrerlik bilgisi taşımak olurdu; mimari sınır bundan önce gelir.
 Gerekirse kapıyı çağıran katman (MCP aracı, GUI) koyar.
+
+### Köken devrinin tamamlanması ve iki kapı daha
+
+Altıncı inceleme turu (2026-09-20, şema değişmedi). Dört davranış düzeltildi.
+
+**Köken mevcut açık alt soruya da geçer.** Beşinci tur devri yalnız zincirleme
+denetimin **yeni açtığı** taleplerle sınırlamıştı. Alt soru daha önce başka bir
+paket tarafından açılmışsa tarama onu yeniden soruyor ama kökenini almıyordu;
+bütün paketler iptal edilince soru cevapsız `gecersiz` oluyordu. Bu, modülün
+kendi kuralıyla da çelişiyordu: `_kanonik_soruyu_koru` aynı durumda kökeni
+mevcut açık halefe zaten devrediyor. `nesneyi_denetle` gövdesi `_nesneyi_tara`
+olarak ayrıldı ve **açılan** ile **dokunulan** açık talepleri birlikte döner;
+köken ikisine de devredilir. Genel sorgu yüzeyi değişmedi: `nesneyi_denetle`
+yine yalnız açılan talepleri verir, dolayısıyla `KararSonucu.yeni_talepler`in
+anlamı aynı kaldı. Devir yine yalnız **bağımsız kökenli** karardan olur; paket
+kaynaklı bir karar mevcut soruyu bağımsız yapmaz (ayrı test).
+
+**Mükerrerlik şartını yalnız kullanıcı seçer.** Kavramlar sözlüğü
+("Mükerrerlik protokolü", 1. madde, 2026-09-11) ve bu modülün açıklaması şartı
+kullanıcının seçtiğini söylüyordu; kod aktör türüne bakmıyordu ve ajan da
+sistem de kalıcı şart ekleyebiliyordu. Şart geri alınamadığı için yanlış bir
+seçim kalıcı bir yanlış şüphe kaynağı olurdu. `nesne_sarti_ekle` ve
+`aday_sarti_ekle` artık `SartKaynagiGecersiz` ile reddeder; kapı `karar_ver`in
+kapısıyla aynı yerdedir — en başta, hiçbir şey okunmadan ve yazılmadan.
+Tarama kısıtlanmadı: ajan tarar, şüphe açar, denetim olayı üretir; neyin
+kimlik sayılacağına ve kararın ne olduğuna kullanıcı karar verir. Karar için
+olan `karar_aktor_turu` kontrol kısıtının burada karşılığı yok — şart satırı
+aktör taşımaz, aktör yalnız denetim izine yazılır; veritabanı düzeyinde kısıt
+istenirse şart tablolarına aktör sütunu eklemek gerekir, bugün servis kapısı
+yeterli sayıldı.
+
+**`bekleyen_paketler` söylediğini yapar.** İşlev "açık karar talebi yüzünden
+bekleyen paketler" diyordu ama yalnız `durum == bekliyor` bakıyordu;
+`taslak_islemleri.paketi_beklet` açık soru olmadan da çağrılabildiği için elle
+duraklatılmış paketler de listeye giriyordu. Açık soru şartı artık gerçekten
+aranıyor. Beşinci turda bu işleve yazılan testin adı da tutulmayan bir sözü
+doğruluyordu (elle duraklatılmış paket yaratmadığı için geçiyordu); test
+düzeltildi ve elle duraklatma ayrıca sınandı.
+
+**İptal paket toplu taramada da baştan reddedilir.** `paketin_adaylarini_denetle`
+paket durumunu denetlemiyordu: paketin adayı varsa ilk `adayi_denetle` çağrısı
+`PaketDurumuGecersiz` veriyor, adayı yoksa döngü hiç dönmediği için sessizce
+`[]` dönüyordu. Aynı geçersiz durum iki farklı davranış üretmesin diye denetim
+`adayi_denetle` ile aynı mesaja bağlandı.
 
 ## Mimari sınır: çekirdek ve finans
 

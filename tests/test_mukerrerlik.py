@@ -1110,14 +1110,25 @@ def test_uzun_gerekce_reddedilir(ortam: Ortam, env: Envanter) -> None:
 
 
 def test_aktor_turleri_domain_bagimsizdir(ortam: Ortam, env: Envanter) -> None:
-    """Üç nötr aktör türü; finansal rol yoktur."""
+    """Üç nötr aktör türü; finansal rol yoktur.
+
+    Ajanın yetkili olduğu iş taramadır: şüphe açar, denetim olayı üretir.
+    Şart seçimi ve karar kullanıcıya aittir (``SartKaynagiGecersiz`` /
+    ``KararKaynagiGecersiz``), o yüzden burada ajanla tarama yaptırılır.
+    """
     assert {a.value for a in AktorTuru} == {"kullanici", "ajan", "sistem"}
-    depo = _depo(ortam, env, harici_kimlik="X1")
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
     with ortam.veritabani.islem() as o:
-        mu.nesne_sarti_ekle(o, depo, ["harici_kimlik"], AJAN)
-        [olay] = di.olaylari_listele(o)
-        assert olay.aktor_turu == AktorTuru.AJAN.value
-        assert olay.aktor_kimligi == "test-ajan"
+        assert len(mu.nesneyi_denetle(o, kaynak, AJAN)) == 1
+        ajan_olaylari = [
+            olay
+            for olay in di.olaylari_listele(o)
+            if olay.aktor_turu == AktorTuru.AJAN.value
+        ]
+    assert ajan_olaylari
+    assert {olay.aktor_kimligi for olay in ajan_olaylari} == {"test-ajan"}
 
 
 # --- 33-45: 2026-09-20 incelemesi — karar yaşam döngüsü ve kanonik kimlik -------------
@@ -2966,9 +2977,7 @@ def test_toplu_aday_taramasi_duserse_ilk_adayin_yazmalari_da_kalmaz(
     _butunluk_temiz(ortam)
 
 
-def test_bekleyen_paketler_yalniz_acik_sorusu_olanlari_verir(
-    ortam: Ortam, env: Envanter
-) -> None:
+def test_bekleyen_paketler_acik_sorusu_olani_verir(ortam: Ortam, env: Envanter) -> None:
     bos = _paket(ortam)
     hedef = _depo(ortam, env, harici_kimlik="X1")
     _sart(ortam, hedef, ["harici_kimlik"])
@@ -3039,3 +3048,141 @@ def test_birlesmis_nesneye_sart_secilemez_koruma_tek_yonlu_kalmaz(
     sartsiz_yeni = _depo(ortam, env, sehir="Edirne")
     assert len(_denetle(ortam, sartsiz_yeni)) == 1  # şartsız uç korumadan kaçamaz
     _butunluk_temiz(ortam)
+
+
+# --- 2026-09-20 altıncı turu: köken devri (mevcut soru), şart kaynağı, sorgu adı -----
+
+
+def test_bagimsiz_koken_mevcut_acik_alt_soruya_da_gecer(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Alt soru daha önce **başka bir paket** tarafından açılmışsa da köken geçer.
+
+    Beşinci turda devir yalnız zincirleme denetimin **yeni açtığı** taleplere
+    uygulanıyordu. Alt soru zaten açıksa tarama onu yeniden soruyor ama kökenini
+    almıyordu; bütün paketler iptal edilince soru cevapsız ``gecersiz`` oluyordu.
+    ``_kanonik_soruyu_koru`` aynı durumda kökeni mevcut açık halefe zaten
+    devrediyordu; kural iki yerde de aynı olmalı.
+    """
+    p, halef, _r1, r2 = _iki_rafli_bagimsiz_soru(ortam, env)
+    p2 = _paket(ortam)
+    [alt] = _denetle(ortam, r2, p2)  # alt soru ÖNCE başka paketten açılır
+    assert _koken(ortam, alt) == (TalepDurumu.ACIK.value, p2, False)
+
+    sonuc = _karar(ortam, halef, Karar.AYNI)
+    assert sonuc.yeni_talepler == ()  # soru zaten vardı, yenisi açılmadı
+    assert _koken(ortam, alt)[2] is True  # köken yine de devredildi
+
+    _iptal_et(ortam, p)
+    _iptal_et(ortam, p2)
+    assert _talep_durumu(ortam, alt) == TalepDurumu.ACIK.value
+    assert _karar(ortam, alt, Karar.AYRI).cozuldu  # hâlâ cevaplanabilir
+    _butunluk_temiz(ortam)
+
+
+def test_paket_kaynakli_karar_mevcut_soruya_koken_yazmaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Devir yalnız bağımsız kökenli karardan olur; paket kaynaklı karar mevcut
+    soruyu bağımsız yapmaz (aksi hâlde koruma gereğinden geniş olurdu)."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    r1 = _raf(ortam, env, hedef, "A1", seri_no="SN")
+    r2 = _raf(ortam, env, kaynak, "A2", seri_no="SN")
+    _sart(ortam, r1, ["seri_no"])
+    _sart(ortam, r2, ["seri_no"])
+    p1, p2 = _paket(ortam), _paket(ortam)
+    [ust] = _denetle(ortam, kaynak, p1)
+    [alt] = _denetle(ortam, r2, p2)
+
+    _karar(ortam, ust, Karar.AYNI)
+    assert _koken(ortam, alt)[2] is False
+
+    _iptal_et(ortam, p1)
+    _iptal_et(ortam, p2)
+    assert _talep_durumu(ortam, alt) == TalepDurumu.GECERSIZ.value
+    _butunluk_temiz(ortam)
+
+
+@pytest.mark.parametrize("aktor", [AJAN, Aktor(AktorTuru.SISTEM, "test-sistem")])
+def test_mukerrerlik_sartini_yalniz_kullanici_secer(
+    ortam: Ortam, env: Envanter, aktor: Aktor
+) -> None:
+    """Sözlük ve modül açıklaması şartı kullanıcının seçtiğini söylüyordu; kod
+    aktör türüne bakmıyordu. Şart geri alınamadığı için yanlış seçim kalıcı bir
+    yanlış şüphe kaynağı olurdu. Reddedilen çağrı hiçbir şey yazmaz."""
+    depo = _depo(ortam, env, harici_kimlik="X1")
+    paket_id = _paket(ortam)
+    with ortam.veritabani.islem() as o:
+        aday = tsi.aday_nesne_ekle(o, paket_id, env.depo_id, {"ad": "A"}).id
+    onceki_olaylar = _olaylar(ortam)
+
+    with ortam.veritabani.islem() as o:
+        with pytest.raises(mu.SartKaynagiGecersiz):
+            mu.nesne_sarti_ekle(o, depo, ["harici_kimlik"], aktor)
+        with pytest.raises(mu.SartKaynagiGecersiz):
+            mu.aday_sarti_ekle(o, aday, ["harici_kimlik"], aktor)
+
+    assert _sayi(ortam, mt.NESNE_MUKERRERLIK_SARTI) == 0
+    assert _sayi(ortam, mt.ADAY_NESNE_MUKERRERLIK_SARTI) == 0
+    assert _olaylar(ortam) == onceki_olaylar
+    # aynı şartı kullanıcı seçebilir
+    _sart(ortam, depo, ["harici_kimlik"])
+    assert _sayi(ortam, mt.NESNE_MUKERRERLIK_SARTI) == 1
+
+
+def test_ajan_sart_secemez_ama_tarayip_suphe_acabilir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Kapı taramayı kısıtlamaz: ajan şüphe açar, kullanıcı karar verir."""
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    with ortam.veritabani.islem() as o:
+        [talep] = mu.nesneyi_denetle(o, kaynak, AJAN)
+        assert talep.acan_aktor_turu == AktorTuru.AJAN.value
+        with pytest.raises(mu.KararKaynagiGecersiz):
+            mu.karar_ver(o, talep.id, Karar.AYNI, AJAN)
+        talep_id = talep.id
+    assert _karar(ortam, talep_id, Karar.AYNI).cozuldu
+
+
+def test_bekleyen_paketler_elle_duraklatilani_saymaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """``paketi_beklet`` açık soru olmadan da çağrılabilir; işlev "açık karar
+    talebi yüzünden bekleyen" dediği için elle duraklatılmış paketi saymamalı."""
+    elle = _paket(ortam)
+    with ortam.veritabani.islem() as o:
+        tsi.paketi_beklet(o, elle)
+    assert _paket_durumu(ortam, elle) == BEKLIYOR.value
+
+    hedef = _depo(ortam, env, harici_kimlik="X1")
+    _sart(ortam, hedef, ["harici_kimlik"])
+    kaynak = _depo(ortam, env, harici_kimlik="X1")
+    soruyla = _paket(ortam)
+    [talep] = _denetle(ortam, kaynak, soruyla)
+
+    with ortam.veritabani.islem() as o:
+        assert [p.id for p in mu.bekleyen_paketler(o)] == [soruyla]
+
+    _karar(ortam, talep, Karar.AYRI)
+    with ortam.veritabani.islem() as o:
+        assert mu.bekleyen_paketler(o) == []
+    assert _paket_durumu(ortam, elle) == BEKLIYOR.value  # elle duraklatma sürüyor
+
+
+@pytest.mark.parametrize("adayli", [False, True])
+def test_toplu_tarama_iptal_paketi_her_durumda_reddeder(
+    ortam: Ortam, env: Envanter, adayli: bool
+) -> None:
+    """Aynı geçersiz durum iki farklı davranış üretmemeli: önceden adayı olan
+    iptal paket hata veriyor, boş iptal paket sessizce ``[]`` dönüyordu."""
+    paket_id = _paket(ortam)
+    if adayli:
+        _aday(ortam, paket_id, env.depo_id, {"ad": "A"})
+    _iptal_et(ortam, paket_id)
+    with ortam.veritabani.islem() as o:
+        with pytest.raises(tsi.PaketDurumuGecersiz):
+            mu.paketin_adaylarini_denetle(o, paket_id, KULLANICI)
