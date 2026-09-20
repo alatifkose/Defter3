@@ -28,8 +28,9 @@ Sözleşmeler:
 * **Özellik değeri** tanımın ``deger_turu``'ne göre doğrulanır ve kanonik
   metin olarak saklanır (kural ``deger_kodlama`` modülünde, 4.5'te aday
   özellikle ortak): metin olduğu gibi; tam sayı ``str(int)`` (``bool``
-  reddedilir); mantıksal ``"1"`` / ``"0"``; ondalık ``str(Decimal)`` (sonlu
-  ``Decimal``; ``float`` reddedilir, ölçek varsayımı yoktur). Okuma aynı
+  reddedilir); mantıksal ``"1"`` / ``"0"``; ondalık sayısal kanonik biçim
+  (``12.50`` → ``125e-1``; sonlu ``Decimal``, ``float`` reddedilir, ölçek
+  varsayımı yoktur). Okuma aynı
   kuralla Python değerine döner. Nesneye yalnız kendi türünün özellikleri
   yazılır; ``ozellik_yaz`` var olan değeri günceller (aynı özellik iki satır
   olmaz), ``ozellik_sil`` zorunlu özelliği silmez.
