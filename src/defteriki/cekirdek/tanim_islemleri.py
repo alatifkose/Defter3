@@ -159,6 +159,23 @@ def _gosterim_adini_dogrula(gosterim_adi: str, ne: str) -> str:
     return gosterim_adi
 
 
+def _deger_turunu_dogrula(deger_turu: DegerTuru, kod: str, ne: str) -> DegerTuru:
+    """Tip ipucu çalışma zamanında denetlemez: ``DegerTuru`` dışında bir değer
+    gelirse tanım geçersizdir."""
+    try:
+        return DegerTuru(deger_turu)
+    except ValueError:
+        raise GecersizTanim(
+            f"{ne} {kod!r}: değer türü geçersiz: {deger_turu!r}"
+        ) from None
+
+
+def _zorunlulugu_dogrula(zorunlu: bool, kod: str, ne: str) -> bool:
+    if type(zorunlu) is not bool:
+        raise GecersizTanim(f"{ne} {kod!r}: zorunlu bilgisi mantıksal olmalı.")
+    return zorunlu
+
+
 def _tam_sayi_dogrula(deger: object, ne: str) -> int:
     """Yalnız gerçek ``int``: tip ipucu çalışma zamanında denetlemez; ``1.5``,
     ``"1"`` ve ``True`` sayı değildir (``bool`` ``int`` alt sınıfı olduğundan
@@ -303,14 +320,8 @@ def ozellik_tanimla(
     kilit), aksi hâlde ``TanimSurumuKilitli``."""
     _kodu_dogrula(kod, "özellik")
     _gosterim_adini_dogrula(gosterim_adi, "özellik")
-    try:
-        deger_turu = DegerTuru(deger_turu)
-    except ValueError:
-        raise GecersizTanim(
-            f"özellik {kod!r}: değer türü geçersiz: {deger_turu!r}"
-        ) from None
-    if type(zorunlu) is not bool:
-        raise GecersizTanim(f"özellik {kod!r}: zorunlu bilgisi mantıksal olmalı.")
+    deger_turu = _deger_turunu_dogrula(deger_turu, kod, "özellik")
+    _zorunlulugu_dogrula(zorunlu, kod, "özellik")
     tur = nesne_turu_getir(oturum, nesne_turu_id)
     _mukerrer_denetle(
         oturum,
@@ -475,12 +486,17 @@ def kayit_alani_tanimla(
     kayit_turu_id: int,
     kod: str,
     gosterim_adi: str,
+    deger_turu: DegerTuru,
+    zorunlu: bool = False,
     aciklama: str | None = None,
 ) -> KayitAlaniTanimi:
-    """Kayıt türüne yeni alan tanımı; ``kod`` tür içinde benzersiz; kilitli
-    sürümde de serbest."""
+    """Kayıt türüne yeni alan tanımı; ``kod`` tür içinde benzersiz.
+    ``deger_turu`` teknik değer türü, ``zorunlu`` kaydın bu alan olmadan var
+    olamayacağı anlamına gelir; kilitli sürümde de serbest."""
     _kodu_dogrula(kod, "kayıt alanı")
     _gosterim_adini_dogrula(gosterim_adi, "kayıt alanı")
+    deger_turu = _deger_turunu_dogrula(deger_turu, kod, "kayıt alanı")
+    _zorunlulugu_dogrula(zorunlu, kod, "kayıt alanı")
     tur = kayit_turu_getir(oturum, kayit_turu_id)
     _mukerrer_denetle(
         oturum,
@@ -490,7 +506,12 @@ def kayit_alani_tanimla(
         f"kayıt alanı {kod!r} kayıt türü {tur.kod!r} için zaten var.",
     )
     alan = KayitAlaniTanimi(
-        kayit_turu_id=tur.id, kod=kod, gosterim_adi=gosterim_adi, aciklama=aciklama
+        kayit_turu_id=tur.id,
+        kod=kod,
+        gosterim_adi=gosterim_adi,
+        aciklama=aciklama,
+        deger_turu=deger_turu.value,
+        zorunlu=zorunlu,
     )
     oturum.add(alan)
     oturum.flush()

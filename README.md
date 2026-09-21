@@ -22,8 +22,9 @@ paket beklemesi"; dördüncü tur göç `0011`, "Bağımsız köken ve tarama
 atomikliği"; beşinci ve altıncı tur şemaya dokunmadan, "Köken devri, toplu
 tarama ve şart kapıları" ve "Köken devrinin tamamlanması ve iki kapı daha";
 yedinci tur göç `0012`, "Bekleme tek anlamlı, denetim izi ayrık").
-Aşama 4.7 (kesin kayıt)
-sırada.
+Aşama 4.7 (kesin kayıt) sürüyor: 4.7/1 (kayıt tanımının değer türü,
+zorunluluğu ve bileşik anahtar hedefleri; göç `0013`) 2026-09-21'de bitti;
+sıradaki 4.7/2 kesin kayıt tabloları.
 Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
@@ -114,11 +115,14 @@ Bitenler:
   bütün üyeleri denetlenir), birleşmeden sonra bayat kalan açık talepler
   kanonik uçlara uzlaştırılır, `karar_ver` ve `paketi_iptal_et` tek bir dış
   SAVEPOINT ile bütünüyle atomiktir ("AYRI geçmişi ve karar atomikliği")
+* Kayıt tanımının değer türü ve zorunluluğu (Aşama 4.7/1, göç `0013`):
+  `kayit_alani_tanimi.deger_turu` / `zorunlu`, kesin kaydın bileşik anahtar
+  hedefleri ("Tanım sistemi" bölümü)
 
-Henüz yok: kesin kayıt (hareket) verisi (Aşama 4.7), kesin kaydetme / paketi
-kesinleştirme (4.8), genel kural motoru (4.9), finans tanım paketi
-(`finans/` boş, 4.10), GUI, ürün verisi yazan MCP aracı (belge alan, işlem
-paketi ve karar araçları dahil; 4.11).
+Henüz yok: kesin kayıt tabloları ve kayıt oluşturma servisi (Aşama 4.7/2),
+kesin kaydetme / paketi kesinleştirme (4.8), genel kural motoru (4.9), finans
+tanım paketi (`finans/` boş, 4.10), GUI, ürün verisi yazan MCP aracı (belge
+alan, işlem paketi ve karar araçları dahil; 4.11).
 
 ## Veritabanı
 
@@ -431,9 +435,22 @@ kapandıktan sonra dönen nesneler okunabilir; iki farklı sahte domain (`DEMO`,
 
 **Aşama 4.3 ile gelenler:** özellik değer türü ve zorunluluk, hiyerarşi
 kuralı (çokluk, zorunluluk, üstün gerekli durumu), sürüm kilidi — hepsi
-"Nesne motoru" bölümünde. **Hâlâ yok (bilinçli):** kayıt alanı için veri
-tipi (kayıt sistemi Aşama 4.7'de); tanım silme ve güncelleme; finans tanım
-paketi (Aşama 4.10).
+"Nesne motoru" bölümünde.
+
+**Aşama 4.7/1 ile gelenler (göç `0013`).** Kayıt alanı tanımı artık
+`deger_turu` (`DegerTuru`; nesne özelliğiyle aynı dört değer, aynı
+`deger_kodlama` kuralı) ve `zorunlu` taşır; `kayit_alani_tanimla` ikisini de
+alır ve doğrular (geçersiz değer türü ya da mantıksal olmayan zorunluluk
+`GecersizTanim`; kontrol kısıtı ham SQL'i de reddeder). Zorunluluk kaydın o
+alan olmadan var olamayacağı demektir ve kaydın açılışında denetlenir (4.7/2),
+yani eksik kesin kayıt veritabanında bulunamaz. İki benzersizlik kesin kaydın
+bileşik dış anahtar hedefidir: `kayit_turu (id, tanim_surumu_id)` — kaydın
+türü ile tanım sürümü rastgele iki kimlik olamaz — ve `kayit_alani_tanimi
+(id, kayit_turu_id)` — başka kayıt türünün alanı bir kayda yazılamaz.
+
+**Hâlâ yok (bilinçli):** tanım silme ve güncelleme; kayıt türü ile nesne türü
+arasında semantik uygunluk kuralı (gerekirse Aşama 4.9'un kural sistemi);
+finans tanım paketi (Aşama 4.10).
 
 ## Nesne motoru
 

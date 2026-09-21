@@ -624,8 +624,12 @@ def test_kayit_alani_kayit_turune_baglanir(
     veritabani: vt.Veritabani, demo: Demo
 ) -> None:
     with veritabani.islem() as oturum:
-        aciklama = ti.kayit_alani_tanimla(oturum, demo.olay_id, "aciklama", "Açıklama")
-        miktar = ti.kayit_alani_tanimla(oturum, demo.olay_id, "miktar", "Miktar")
+        aciklama = ti.kayit_alani_tanimla(
+            oturum, demo.olay_id, "aciklama", "Açıklama", DegerTuru.METIN
+        )
+        miktar = ti.kayit_alani_tanimla(
+            oturum, demo.olay_id, "miktar", "Miktar", DegerTuru.ONDALIK
+        )
 
     with veritabani.islem() as oturum:
         alanlar = ti.kayit_alani_tanimlarini_listele(oturum, demo.olay_id)
@@ -640,19 +644,84 @@ def test_ayni_kayit_turunde_ayni_alan_kodu_reddedilir(
     veritabani: vt.Veritabani, demo: Demo
 ) -> None:
     with veritabani.islem() as oturum:
-        ti.kayit_alani_tanimla(oturum, demo.olay_id, "miktar", "Miktar")
+        ti.kayit_alani_tanimla(
+            oturum, demo.olay_id, "miktar", "Miktar", DegerTuru.ONDALIK
+        )
 
     with pytest.raises(ti.MukerrerTanim, match="'miktar' kayıt türü 'TEST_OLAY'"):
         with veritabani.islem() as oturum:
-            ti.kayit_alani_tanimla(oturum, demo.olay_id, "miktar", "Yine miktar")
+            ti.kayit_alani_tanimla(
+                oturum, demo.olay_id, "miktar", "Yine miktar", DegerTuru.METIN
+            )
 
     assert _sayi(veritabani, tt.KAYIT_ALANI_TANIMI) == 1
+
+
+def test_kayit_alani_deger_turu_ve_zorunlulugu_saklanir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    """Değer türü ve zorunluluk kayıt alanı tanımının parçasıdır (Aşama 4.7);
+    varsayılan isteğe bağlıdır."""
+    with veritabani.islem() as oturum:
+        ti.kayit_alani_tanimla(
+            oturum, demo.olay_id, "adet", "Adet", DegerTuru.TAM_SAYI, zorunlu=True
+        )
+        ti.kayit_alani_tanimla(oturum, demo.olay_id, "not", "Not", DegerTuru.METIN)
+
+    with veritabani.islem() as oturum:
+        alanlar = ti.kayit_alani_tanimlarini_listele(oturum, demo.olay_id)
+        assert [(a.kod, a.deger_turu, a.zorunlu) for a in alanlar] == [
+            ("adet", "tam_sayi", True),
+            ("not", "metin", False),
+        ]
+
+
+def test_kayit_alani_gecersiz_deger_turu_reddedilir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    tur: Any = "sayi"
+    with pytest.raises(ti.GecersizTanim, match="değer türü geçersiz"):
+        with veritabani.islem() as oturum:
+            ti.kayit_alani_tanimla(oturum, demo.olay_id, "adet", "Adet", tur)
+
+    assert _sayi(veritabani, tt.KAYIT_ALANI_TANIMI) == 0
+
+
+def test_kayit_alani_zorunlulugu_mantiksal_olmali(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    """Tip ipucu çalışma zamanında denetlemez: ``1`` mantıksal değildir."""
+    zorunlu: Any = 1
+    with pytest.raises(ti.GecersizTanim, match="mantıksal olmalı"):
+        with veritabani.islem() as oturum:
+            ti.kayit_alani_tanimla(
+                oturum, demo.olay_id, "adet", "Adet", DegerTuru.TAM_SAYI, zorunlu
+            )
+
+    assert _sayi(veritabani, tt.KAYIT_ALANI_TANIMI) == 0
+
+
+def test_kayit_alani_deger_turu_veritabaninda_da_dogrulanir(
+    veritabani: vt.Veritabani, demo: Demo
+) -> None:
+    """Servis atlansa bile kontrol kısıtı tanımsız değer türünü reddeder."""
+    with pytest.raises(IntegrityError, match="CHECK constraint failed"):
+        with veritabani.islem() as oturum:
+            oturum.execute(
+                text(
+                    "INSERT INTO kayit_alani_tanimi (kayit_turu_id, kod, "
+                    "gosterim_adi, deger_turu, zorunlu) "
+                    f"VALUES ({demo.olay_id}, 'adet', 'Adet', 'sayi', 0)"
+                )
+            )
+
+    assert _sayi(veritabani, tt.KAYIT_ALANI_TANIMI) == 0
 
 
 def test_olmayan_kayit_turune_alan_eklenemez(veritabani: vt.Veritabani) -> None:
     with pytest.raises(ti.TanimBulunamadi, match="kayıt türü bulunamadı"):
         with veritabani.islem() as oturum:
-            ti.kayit_alani_tanimla(oturum, 999, "miktar", "Miktar")
+            ti.kayit_alani_tanimla(oturum, 999, "miktar", "Miktar", DegerTuru.METIN)
 
 
 def test_kayit_alani_dis_anahtari_veritabaninda_calisir(
@@ -939,7 +1008,7 @@ def test_iki_farkli_sahte_domain_ayni_mekanizmayla_tanimlanir(
         ti.iliski_tanimla(oturum, surum.id, "ICERIR", "İçerir", depo.id, raf.id)
         ti.iliski_tanimla(oturum, surum.id, "TASIR", "Taşır", raf.id, urun.id)
         sayim = ti.kayit_turu_tanimla(oturum, surum.id, "SAYIM", "Sayım")
-        ti.kayit_alani_tanimla(oturum, sayim.id, "adet", "Adet")
+        ti.kayit_alani_tanimla(oturum, sayim.id, "adet", "Adet", DegerTuru.TAM_SAYI)
 
     with veritabani.islem() as oturum:
         assert [p.kod for p in ti.paketleri_listele(oturum)] == ["DEMO", "ENVANTER"]

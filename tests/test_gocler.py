@@ -56,8 +56,10 @@ DEFTERIKI_DEGISKENLERI = (
 )
 BEKLEME_SANIYE = 120
 BASLANGIC_SURUMU = "0001"
-GUNCEL_SURUM = "0012"
+GUNCEL_SURUM = "0013"
 ORTAK_PAKET_SURUMU = "0010"
+DENETIM_OLAY_SURUMU = "0012"
+KAYIT_TURU_INDEKSI = "ix_kayit_turu_id_tanim_surumu_id"
 ONAY_SURUMU = "0008"
 TASLAK_SURUMU = "0007"
 BELGE_SURUMU = "0006"
@@ -381,7 +383,10 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                 ],
                 "iliski_tanimi": ["uq_iliski_tanimi_tanim_surumu_id_kod"],
                 "kayit_turu": ["uq_kayit_turu_tanim_surumu_id_kod"],
-                "kayit_alani_tanimi": ["uq_kayit_alani_tanimi_kayit_turu_id_kod"],
+                "kayit_alani_tanimi": [
+                    "uq_kayit_alani_tanimi_id_kayit_turu_id",
+                    "uq_kayit_alani_tanimi_kayit_turu_id_kod",
+                ],
                 "hiyerarsi_kurali": ["uq_hiyerarsi_kurali_iliski_tanimi_id"],
                 "nesne": [
                     "uq_nesne_id_nesne_turu_id",
@@ -470,7 +475,10 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     "ck_hiyerarsi_kurali_ust_yasam_durumu_gecerli",
                 ],
                 "kayit_turu": [],
-                "kayit_alani_tanimi": [],
+                "kayit_alani_tanimi": [
+                    "ck_kayit_alani_tanimi_deger_turu_gecerli",
+                    "ck_kayit_alani_tanimi_zorunlu_ikili",
+                ],
                 "nesne": ["ck_nesne_yasam_durumu_gecerli"],
                 "nesne_ozelligi": [],
                 "nesne_iliskisi": [],
@@ -2154,5 +2162,82 @@ def test_0011_0012_bos_veritabani_dongusu_semayi_degistirmez(
         with v.islem() as oturum:
             assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
             assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+    finally:
+        v.kapat()
+
+
+def test_0012_0013_gecisi_kayit_tanimlarini_korur(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0012``de yazılmış kayıt türü ve kayıt alanı satırları ``0013``e
+    taşınır; yeni sütunlar var olan satırlarda metin / isteğe bağlı olur,
+    ``kayit_turu`` benzersiz indeksi kurulur. Geri alma satırları silmez,
+    yalnız yeni sütunları ve indeksi kaldırır; tekrar ``head`` sıfırdan
+    kurulanla aynı şemayı verir."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    def indeksler() -> list[str]:
+        return [ad for tur, ad, _ in _sema(v) if tur == "index"]
+
+    try:
+        goc(DENETIM_OLAY_SURUMU)
+        with v.islem() as oturum:
+            for sql in (
+                "INSERT INTO tanim_paketi (kod, gosterim_adi, olusturma_zamani) "
+                "VALUES ('ENVANTER', 'Envanter', '2026-09-21 00:00:00')",
+                "INSERT INTO tanim_surumu (tanim_paketi_id, surum_no, "
+                "olusturma_zamani, kilitli) VALUES (1, 1, '2026-09-21 00:00:00', 0)",
+                "INSERT INTO kayit_turu (tanim_surumu_id, kod, gosterim_adi) "
+                "VALUES (1, 'SAYIM', 'Sayım')",
+                "INSERT INTO kayit_alani_tanimi (kayit_turu_id, kod, gosterim_adi) "
+                "VALUES (1, 'adet', 'Adet')",
+            ):
+                oturum.execute(text(sql))
+        eski_indeksler = indeksler()
+        assert KAYIT_TURU_INDEKSI not in eski_indeksler
+
+        goc(GUNCEL_SURUM)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        assert KAYIT_TURU_INDEKSI in indeksler()
+        with v.islem() as oturum:
+            assert oturum.execute(
+                text(
+                    "SELECT kod, gosterim_adi, deger_turu, zorunlu "
+                    "FROM kayit_alani_tanimi"
+                )
+            ).all() == [("adet", "Adet", "metin", 0)]
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert not any(ad.endswith("_yeni") for _, ad, _ in _sema(v))
+            # tanımsız değer türü kontrol kısıtına takılır
+            with pytest.raises(IntegrityError):
+                oturum.execute(
+                    text(
+                        "INSERT INTO kayit_alani_tanimi (kayit_turu_id, kod, "
+                        "gosterim_adi, deger_turu, zorunlu) VALUES "
+                        "(1, 'hatali', 'Hatalı', 'yok_boyle', 0)"
+                    )
+                )
+        tam_sema = _sema(v)
+
+        goc(DENETIM_OLAY_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == DENETIM_OLAY_SURUMU
+        assert indeksler() == eski_indeksler
+        with v.islem() as oturum:
+            assert oturum.execute(
+                text("SELECT kod, gosterim_adi FROM kayit_alani_tanimi")
+            ).all() == [("adet", "Adet")]
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+
+        goc(GUNCEL_SURUM)
+        assert _sema(v) == tam_sema
+        assert _sema(v) == _yukselt(tmp_path / "sifir", monkeypatch)[1]
     finally:
         v.kapat()

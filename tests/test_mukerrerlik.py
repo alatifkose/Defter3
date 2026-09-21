@@ -131,7 +131,7 @@ def env(ortam: Ortam) -> Envanter:
         ti.hiyerarsi_kurali_tanimla(o, rafta.id, 1, 2, YasamDurumu.ETKIN)
         ti.hiyerarsi_kurali_tanimla(o, altinda.id, 0, 1, YasamDurumu.ETKIN)
         sayim = ti.kayit_turu_tanimla(o, surum.id, "SAYIM", "Sayım")
-        ti.kayit_alani_tanimla(o, sayim.id, "adet", "Adet")
+        ti.kayit_alani_tanimla(o, sayim.id, "adet", "Adet", DegerTuru.TAM_SAYI)
         return Envanter(
             paket.id,
             surum.id,

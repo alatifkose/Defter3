@@ -31,8 +31,14 @@ Yapı (üstten alta, her satır bir üstteki satıra dış anahtarla bağlı):
   (Aşama 4.3). Kural satırı varsa ilişki hiyerarşiktir; yön sabittir: ilişkinin
   **kaynağı çocuk, hedefi üst** türdür. Kural en az / en çok üst sayısını ve
   üstün gerekli yaşam durumunu verir; zorunluluk ``en_az_ust >= 1`` demektir.
-* ``KayitTuru`` — sürüm içinde ``kod`` benzersiz.
+* ``KayitTuru`` — sürüm içinde ``kod`` benzersiz. ``(id, tanim_surumu_id)``
+  benzersizliği kesin kaydın bileşik dış anahtarı içindir (Aşama 4.7):
+  kaydın kayıt türü ile tanım sürümü rastgele iki kimlik olamaz.
 * ``KayitAlaniTanimi`` — bir kayıt türünün alanı; tür içinde ``kod`` benzersiz.
+  ``deger_turu`` ve ``zorunlu`` tanım verisinin parçasıdır (Aşama 4.7;
+  ``OzellikTanimi`` ile aynı kurallar). ``(id, kayit_turu_id)`` benzersizliği
+  kayıt alanının bileşik dış anahtarı içindir: başka kayıt türünün alanı bir
+  kayda yazılamaz.
 
 Her tanımda ``kod`` makine kimliğidir (kararlı, ``tanim_islemleri.KOD_BICIMI``
 biçiminde), ``gosterim_adi`` insan için başlıktır; ikisi karıştırılmaz.
@@ -96,8 +102,8 @@ class DegerTuru(StrEnum):
 
     ``ONDALIK`` kesin ondalık sayıdır (``decimal.Decimal``); ``float`` ve REAL
     kullanılmaz, ölçek ya da birim varsayımı yoktur. Değerler ``nesne_ozelligi``
-    tablosunda metin olarak, türe göre kanonik biçimde saklanır
-    (``nesne_islemleri``).
+    ve ``kayit_alani`` tablolarında metin olarak, türe göre kanonik biçimde
+    saklanır (``deger_kodlama``).
     """
 
     METIN = "metin"
@@ -310,7 +316,12 @@ class KayitTuru(TabloTabani):
     gosterim_adi: Mapped[str] = mapped_column(String, nullable=False)
     aciklama: Mapped[str | None] = mapped_column(Text)
 
-    __table_args__ = (UniqueConstraint("tanim_surumu_id", "kod"),)
+    __table_args__ = (
+        UniqueConstraint("tanim_surumu_id", "kod"),
+        # Kesin kaydın bileşik dış anahtarı için benzersiz indeks (göç 0013):
+        # kayıt satırı türü ve türün sürümünü birlikte taşır.
+        Index(None, "id", "tanim_surumu_id", unique=True),
+    )
 
 
 class KayitAlaniTanimi(TabloTabani):
@@ -323,5 +334,19 @@ class KayitAlaniTanimi(TabloTabani):
     kod: Mapped[str] = mapped_column(String, nullable=False)
     gosterim_adi: Mapped[str] = mapped_column(String, nullable=False)
     aciklama: Mapped[str | None] = mapped_column(Text)
+    deger_turu: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text(f"'{DegerTuru.METIN.value}'")
+    )
+    """``DegerTuru`` değeri; göç 0013 öncesi satırlar (varsa) metin sayılır."""
+    zorunlu: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("0")
+    )
+    """Kayıt bu alan olmadan var olamaz; tamlık ``kayit_islemleri`` tarafından
+    kaydın açılışında denetlenir (Aşama 4.7), eksik kesin kayıt oluşmaz."""
 
-    __table_args__ = (UniqueConstraint("kayit_turu_id", "kod"),)
+    __table_args__ = (
+        UniqueConstraint("kayit_turu_id", "kod"),
+        UniqueConstraint("id", "kayit_turu_id"),
+        CheckConstraint(DEGER_TURU_KOSULU, name="deger_turu_gecerli"),
+        CheckConstraint("zorunlu IN (0, 1)", name="zorunlu_ikili"),
+    )

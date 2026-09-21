@@ -1141,7 +1141,7 @@ def test_kullanilan_ture_istege_bagli_ozellik_eklenir_eski_nesne_gecerli_kalir(
     with veritabani.islem() as o:
         ti.ozellik_tanimla(o, env.depo_id, "sehir", "Şehir", DegerTuru.METIN)
         sayim = ti.kayit_turu_tanimla(o, env.surum_id, "SAYIM", "Sayım")
-        ti.kayit_alani_tanimla(o, sayim.id, "adet", "Adet")
+        ti.kayit_alani_tanimla(o, sayim.id, "adet", "Adet", DegerTuru.TAM_SAYI)
     with veritabani.islem() as o:
         assert ni.ozellikleri_oku(o, depo) == {"ad": "Merkez"}  # yazılmamış sayılır
         assert [t.kod for t in ti.ozellik_tanimlarini_listele(o, env.depo_id)] == [
