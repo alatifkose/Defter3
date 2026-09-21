@@ -25,8 +25,9 @@ yedinci tur göç `0012`, "Bekleme tek anlamlı, denetim izi ayrık").
 Aşama 4.7 (kesin kayıt) sürüyor: 4.7/1 (kayıt tanımının değer türü,
 zorunluluğu ve bileşik anahtar hedefleri; göç `0013`), 4.7/2 (kesin kayıt
 tabloları, denetim izinin kayıt bağı; göç `0014`) ve 4.7/3 (kayıt oluşturma
-servisi) 2026-09-21'de bitti ("Kesin kayıt" bölümü); sıradaki 4.7/4,
-birleşmede kayıt bağlarının kanonik nesneye devri.
+servisi) ve 4.7/4 (birleşmede kayıt bağlarının kanonik nesneye devri)
+2026-09-21'de bitti ("Kesin kayıt" bölümü); Aşama 4.7 kapısı geçildi,
+sıradaki aşama 4.8 (atomik kaydetme).
 Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
@@ -126,11 +127,12 @@ Bitenler:
 * Kayıt oluşturma servisi (Aşama 4.7/3): `kayit_islemleri.kayit_olustur` —
   kayıt, alanları ve nesne bağları tek SAVEPOINT'te; doğrulama mutasyondan
   önce; okuma işlevleri ve köken zinciri
+* Birleşmede kayıt bağlarının devri (Aşama 4.7/4): `kayit_baglarini_devret`,
+  mükerrerlik birleştirmesinin atomik bütününün parçası
 
-Henüz yok: birleşmede kayıt bağlarının devri (Aşama 4.7/4), kesin kaydetme /
-paketi kesinleştirme (4.8), genel kural motoru (4.9), finans tanım paketi
-(`finans/` boş, 4.10), GUI, ürün verisi yazan MCP aracı (belge alan, işlem
-paketi ve karar araçları dahil; 4.11).
+Henüz yok: kesin kaydetme / paketi kesinleştirme (4.8), genel kural motoru
+(4.9), finans tanım paketi (`finans/` boş, 4.10), GUI, ürün verisi yazan MCP
+aracı (belge alan, işlem paketi ve karar araçları dahil; 4.11).
 
 ## Veritabanı
 
@@ -1854,7 +1856,8 @@ zincir taslak dünyasını kesin nesneye bağlardı.
 (`tests/test_mimari_sinir.py`): taslak modülleri, nesne motoru ve denetim izi
 kayıt şemasına ulaşamaz, kayıt modülü ikisini de görebilir.
 
-**Testler** (`tests/test_kayit_sistemi.py`, 33 test). Şema bölümü ham SQL ile
+**Testler** (`tests/test_kayit_sistemi.py`, 37 test; birleşme tarafı
+`tests/test_mukerrerlik.py` içinde üç test). Şema bölümü ham SQL ile
 sınanır: servis atlansa da veritabanı aynı ihlalleri reddetmelidir. Kayıt paketsiz
 yazılamaz; paketin okumasından başka okuma ve başka okumanın kaynağı düşer;
 ikinci sürümün kayıt türü birinci sürümle yazılamaz; başka kayıt türünün alanı
@@ -1872,6 +1875,12 @@ reddedilir; iptal edilmiş pakete kayıt yazılamaz; denetim izine kayıt düzey
 tek olay yazılır ve ham değer taşımaz; hata yutulsa da yarım kayıt kalmaz ve
 işlem kullanılabilir kalır; iki bağlantı yarışında kaybeden `KayitYazmaCakismasi`
 alır; silme / değiştirme / kesinleştirme işlevinin bulunmadığı testle sabitlenir.
+
+Devir: bağ hedefe taşınır ve kaydın alanları / kökeni değişmez; hedefte zaten
+bağlı kayıt ikinci kez yazılmaz; bağ yoksa iz yazılmaz; kendine devir, kapalı
+hedef ve olmayan nesne reddedilir. Birleşme tarafında: kayıtlar kanonik
+nesneden görünür ve kaynakta kalmaz, iki uca bağlı kayıt tek satıra iner,
+hiyerarşi ihlali birleşmeyi düşürünce bağlar da yerinde kalır.
 
 **Servis (`src/defteriki/cekirdek/kayit_islemleri.py`, Aşama 4.7/3).** Kesin
 kayıt tek kapıdan doğar:
@@ -1909,11 +1918,25 @@ Okuma: `kayit_getir`, `kayit_alanlarini_oku` (kanonik metin → Python değeri),
 bulunur, tahmin yok). Denetim izi `olaylari_listele(..., kayit_id=...)` ile
 kayda göre süzülür.
 
-**Bilinçli kapsam dışı (4.7/3'te yok):** birleşmede kayıt bağlarının kanonik
-nesneye devri (4.7/4); aday → kesin dönüşüm, paketi kesinleştirme, atomik
-finalizasyon, belgeyi kayıtlı duruma geçirme (4.8); kural ve projection motoru
-(4.9); kayıt silme, alan değiştirme ve geri alma (4.14 — bu modülde öyle bir
-işlev bulunmadığı testle sabitlenir).
+**Birleşmede bağ devri (Aşama 4.7/4).**
+`kayit_baglarini_devret(oturum, kaynak_nesne_id, hedef_nesne_id, aktor, *,
+islem_paketi_id=None)` kaynağa bağlı kesin kayıtları kanonik nesneye taşır.
+Birleşen nesne `kapali` olur; kayıtları orada kalsaydı artık kullanılmayan bir
+kimliğe asılı kalırdı. Kayıtların kendisi **değişmez** (alanları, kökeni,
+paketi yerinde durur), yalnız `kayit_nesne` satırının ucu değişir; hedefte aynı
+kayıt zaten bağlıysa ikinci satır yazılmaz, kaynağın satırı kaldırılır.
+Taşınacak bağ yoksa denetim izine olay yazılmaz.
+
+Çağrı `mukerrerlik_islemleri._nesneleri_birlestir` içinde, ilişki devrinden
+hemen sonradır ve birleşmenin dış SAVEPOINT'i içindedir: hiyerarşi ihlali ya da
+çevrim birleşmeyi düşürürse kayıt bağları da yerinde kalır. Bağımlılık tek
+yönlüdür — mükerrerlik kayıt modülünü kullanır, kayıt modülü mükerrerliği
+bilmez.
+
+**Bilinçli kapsam dışı (Aşama 4.7'de yok):** aday → kesin dönüşüm, paketi
+kesinleştirme, atomik finalizasyon, belgeyi kayıtlı duruma geçirme (4.8);
+kural ve projection motoru (4.9); kayıt silme, alan değiştirme ve geri alma
+(4.14 — bu modülde öyle bir işlev bulunmadığı testle sabitlenir).
 
 ## Mimari sınır: çekirdek ve finans
 

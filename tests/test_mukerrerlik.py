@@ -37,6 +37,7 @@ from defteriki.cekirdek import belge_islemleri as bi
 from defteriki.cekirdek import denetim_islemleri as di
 from defteriki.cekirdek import denetim_tablolari as dt
 from defteriki.cekirdek import gocler
+from defteriki.cekirdek import kayit_islemleri as ki
 from defteriki.cekirdek import mukerrerlik_islemleri as mu
 from defteriki.cekirdek import mukerrerlik_tablolari as mt
 from defteriki.cekirdek import nesne_islemleri as ni
@@ -3257,3 +3258,87 @@ def test_acilan_talep_sayisi_denetim_izinden_dogru_sayilir(
     assert olaylar.count(DenetimOlayi.KARAR_TALEBI_ACILDI.value) == 1
     assert olaylar.count(DenetimOlayi.KARAR_TALEBI_PAKETE_BAGLANDI.value) == 1
     assert _talep_durumu(ortam, talep) == TalepDurumu.ACIK.value
+
+
+# --- birleşmede kesin kayıt bağları (Aşama 4.7/4) -------------------------------------
+
+
+def _kesin_kayit(
+    ortam: Ortam, env: Envanter, paket_id: int, nesneler: list[int]
+) -> int:
+    with ortam.veritabani.islem() as o:
+        return ki.kayit_olustur(
+            o, paket_id, env.sayim_id, {"adet": 1}, nesneler, KULLANICI
+        ).id
+
+
+def test_birlesmede_kayit_baglari_kanonige_tasinir(ortam: Ortam, env: Envanter) -> None:
+    """Birleşen nesne ``kapali`` olur; kayıtları orada kalsaydı kullanılmayan
+    bir kimliğe asılı kalırdı. Kayıtların kendisi değişmez, bağın ucu değişir."""
+    depo = _depo(ortam, env)
+    raf = _raf(ortam, env, depo, "A1")
+    hedef = _urun(ortam, env, [raf], barkod="B1", agirlik=Decimal("1.0"))
+    _sart(ortam, hedef, ["agirlik"])
+    kaynak = _urun(ortam, env, [raf], barkod="B2", agirlik=Decimal("1.00"))
+    paket_id = _paket(ortam)
+    kayit_id = _kesin_kayit(ortam, env, paket_id, [kaynak])
+
+    [talep_id] = _denetle(ortam, kaynak)
+    _karar(ortam, talep_id, Karar.AYNI)
+
+    with ortam.veritabani.islem() as o:
+        assert ki.kaydin_nesneleri(o, kayit_id) == [hedef]
+        assert [k.id for k in ki.nesnenin_kayitlari(o, hedef)] == [kayit_id]
+        assert ki.nesnenin_kayitlari(o, kaynak) == []
+        # kaydın kendisi değişmedi: kökeni hâlâ kendi paketi
+        assert ki.kaydin_kokeni(o, kayit_id).islem_paketi.id == paket_id
+        olaylar = [iz.olay for iz in di.olaylari_listele(o, nesne_id=hedef)]
+    assert DenetimOlayi.KAYIT_BAGLARI_DEVREDILDI.value in olaylar
+
+
+def test_iki_uca_bagli_kayit_birlesmede_tek_satir_kalir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Aynı kayıt hem hedefe hem kaynağa bağlıysa hedefte ikinci satır
+    yazılmaz; bağ rolsüzdür ve bir kez bulunur."""
+    depo = _depo(ortam, env)
+    raf = _raf(ortam, env, depo, "A1")
+    hedef = _urun(ortam, env, [raf], barkod="B1", agirlik=Decimal("1.0"))
+    _sart(ortam, hedef, ["agirlik"])
+    kaynak = _urun(ortam, env, [raf], barkod="B2", agirlik=Decimal("1.00"))
+    paket_id = _paket(ortam)
+    kayit_id = _kesin_kayit(ortam, env, paket_id, [hedef, kaynak])
+
+    [talep_id] = _denetle(ortam, kaynak)
+    _karar(ortam, talep_id, Karar.AYNI)
+
+    with ortam.veritabani.islem() as o:
+        assert ki.kaydin_nesneleri(o, kayit_id) == [hedef]
+    assert _sayi(ortam, "kayit_nesne") == 1
+
+
+def test_birlestirme_geri_alinirsa_kayit_baglari_da_geri_alinir(
+    ortam: Ortam, env: Envanter
+) -> None:
+    """Hiyerarşi ihlali birleşmeyi düşürünce kayıt bağı da yerinde kalır:
+    devir birleşmenin atomik bütününün parçasıdır."""
+    depo = _depo(ortam, env)
+    r1 = _raf(ortam, env, depo, "A1")
+    r2 = _raf(ortam, env, depo, "A2")
+    r3 = _raf(ortam, env, depo, "A3")
+    hedef = _urun(ortam, env, [r1, r2], barkod="B1", agirlik=Decimal("2"))
+    _sart(ortam, hedef, ["agirlik"])
+    kaynak = _urun(ortam, env, [r3], barkod="B2", agirlik=Decimal("2.0"))
+    paket_id = _paket(ortam)
+    kayit_id = _kesin_kayit(ortam, env, paket_id, [kaynak])
+
+    [talep_id] = _denetle(ortam, kaynak)
+    with pytest.raises(ni.HiyerarsiIhlali):
+        _karar(ortam, talep_id, Karar.AYNI)
+
+    with ortam.veritabani.islem() as o:
+        assert ki.kaydin_nesneleri(o, kayit_id) == [kaynak]
+        assert ki.nesnenin_kayitlari(o, hedef) == []
+        olaylar = [iz.olay for iz in di.olaylari_listele(o, nesne_id=hedef)]
+        assert DenetimOlayi.KAYIT_BAGLARI_DEVREDILDI.value not in olaylar
+    assert _sayi(ortam, "kayit_nesne") == 1

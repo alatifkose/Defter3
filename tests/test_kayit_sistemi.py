@@ -761,3 +761,70 @@ def test_esli_yazmada_kaybeden_cakisma_alir(ortam: Ortam, env: Envanter) -> None
     finally:
         ikinci.kapat()
     assert _sayi(ortam, kt.KAYIT) == 1
+
+
+# --- bağ devri (Aşama 4.7/4) ----------------------------------------------------------
+
+
+def _ikinci_nesne(ortam: Ortam, env: Envanter, kod: str = "A2") -> int:
+    with ortam.veritabani.islem() as oturum:
+        return ni.nesne_olustur(oturum, env.raf_id, {"kod": kod}).id
+
+
+def test_bag_devri_kaydin_kendisini_degistirmez(ortam: Ortam, env: Envanter) -> None:
+    paket_id, _ = _paket(ortam)
+    kayit_id = _kayit(ortam, env, paket_id)
+    hedef_id = _ikinci_nesne(ortam, env)
+    with ortam.veritabani.islem() as oturum:
+        ozet = ki.kayit_baglarini_devret(oturum, env.nesne_id, hedef_id, AJAN)
+    assert (ozet.tasinan, ozet.birlesen) == (1, 0)
+    with ortam.veritabani.islem() as oturum:
+        assert ki.kaydin_nesneleri(oturum, kayit_id) == [hedef_id]
+        assert ki.kayit_alanlarini_oku(oturum, kayit_id) == {"adet": 12}
+        assert ki.kayit_getir(oturum, kayit_id).islem_paketi_id == paket_id
+    assert _sayi(ortam, kt.KAYIT_NESNE) == 1
+
+
+def test_hedefte_zaten_bagli_kayit_ikinci_kez_yazilmaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    paket_id, _ = _paket(ortam)
+    hedef_id = _ikinci_nesne(ortam, env)
+    kayit_id = _kayit(ortam, env, paket_id, nesneler=[env.nesne_id, hedef_id])
+    with ortam.veritabani.islem() as oturum:
+        ozet = ki.kayit_baglarini_devret(oturum, env.nesne_id, hedef_id, AJAN)
+    assert (ozet.tasinan, ozet.birlesen) == (0, 1)
+    with ortam.veritabani.islem() as oturum:
+        assert ki.kaydin_nesneleri(oturum, kayit_id) == [hedef_id]
+    assert _sayi(ortam, kt.KAYIT_NESNE) == 1
+
+
+def test_bagi_olmayan_nesnenin_devri_iz_birakmaz(ortam: Ortam, env: Envanter) -> None:
+    """Taşınacak bağ yoksa denetim izine olay yazılmaz: iz gürültü deposu
+    değildir."""
+    hedef_id = _ikinci_nesne(ortam, env)
+    with ortam.veritabani.islem() as oturum:
+        ozet = ki.kayit_baglarini_devret(oturum, env.nesne_id, hedef_id, AJAN)
+    assert (ozet.tasinan, ozet.birlesen) == (0, 0)
+    with ortam.veritabani.islem() as oturum:
+        assert di.olaylari_listele(oturum, nesne_id=hedef_id) == []
+
+
+def test_bag_devri_kendine_ve_kapali_hedefe_yapilamaz(
+    ortam: Ortam, env: Envanter
+) -> None:
+    paket_id, _ = _paket(ortam)
+    _kayit(ortam, env, paket_id)
+    hedef_id = _ikinci_nesne(ortam, env)
+    with pytest.raises(ki.KayitNesneBagiGecersiz, match="kendisine devredilemez"):
+        with ortam.veritabani.islem() as oturum:
+            ki.kayit_baglarini_devret(oturum, env.nesne_id, env.nesne_id, AJAN)
+    with ortam.veritabani.islem() as oturum:
+        ni.yasam_durumunu_degistir(oturum, hedef_id, YasamDurumu.KAPALI)
+    with pytest.raises(ki.KayitNesneBagiGecersiz, match="yalnız etkin nesneye"):
+        with ortam.veritabani.islem() as oturum:
+            ki.kayit_baglarini_devret(oturum, env.nesne_id, hedef_id, AJAN)
+    with pytest.raises(ki.KayitNesneBagiGecersiz, match="nesne bulunamadı"):
+        with ortam.veritabani.islem() as oturum:
+            ki.kayit_baglarini_devret(oturum, env.nesne_id, 999, AJAN)
+    assert _sayi(ortam, kt.KAYIT_NESNE) == 1

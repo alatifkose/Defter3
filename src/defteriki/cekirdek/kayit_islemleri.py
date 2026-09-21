@@ -116,6 +116,15 @@ class KayitYazmaCakismasi(KayitHatasi):
 
 
 @dataclass(frozen=True, slots=True)
+class KayitDevirOzeti:
+    """``kayit_baglarini_devret`` sonucu: kaç bağ hedefe taşındı, kaçı hedefte
+    zaten vardı (ikinci satır yazılmadı, kaynaktaki satır kaldırıldı)."""
+
+    tasinan: int
+    birlesen: int
+
+
+@dataclass(frozen=True, slots=True)
 class KayitKokeni:
     """Kaydın belgeye kadar giden kökeni; her halka kimlikle bulunur."""
 
@@ -288,6 +297,77 @@ def kayit_olustur(
             kayit_id=kayit.id,
         )
     return kayit
+
+
+# --- birleşmede bağ devri -------------------------------------------------------------
+
+
+def kayit_baglarini_devret(
+    oturum: Session,
+    kaynak_nesne_id: int,
+    hedef_nesne_id: int,
+    aktor: Aktor,
+    *,
+    islem_paketi_id: int | None = None,
+) -> KayitDevirOzeti:
+    """Kaynağa bağlı kesin kayıtları hedefe taşır (Aşama 4.6 birleştirmesi).
+
+    Birleşen nesne ``kapali`` olur; kayıtları orada kalsaydı artık
+    kullanılmayan bir kimliğe asılı kalırdı. Bu işlev **kayıtların kendisini
+    değiştirmez**: yalnız ``kayit_nesne`` satırının ucunu kanonik nesneye
+    çevirir. Hedefte aynı kayıt zaten bağlıysa ikinci satır yazılmaz, kaynağın
+    satırı kaldırılır (bağ rolsüzdür, bir kez bulunur).
+
+    Tek SAVEPOINT içindedir; hata hâlinde hiçbir bağ taşınmaz ve hiçbiri
+    kaybolmaz. Satır taşındıysa denetim izine tek olay yazılır.
+    """
+    if kaynak_nesne_id == hedef_nesne_id:
+        raise KayitNesneBagiGecersiz(
+            "bir nesnenin kayıt bağları kendisine devredilemez."
+        )
+    hedef = oturum.get(Nesne, hedef_nesne_id)
+    if hedef is None:
+        raise KayitNesneBagiGecersiz(f"nesne bulunamadı: kimlik {hedef_nesne_id}")
+    if hedef.yasam_durumu != YasamDurumu.ETKIN.value:
+        raise KayitNesneBagiGecersiz(
+            f"devir hedefi {hedef.id} {hedef.yasam_durumu}; kayıt bağları yalnız "
+            "etkin nesneye taşınır."
+        )
+    satirlar = list(
+        oturum.scalars(
+            select(KayitNesne)
+            .where(KayitNesne.nesne_id == kaynak_nesne_id)
+            .order_by(KayitNesne.id)
+        )
+    )
+    if not satirlar:
+        return KayitDevirOzeti(tasinan=0, birlesen=0)
+    hedefteki = set(
+        oturum.scalars(
+            select(KayitNesne.kayit_id).where(KayitNesne.nesne_id == hedef.id)
+        )
+    )
+    tasinan = birlesen = 0
+    with _yazma_siniri(oturum):
+        for satir in satirlar:
+            if satir.kayit_id in hedefteki:
+                oturum.delete(satir)
+                birlesen += 1
+            else:
+                satir.nesne_id = hedef.id
+                hedefteki.add(satir.kayit_id)
+                tasinan += 1
+        oturum.flush()
+        olay_yaz(
+            oturum,
+            DenetimOlayi.KAYIT_BAGLARI_DEVREDILDI,
+            aktor,
+            islem_paketi_id=islem_paketi_id,
+            nesne_id=hedef.id,
+            ikincil_nesne_id=kaynak_nesne_id,
+            gerekce=f"taşınan {tasinan}, birleşen {birlesen}",
+        )
+    return KayitDevirOzeti(tasinan=tasinan, birlesen=birlesen)
 
 
 # --- okuma ----------------------------------------------------------------------------

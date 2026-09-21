@@ -155,6 +155,7 @@ from sqlalchemy.orm import Session
 
 from defteriki.cekirdek.denetim_islemleri import AZAMI_GEREKCE_UZUNLUGU, olay_yaz
 from defteriki.cekirdek.denetim_tablolari import Aktor, AktorTuru, DenetimOlayi
+from defteriki.cekirdek.kayit_islemleri import kayit_baglarini_devret
 from defteriki.cekirdek.mukerrerlik_tablolari import (
     KARAR_TALEBI,
     NESNE_BIRLESIMI,
@@ -1750,6 +1751,9 @@ def _nesneleri_birlestir(
             "ele alın."
         )
     devir = iliskileri_devret(oturum, kaynak.id, hedef.id)
+    kayit_devri = kayit_baglarini_devret(
+        oturum, kaynak.id, hedef.id, aktor, islem_paketi_id=talep.islem_paketi_id
+    )
     with _yazma_siniri(oturum):
         _sartlari_hedefe_kopyala(oturum, kaynak, hedef)
     yasam_durumunu_degistir(oturum, kaynak.id, YasamDurumu.KAPALI)
@@ -1781,7 +1785,8 @@ def _nesneleri_birlestir(
             ikincil_nesne_id=kaynak.id,
             gerekce=(
                 f"taşınan {devir.tasinan}, birleşen {devir.birlesen}, "
-                f"düşen {devir.dusen}"
+                f"düşen {devir.dusen}; kayıt bağı taşınan "
+                f"{kayit_devri.tasinan}, birleşen {kayit_devri.birlesen}"
             ),
         )
     _birlesimleri_kanonige_bagla(oturum, kaynak.id, hedef.id, talep, aktor)
