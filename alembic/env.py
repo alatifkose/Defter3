@@ -17,6 +17,7 @@ from defteriki.ayarlar import ayarlari_yukle
 from defteriki.cekirdek import (
     belge_tablolari,
     denetim_tablolari,
+    kayit_tablolari,
     mukerrerlik_tablolari,
     nesne_tablolari,
     tanim_tablolari,
@@ -34,6 +35,7 @@ assert set(belge_tablolari.BELGE_TABLOLARI) <= set(hedef_metadata.tables)
 assert set(taslak_tablolari.TASLAK_TABLOLARI) <= set(hedef_metadata.tables)
 assert set(mukerrerlik_tablolari.MUKERRERLIK_TABLOLARI) <= set(hedef_metadata.tables)
 assert set(denetim_tablolari.DENETIM_TABLOLARI) <= set(hedef_metadata.tables)
+assert set(kayit_tablolari.KAYIT_TABLOLARI) <= set(hedef_metadata.tables)
 
 
 def _gocleri_calistir(baglanti: Connection) -> None:

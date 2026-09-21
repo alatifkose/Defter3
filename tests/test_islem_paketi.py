@@ -951,19 +951,25 @@ def test_genel_kayit_turune_bagli_aday_kayit(ortam: Ortam, env: Envanter) -> Non
 
 
 def test_aday_kayit_kesin_kayit_degildir(ortam: Ortam, env: Envanter) -> None:
-    """Kesin ``kayit`` tablosu (Aşama 4.7) yoktur; aday kayıt yalnız aday tablodadır."""
+    """Aday kayıt yalnız aday tablodadır: Aşama 4.7'nin kesin ``kayit``
+    tabloları (4.7/2'den beri şemada) taslak yazmalarından etkilenmez ve boş
+    kalır; kesin kayıt yalnız 4.8'in kesinleştirmesiyle doğar."""
     paket_id = _paket(ortam)
     with ortam.veritabani.islem() as o:
         tsi.aday_kayit_ekle(o, paket_id, env.sayim_id, SAYIM_ICERIGI)
     tablolar = _tablolar(ortam)
-    assert "kayit" not in tablolar
     assert [t for t in tablolar if "kayit" in t] == [
         "aday_kayit",
         "aday_kayit_nesne",
+        "kayit",
+        "kayit_alani",
         "kayit_alani_tanimi",
+        "kayit_nesne",
         "kayit_turu",
     ]
     assert _sayi(ortam, tst.ADAY_KAYIT) == 1
+    for kesin in ("kayit", "kayit_alani", "kayit_nesne"):
+        assert _sayi(ortam, kesin) == 0
 
 
 @pytest.mark.parametrize(

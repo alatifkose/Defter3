@@ -40,6 +40,7 @@ from defteriki import baslangic, gunluk
 from defteriki.cekirdek import belge_tablolari as bt
 from defteriki.cekirdek import denetim_tablolari as dnt
 from defteriki.cekirdek import gocler
+from defteriki.cekirdek import kayit_tablolari as kt
 from defteriki.cekirdek import mukerrerlik_tablolari as mt
 from defteriki.cekirdek import nesne_tablolari as nt
 from defteriki.cekirdek import tanim_tablolari as tt
@@ -56,10 +57,11 @@ DEFTERIKI_DEGISKENLERI = (
 )
 BEKLEME_SANIYE = 120
 BASLANGIC_SURUMU = "0001"
-GUNCEL_SURUM = "0013"
+GUNCEL_SURUM = "0014"
 ORTAK_PAKET_SURUMU = "0010"
 DENETIM_OLAY_SURUMU = "0012"
 KAYIT_TURU_INDEKSI = "ix_kayit_turu_id_tanim_surumu_id"
+TANIM_GENISLEME_SURUMU = "0013"
 ONAY_SURUMU = "0008"
 TASLAK_SURUMU = "0007"
 BELGE_SURUMU = "0006"
@@ -73,6 +75,7 @@ UYGULAMA_TABLOLARI = (
     *bt.BELGE_TABLOLARI,
     *tst.TASLAK_TABLOLARI,
     *mt.MUKERRERLIK_TABLOLARI,
+    *kt.KAYIT_TABLOLARI,
     *dnt.DENETIM_TABLOLARI,
 )
 GUNCEL_TABLOLAR = sorted((gocler.SURUM_TABLOSU, *UYGULAMA_TABLOLARI))
@@ -356,10 +359,25 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     "fk_nesne_birlesimi_karar_talebi_id_karar_talebi",
                     "fk_nesne_birlesimi_kaynak_nesne_id_nesne_turu_id_nesne",
                 ],
+                "kayit": [
+                    "fk_kayit_islem_paketi_id_okuma_id_islem_paketi",
+                    "fk_kayit_kayit_turu_id_tanim_surumu_id_kayit_turu",
+                    "fk_kayit_kaynak_id_okuma_id_kaynak",
+                ],
+                "kayit_alani": [
+                    "fk_kayit_alani_kayit_alani_tanimi_id_kayit_turu_id_"
+                    "kayit_alani_tanimi",
+                    "fk_kayit_alani_kayit_id_kayit_turu_id_kayit",
+                ],
+                "kayit_nesne": [
+                    "fk_kayit_nesne_kayit_id_kayit",
+                    "fk_kayit_nesne_nesne_id_nesne",
+                ],
                 "denetim_izi": [
                     "fk_denetim_izi_ikincil_nesne_id_nesne",
                     "fk_denetim_izi_islem_paketi_id_islem_paketi",
                     "fk_denetim_izi_karar_talebi_id_karar_talebi",
+                    "fk_denetim_izi_kayit_id_kayit",
                     "fk_denetim_izi_nesne_id_nesne",
                     "fk_denetim_izi_ozellik_tanimi_id_ozellik_tanimi",
                 ],
@@ -434,6 +452,9 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     "uq_nesne_birlesimi_karar_talebi_id",
                     "uq_nesne_birlesimi_kaynak_nesne_id",
                 ],
+                "kayit": ["uq_kayit_id_kayit_turu_id"],
+                "kayit_alani": ["uq_kayit_alani_kayit_id_kayit_alani_tanimi_id"],
+                "kayit_nesne": ["uq_kayit_nesne_kayit_id_nesne_id"],
                 "denetim_izi": [],
             }
             assert sorted(
@@ -520,6 +541,9 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     "ck_nesne_birlesimi_kaynak_hedeften_farkli",
                     "ck_nesne_birlesimi_kaynak_kanonikten_farkli",
                 ],
+                "kayit": [],
+                "kayit_alani": [],
+                "kayit_nesne": [],
                 "denetim_izi": [
                     "ck_denetim_izi_aktor_kimligi_dolu",
                     "ck_denetim_izi_aktor_turu_gecerli",
@@ -533,6 +557,7 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     *bt.BELGE_TABLOLARI,
                     *tst.TASLAK_TABLOLARI,
                     *mt.MUKERRERLIK_TABLOLARI,
+                    *kt.KAYIT_TABLOLARI,
                     *dnt.DENETIM_TABLOLARI,
                 )
             }
@@ -593,9 +618,18 @@ def test_tanim_tablolarinin_kisitlari_isimli_ve_tam(
                     "ix_nesne_birlesimi_hedef_nesne_id",
                     "ix_nesne_birlesimi_kanonik_nesne_id",
                 ],
+                "kayit": [
+                    "ix_kayit_islem_paketi_id",
+                    "ix_kayit_kayit_turu_id",
+                    "ix_kayit_kaynak_id",
+                    "ix_kayit_tanim_surumu_id",
+                ],
+                "kayit_alani": ["ix_kayit_alani_kayit_alani_tanimi_id"],
+                "kayit_nesne": ["ix_kayit_nesne_nesne_id"],
                 "denetim_izi": [
                     "ix_denetim_izi_islem_paketi_id",
                     "ix_denetim_izi_karar_talebi_id",
+                    "ix_denetim_izi_kayit_id",
                     "ix_denetim_izi_nesne_id",
                     "ix_denetim_izi_olay",
                 ],
@@ -1549,7 +1583,11 @@ def test_0007_0008_gecisi_veriyi_korur_ve_dolu_geri_alinmaz(
     ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
     v = vt.Veritabani(ayar.veritabani_yolu)
     alembic = gocler.alembic_ayari()
-    yeni_tablolar = (*mt.MUKERRERLIK_TABLOLARI, *dnt.DENETIM_TABLOLARI)
+    yeni_tablolar = (
+        *mt.MUKERRERLIK_TABLOLARI,
+        *kt.KAYIT_TABLOLARI,
+        *dnt.DENETIM_TABLOLARI,
+    )
     kismi_indeksler = ("ix_karar_talebi_acik_aday", "ix_karar_talebi_acik_kesin")
 
     def goc(hedef: str, geri: bool = False) -> None:
@@ -2234,6 +2272,136 @@ def test_0012_0013_gecisi_kayit_tanimlarini_korur(
             assert oturum.execute(
                 text("SELECT kod, gosterim_adi FROM kayit_alani_tanimi")
             ).all() == [("adet", "Adet")]
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+
+        goc(GUNCEL_SURUM)
+        assert _sema(v) == tam_sema
+        assert _sema(v) == _yukselt(tmp_path / "sifir", monkeypatch)[1]
+    finally:
+        v.kapat()
+
+
+_KAYIT_TOHUMU: tuple[str, ...] = (
+    "INSERT INTO tanim_paketi (kod, gosterim_adi, olusturma_zamani) "
+    "VALUES ('ENVANTER', 'Envanter', '2026-09-21 00:00:00')",
+    "INSERT INTO tanim_surumu (tanim_paketi_id, surum_no, olusturma_zamani, "
+    "kilitli) VALUES (1, 1, '2026-09-21 00:00:00', 1)",
+    "INSERT INTO nesne_turu (tanim_surumu_id, kod, gosterim_adi) "
+    "VALUES (1, 'RAF', 'Raf')",
+    "INSERT INTO kayit_turu (tanim_surumu_id, kod, gosterim_adi) "
+    "VALUES (1, 'SAYIM', 'Sayım')",
+    "INSERT INTO kayit_alani_tanimi (kayit_turu_id, kod, gosterim_adi, "
+    "deger_turu, zorunlu) VALUES (1, 'adet', 'Adet', 'tam_sayi', 1)",
+    "INSERT INTO nesne (nesne_turu_id, tanim_surumu_id, yasam_durumu, "
+    "olusturma_zamani) VALUES (1, 1, 'etkin', '2026-09-21')",
+    "INSERT INTO arsiv_dosyasi (sha256, boyut, mime, kaynak_uzantisi, kaynak_adi, "
+    "goreli_yol, olusturma_zamani) VALUES ('{ozet}', 3, "
+    "'application/octet-stream', '', 'a', '{on}/{ozet}', '2026-09-21 00:00:00')",
+    "INSERT INTO belge (arsiv_dosyasi_id, olusturma_zamani) "
+    "VALUES (1, '2026-09-21 00:00:00')",
+    "INSERT INTO okuma (belge_id, surum_no, durum, icerik, olusturma_zamani, "
+    "tamamlanma_zamani) VALUES (1, 1, 'tamamlandi', '{{}}', "
+    "'2026-09-21 00:00:00', '2026-09-21 00:00:01')",
+    "INSERT INTO islem_paketi (okuma_id, durum, olusturma_zamani, durum_zamani) "
+    "VALUES (1, 'calisiyor', '2026-09-21', '2026-09-21')",
+    "INSERT INTO denetim_izi (olay, olay_zamani, aktor_turu, aktor_kimligi) "
+    "VALUES ('paket_beklemeye_gecti', '2026-09-21', 'sistem', 'test')",
+)
+
+
+def test_0013_0014_gecisi_veriyi_korur_ve_dolu_geri_alinmaz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``0013``te yazılmış tanım / nesne / belge / paket / iz satırları
+    ``0014``e olduğu gibi taşınır, üç kayıt tablosu boş gelir, denetim izi
+    ``kayit_id`` sütununu ve iki yeni olay adını kazanır. Kesin kayıt satırı ya
+    da yeni olay adını taşıyan iz satırı varken geri alma uygulanmaz; satırlar
+    silinince geri alınır, kayıt tabloları gider, eski veri yerinde kalır;
+    tekrar ``head`` sıfırdan kurulanla aynı şemayı verir."""
+    ayar = _test_ayarlari(tmp_path / "kok", monkeypatch)
+    v = vt.Veritabani(ayar.veritabani_yolu)
+    alembic = gocler.alembic_ayari()
+    ozet = "d" * 64
+
+    def goc(hedef: str, geri: bool = False) -> None:
+        with v.motor.begin() as baglanti:
+            alembic.attributes["connection"] = baglanti
+            (command.downgrade if geri else command.upgrade)(alembic, hedef)
+
+    def tablolar() -> list[str]:
+        return [ad for tur, ad, _ in _sema(v) if tur == "table"]
+
+    def iz_sayisi(oturum: Session) -> int:
+        return int(
+            oturum.execute(text("SELECT count(*) FROM denetim_izi")).scalar_one()
+        )
+
+    try:
+        goc(TANIM_GENISLEME_SURUMU)
+        with v.islem() as oturum:
+            for sql in _KAYIT_TOHUMU:
+                oturum.execute(text(sql.format(ozet=ozet, on=ozet[:2])))
+            assert iz_sayisi(oturum) == 1
+        eski_tablolar = tablolar()
+        assert not set(kt.KAYIT_TABLOLARI) & set(eski_tablolar)
+
+        goc(GUNCEL_SURUM)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        assert tablolar() == sorted([*eski_tablolar, *kt.KAYIT_TABLOLARI])
+        with v.islem() as oturum:
+            assert iz_sayisi(oturum) == 1
+            for t in kt.KAYIT_TABLOLARI:
+                assert (
+                    oturum.execute(text(f"SELECT count(*) FROM {t}")).scalar_one() == 0
+                )
+            # kayit_id sütunu geldi ve yeni olay adı yazılabilir
+            oturum.execute(
+                text(
+                    "INSERT INTO kayit (kayit_turu_id, tanim_surumu_id, "
+                    "islem_paketi_id, okuma_id, olusturma_zamani) "
+                    "VALUES (1, 1, 1, 1, '2026-09-21')"
+                )
+            )
+            oturum.execute(
+                text(
+                    "INSERT INTO denetim_izi (olay, olay_zamani, aktor_turu, "
+                    "aktor_kimligi, kayit_id) VALUES ('kayit_olusturuldu', "
+                    "'2026-09-21', 'ajan', 'test', 1)"
+                )
+            )
+            assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
+            assert oturum.execute(text("PRAGMA integrity_check")).scalar_one() == "ok"
+            assert not any(ad.endswith("_yeni") for ad in tablolar())
+        tam_sema = _sema(v)
+
+        with pytest.raises(RuntimeError, match="geri alma kesin kayıt verisini"):
+            goc(TANIM_GENISLEME_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        assert _sema(v) == tam_sema
+
+        with v.islem() as oturum:
+            oturum.execute(text("DELETE FROM denetim_izi WHERE kayit_id IS NOT NULL"))
+            oturum.execute(text("DELETE FROM kayit"))
+            oturum.execute(
+                text(
+                    "INSERT INTO denetim_izi (olay, olay_zamani, aktor_turu, "
+                    "aktor_kimligi) VALUES ('kayit_baglari_devredildi', "
+                    "'2026-09-21', 'sistem', 'test')"
+                )
+            )
+        with pytest.raises(RuntimeError, match="0014 ile gelen olay adlarını"):
+            goc(TANIM_GENISLEME_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == GUNCEL_SURUM
+        with v.islem() as oturum:
+            oturum.execute(
+                text("DELETE FROM denetim_izi WHERE olay = 'kayit_baglari_devredildi'")
+            )
+
+        goc(TANIM_GENISLEME_SURUMU, geri=True)
+        assert gocler.sema_surumu(v) == TANIM_GENISLEME_SURUMU
+        assert tablolar() == eski_tablolar
+        with v.islem() as oturum:
+            assert iz_sayisi(oturum) == 1
             assert oturum.execute(text("PRAGMA foreign_key_check")).all() == []
 
         goc(GUNCEL_SURUM)

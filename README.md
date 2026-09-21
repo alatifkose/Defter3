@@ -23,8 +23,9 @@ atomikliği"; beşinci ve altıncı tur şemaya dokunmadan, "Köken devri, toplu
 tarama ve şart kapıları" ve "Köken devrinin tamamlanması ve iki kapı daha";
 yedinci tur göç `0012`, "Bekleme tek anlamlı, denetim izi ayrık").
 Aşama 4.7 (kesin kayıt) sürüyor: 4.7/1 (kayıt tanımının değer türü,
-zorunluluğu ve bileşik anahtar hedefleri; göç `0013`) 2026-09-21'de bitti;
-sıradaki 4.7/2 kesin kayıt tabloları.
+zorunluluğu ve bileşik anahtar hedefleri; göç `0013`) ve 4.7/2 (kesin kayıt
+tabloları, denetim izinin kayıt bağı; göç `0014`, "Kesin kayıt" bölümü)
+2026-09-21'de bitti; sıradaki 4.7/3 kayıt oluşturma servisi.
 Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
@@ -118,11 +119,14 @@ Bitenler:
 * Kayıt tanımının değer türü ve zorunluluğu (Aşama 4.7/1, göç `0013`):
   `kayit_alani_tanimi.deger_turu` / `zorunlu`, kesin kaydın bileşik anahtar
   hedefleri ("Tanım sistemi" bölümü)
+* Kesin kayıt şeması (Aşama 4.7/2, göç `0014`): `kayit`, `kayit_alani`,
+  `kayit_nesne`; zorunlu paket kökeni, durumsuz kesinlik, denetim izinin
+  `kayit_id` bağı ("Kesin kayıt" bölümü)
 
-Henüz yok: kesin kayıt tabloları ve kayıt oluşturma servisi (Aşama 4.7/2),
-kesin kaydetme / paketi kesinleştirme (4.8), genel kural motoru (4.9), finans
-tanım paketi (`finans/` boş, 4.10), GUI, ürün verisi yazan MCP aracı (belge
-alan, işlem paketi ve karar araçları dahil; 4.11).
+Henüz yok: kayıt oluşturma servisi (Aşama 4.7/3), kesin kaydetme / paketi
+kesinleştirme (4.8), genel kural motoru (4.9), finans tanım paketi
+(`finans/` boş, 4.10), GUI, ürün verisi yazan MCP aracı (belge alan, işlem
+paketi ve karar araçları dahil; 4.11).
 
 ## Veritabanı
 
@@ -131,8 +135,9 @@ persistence temeli. Uygulama tabloları bugün Aşama 4.2'nin sekiz tanım
 tablosu ("Tanım sistemi" bölümü), Aşama 4.3'ün üç nesne tablosu ("Nesne
 motoru" bölümü), Aşama 4.4'ün dört belge zinciri tablosu ("Belge zinciri"
 bölümü), Aşama 4.5'in altı taslak tablosu ("İşlem paketi ve taslak" bölümü)
-ve Aşama 4.6'nın altı onay / mükerrerlik / denetim tablosudur ("Onay ve
-mükerrerlik" bölümü). Finansal tablo yoktur, `finans/` boştur.
+Aşama 4.6'nın altı onay / mükerrerlik / denetim tablosu ("Onay ve
+mükerrerlik" bölümü) ve Aşama 4.7'nin üç kesin kayıt tablosudur ("Kesin
+kayıt" bölümü). Finansal tablo yoktur, `finans/` boştur.
 
 **Bağlantı (`src/defteriki/cekirdek/veritabani.py`).** SQLite dosyasının yolu
 tek kaynaktan gelir: `Ayarlar.veritabani_yolu`. Çekirdek bu yolu çağırandan
@@ -1796,6 +1801,68 @@ denetim olaylarını yazmaz; olayı çağıran (`_paket_durumunu_esitle`) yazar.
 elle duraklatma olmadığı için bugün bir boşluk değil — geçişi yapan tek yer
 mükerrerlik motoru ve o aktörünü zaten biliyor. Elle duraklatma bir gün
 gelirse aktör ve olay o kapıyla birlikte eklenir.
+
+## Kesin kayıt
+
+Aşama 4.7 (2026-09-21; Yeniden İnşa Teknik Planı madde 9 ve 32). Kayıt nesne
+değildir: bir ya da daha fazla nesneyle ilişkilendirilen olaydır. Çekirdek
+hangi kayıt türlerinin var olduğunu bilmez; tür, alanları ve alanların değer
+türü tanım verisidir. Kayıt tablolarında yön, eksen, ölçek ya da birim gibi
+bir kavram yoktur; sayısal alan değeri de `deger_kodlama` ile kanonik metne
+çevrilir (ölçek ve birim, gerekirse, tanım verisinin ya da domain katmanının
+işidir).
+
+**Tablolar (`src/defteriki/cekirdek/kayit_tablolari.py`, göç `0014`).**
+
+| Tablo | Ne tutar | Veritabanı düzeyinde korunan |
+|---|---|---|
+| `kayit` | `kayit_turu_id`, `tanim_surumu_id`, `islem_paketi_id`, `okuma_id`, `kaynak_id`, `olusturma_zamani` | tür ve sürüm iki rastgele kimlik değildir: `(kayit_turu_id, tanim_surumu_id)` bileşik dış anahtarla `kayit_turu (id, tanim_surumu_id)` çiftine bağlı; `islem_paketi_id` zorunlu ve `(islem_paketi_id, okuma_id) → islem_paketi (id, okuma_id)`; `(kaynak_id, okuma_id) → kaynak (id, okuma_id)`; `(id, kayit_turu_id)` benzersiz (alan tablosunun hedefi) |
+| `kayit_alani` | `kayit_id`, `kayit_turu_id`, `kayit_alani_tanimi_id`, `deger` (kanonik metin) | iki bileşik dış anahtar aynı `kayit_turu_id` üzerinden: `(kayit_id, kayit_turu_id) → kayit` ve `(kayit_alani_tanimi_id, kayit_turu_id) → kayit_alani_tanimi`; başka kayıt türünün alanı yazılamaz; `(kayit_id, kayit_alani_tanimi_id)` benzersiz |
+| `kayit_nesne` | `kayit_id`, `nesne_id` | rolsüz çoktan çoğa bağ (asıl / karşı taraf gibi rol semantiği icat edilmez); `(kayit_id, nesne_id)` benzersiz; nesne indeksli |
+
+**Durum sütunu yoktur** (karar 2026-09-21). Satırın varlığı kesinliktir:
+taslak dünyası fiziksel olarak ayrı tablolardadır (`taslak_tablolari`) ve
+kesin kayıt yalnız kesinleştirmeyle doğacaktır (4.8). Geri alma ve düzeltme
+yaşam döngüsü kendi semantiğiyle Aşama 4.14'te tasarlanacak; şimdiden yarım
+bir durum modeli açılmadı.
+
+**Köken zorunludur.** `islem_paketi_id` boş geçilemez: kesin kayıt her zaman
+bir işlem paketine, dolayısıyla paketin okumasına ve belgesine dayanır.
+`kaynak_id` isteğe bağlıdır (kaydın hangi belge parçasından çıktığı); ikisi de
+`okuma_id` üzerinden aynı okumaya kilitlenir, yani başka okumanın kaynağı ya
+da paketle tutarsız bir okuma veritabanında da reddedilir.
+
+**Sürüm eşitliği aranmaz** (karar 2026-09-21): yeni tanım sürümünde üretilen
+kayıt, eski sürümde doğmuş etkin bir nesneye bağlanabilir. Kayıt türü ile
+nesne türü arasında semantik uygunluk gerekirse bu, tanım ve kural sisteminin
+(Aşama 4.9) konusudur.
+
+**Denetim izi** `kayit_id` sütunu ve iki yeni olay kazandı:
+`kayit_olusturuldu` (kayıt, alanları ve bağlarıyla birlikte tek işlemde doğdu;
+alan başına olay yazılmaz) ve `kayit_baglari_devredildi` (birleşmede kaynağın
+kayıt bağları kanonik nesneye taşındı). `denetim_tablolari` kayıt şemasını
+import etmez, tablo adı yerel sabittir (`KESIN_KAYIT`) ve eşitliği testle
+korunur: `taslak_islemleri` denetim izini kullandığı için oradan açılacak bir
+zincir taslak dünyasını kesin nesneye bağlardı.
+
+**Modül sınırı.** Kayıt hem kesin nesneye hem işlem paketine bağlandığından
+"kesin nesne modülleri" grubuna katılmaz; ayrımı tek yönlü denetimler korur
+(`tests/test_mimari_sinir.py`): taslak modülleri, nesne motoru ve denetim izi
+kayıt şemasına ulaşamaz, kayıt modülü ikisini de görebilir.
+
+**Testler** (`tests/test_kayit_sistemi.py`, 15 test): şema ham SQL ile
+sınanır, çünkü servis (`kayit_islemleri`) 4.7/3'ün işidir. Kayıt paketsiz
+yazılamaz; paketin okumasından başka okuma ve başka okumanın kaynağı düşer;
+ikinci sürümün kayıt türü birinci sürümle yazılamaz; başka kayıt türünün alanı
+ve kaydın türünü taşımayan alan satırı düşer; aynı alan kayıtta iki kez
+bulunamaz; aynı kayıt-nesne çifti iki kez yazılamaz; olmayan nesneye bağ
+kurulamaz; farklı sürümdeki nesneye bağ kurulabilir; ize konu olan kayıt
+silinemez (`RESTRICT`); tanımsız denetim olayı reddedilir.
+
+**Bilinçli kapsam dışı (4.7/2'de yok):** kayıt oluşturma servisi, zorunlu alan
+tamlığı ve değer kodlaması (4.7/3); aday → kesin dönüşüm, paketi
+kesinleştirme, atomik finalizasyon (4.8); kural ve projection motoru (4.9);
+kayıt silme, güncelleme ve geri alma (4.14).
 
 ## Mimari sınır: çekirdek ve finans
 

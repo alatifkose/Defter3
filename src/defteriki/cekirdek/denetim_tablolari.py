@@ -60,6 +60,11 @@ KARAR_TALEBI = "karar_talebi"
 """``mukerrerlik_tablolari.KARAR_TALEBI`` ile aynı ad; oradan import edilmez
 (import döngüsü olurdu: mükerrerlik şeması aktör türünü buradan alır)."""
 
+KESIN_KAYIT = "kayit"
+"""``kayit_tablolari.KAYIT`` ile aynı ad; oradan import edilmez (modül
+açıklamasındaki sınır: kayıt şeması kesin nesneye bağlanır, ``taslak_islemleri``
+ise bu modülü kullanır). Eşitlik ``tests/test_kayit_sistemi.py`` ile korunur."""
+
 DENETIM_IZI = "denetim_izi"
 
 DENETIM_TABLOLARI: tuple[str, ...] = (DENETIM_IZI,)
@@ -100,6 +105,12 @@ class DenetimOlayi(StrEnum):
     ``0012``): üçü de ``KARAR_TALEBI_ACILDI`` yazdığı için denetim izinden
     "kaç karar talebi açıldı" diye saymak yanlış sonuç veriyordu. Artık o ad
     yalnız gerçekten açılan talebi anlatır (``_talep_ac``)."""
+    KAYIT_OLUSTURULDU = "kayit_olusturuldu"
+    """Kesin kayıt, alanları ve nesne bağlarıyla birlikte tek işlemde doğdu
+    (Aşama 4.7; göç ``0014``). Alan başına ayrı olay yazılmaz: kayıt bölünmez."""
+    KAYIT_BAGLARI_DEVREDILDI = "kayit_baglari_devredildi"
+    """İki nesne birleşince kaynağın kesin kayıt bağları kanonik nesneye
+    taşındı; kayıtların kendisi değişmedi."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +158,10 @@ class DenetimIzi(TabloTabani):
         Integer, ForeignKey(f"{OZELLIK_TANIMI}.id", ondelete="RESTRICT")
     )
     """Şüpheyi doğuran şart özelliği; değeri değil, kimliği saklanır."""
+    kayit_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey(f"{KESIN_KAYIT}.id", ondelete="RESTRICT")
+    )
+    """Olayın konusu kesin kayıt (Aşama 4.7); alan değerleri ize yazılmaz."""
     gerekce: Mapped[str | None] = mapped_column(Text)
     """Kısa, insan yazımı açıklama; ham değer ya da içerik taşımaz."""
 
@@ -158,4 +173,5 @@ class DenetimIzi(TabloTabani):
         Index(None, "islem_paketi_id"),
         Index(None, "karar_talebi_id"),
         Index(None, "nesne_id"),
+        Index(None, "kayit_id"),
     )

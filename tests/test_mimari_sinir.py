@@ -760,6 +760,11 @@ KESIN_NESNE_MODULLERI = (
     "defteriki.cekirdek.nesne_tablolari",
     "defteriki.cekirdek.nesne_islemleri",
 )
+KAYIT_MODULLERI = ("defteriki.cekirdek.kayit_tablolari",)
+"""Kesin kayıt modülleri (Aşama 4.7). Kayıt hem kesin nesneye hem işlem
+paketine bağlandığından ``KESIN_NESNE_MODULLERI``ne katılmaz; ayrımı aşağıdaki
+tek yönlü denetimler korur: taslak ve nesne motoru kayıt dünyasına ulaşmaz,
+kayıt modülü ise ikisini de görebilir (kesin kaydın kökeni pakettir)."""
 
 
 def _modul_zinciri(
@@ -814,6 +819,27 @@ def test_kesin_nesne_modulleri_taslak_dunyasina_ulasmaz() -> None:
     }
     assert ihlaller == {}, (
         "kesin nesne modülü taslak dünyasına ulaşıyor (Aşama 4.5 ayrımı):\n"
+        + "\n".join(f"{m}: {' → '.join(z)}" for m, z in ihlaller.items())
+    )
+
+
+def test_taslak_ve_nesne_motoru_kayit_dunyasina_ulasmaz() -> None:
+    """Kayıt bağımlılığı tek yönlüdür (Aşama 4.7): taslak modülleri ve nesne
+    motoru kesin kayıt şemasını doğrudan ya da dolaylı import etmez. Denetim
+    izi de etmez: ``taslak_islemleri`` onu kullanır, oradan kayıt şemasına bir
+    zincir açılırsa taslak dünyası kesin nesneye de ulaşırdı."""
+    ihlaller = {
+        modul: zincir
+        for modul in (
+            *TASLAK_MODULLERI,
+            *KESIN_NESNE_MODULLERI,
+            "defteriki.cekirdek.denetim_tablolari",
+            "defteriki.cekirdek.denetim_islemleri",
+        )
+        if (zincir := _modul_zinciri(modul, KAYIT_MODULLERI, KAYNAK_KOKU))
+    }
+    assert ihlaller == {}, (
+        "modül kesin kayıt dünyasına ulaşıyor (Aşama 4.7 ayrımı):\n"
         + "\n".join(f"{m}: {' → '.join(z)}" for m, z in ihlaller.items())
     )
 
