@@ -23,9 +23,10 @@ atomikliği"; beşinci ve altıncı tur şemaya dokunmadan, "Köken devri, toplu
 tarama ve şart kapıları" ve "Köken devrinin tamamlanması ve iki kapı daha";
 yedinci tur göç `0012`, "Bekleme tek anlamlı, denetim izi ayrık").
 Aşama 4.7 (kesin kayıt) sürüyor: 4.7/1 (kayıt tanımının değer türü,
-zorunluluğu ve bileşik anahtar hedefleri; göç `0013`) ve 4.7/2 (kesin kayıt
-tabloları, denetim izinin kayıt bağı; göç `0014`, "Kesin kayıt" bölümü)
-2026-09-21'de bitti; sıradaki 4.7/3 kayıt oluşturma servisi.
+zorunluluğu ve bileşik anahtar hedefleri; göç `0013`), 4.7/2 (kesin kayıt
+tabloları, denetim izinin kayıt bağı; göç `0014`) ve 4.7/3 (kayıt oluşturma
+servisi) 2026-09-21'de bitti ("Kesin kayıt" bölümü); sıradaki 4.7/4,
+birleşmede kayıt bağlarının kanonik nesneye devri.
 Bitenler:
 
 * uv ile paket iskeleti (`src/defteriki`)
@@ -122,9 +123,12 @@ Bitenler:
 * Kesin kayıt şeması (Aşama 4.7/2, göç `0014`): `kayit`, `kayit_alani`,
   `kayit_nesne`; zorunlu paket kökeni, durumsuz kesinlik, denetim izinin
   `kayit_id` bağı ("Kesin kayıt" bölümü)
+* Kayıt oluşturma servisi (Aşama 4.7/3): `kayit_islemleri.kayit_olustur` —
+  kayıt, alanları ve nesne bağları tek SAVEPOINT'te; doğrulama mutasyondan
+  önce; okuma işlevleri ve köken zinciri
 
-Henüz yok: kayıt oluşturma servisi (Aşama 4.7/3), kesin kaydetme / paketi
-kesinleştirme (4.8), genel kural motoru (4.9), finans tanım paketi
+Henüz yok: birleşmede kayıt bağlarının devri (Aşama 4.7/4), kesin kaydetme /
+paketi kesinleştirme (4.8), genel kural motoru (4.9), finans tanım paketi
 (`finans/` boş, 4.10), GUI, ürün verisi yazan MCP aracı (belge alan, işlem
 paketi ve karar araçları dahil; 4.11).
 
@@ -1850,8 +1854,8 @@ zincir taslak dünyasını kesin nesneye bağlardı.
 (`tests/test_mimari_sinir.py`): taslak modülleri, nesne motoru ve denetim izi
 kayıt şemasına ulaşamaz, kayıt modülü ikisini de görebilir.
 
-**Testler** (`tests/test_kayit_sistemi.py`, 15 test): şema ham SQL ile
-sınanır, çünkü servis (`kayit_islemleri`) 4.7/3'ün işidir. Kayıt paketsiz
+**Testler** (`tests/test_kayit_sistemi.py`, 33 test). Şema bölümü ham SQL ile
+sınanır: servis atlansa da veritabanı aynı ihlalleri reddetmelidir. Kayıt paketsiz
 yazılamaz; paketin okumasından başka okuma ve başka okumanın kaynağı düşer;
 ikinci sürümün kayıt türü birinci sürümle yazılamaz; başka kayıt türünün alanı
 ve kaydın türünü taşımayan alan satırı düşer; aynı alan kayıtta iki kez
@@ -1859,10 +1863,57 @@ bulunamaz; aynı kayıt-nesne çifti iki kez yazılamaz; olmayan nesneye bağ
 kurulamaz; farklı sürümdeki nesneye bağ kurulabilir; ize konu olan kayıt
 silinemez (`RESTRICT`); tanımsız denetim olayı reddedilir.
 
-**Bilinçli kapsam dışı (4.7/2'de yok):** kayıt oluşturma servisi, zorunlu alan
-tamlığı ve değer kodlaması (4.7/3); aday → kesin dönüşüm, paketi
-kesinleştirme, atomik finalizasyon (4.8); kural ve projection motoru (4.9);
-kayıt silme, güncelleme ve geri alma (4.14).
+Servis bölümü: kayıt alanları ve bağlarıyla yazılır ve okunur; kaynaksız kayıt
+geçerlidir ve kökeni belgeye kadar gider; ondalık değer kanonik metne döner
+(`12.50` → `125e-1`), `float` reddedilir; zorunlu alan eksikse **hiçbir satır**
+kalmaz; tanımsız ve başka türün alanı reddedilir; nesnesiz, yinelenmiş, kapalı
+ve olmayan nesneli çağrılar düşer; başka okumanın kaynağı servis tarafından da
+reddedilir; iptal edilmiş pakete kayıt yazılamaz; denetim izine kayıt düzeyinde
+tek olay yazılır ve ham değer taşımaz; hata yutulsa da yarım kayıt kalmaz ve
+işlem kullanılabilir kalır; iki bağlantı yarışında kaybeden `KayitYazmaCakismasi`
+alır; silme / değiştirme / kesinleştirme işlevinin bulunmadığı testle sabitlenir.
+
+**Servis (`src/defteriki/cekirdek/kayit_islemleri.py`, Aşama 4.7/3).** Kesin
+kayıt tek kapıdan doğar:
+
+```
+kayit_olustur(oturum, islem_paketi_id, kayit_turu_id, alanlar, nesne_idleri,
+              aktor, *, kaynak_id=None) -> Kayit
+```
+
+Sıra sabittir ve **doğrulama mutasyondan önce** biter: paket (`calisiyor`
+olmalı; `okuma_id` paketten alınır, çağıran veremez) → kayıt türü ve tanım
+sürümü (türden alınır) → kaynak (aynı okumaya ait olmalı) → alanlar (tanımsız
+ad, eksik zorunlu alan, değer türü, kanonik kodlama) → nesneler (en az bir,
+yinelenmemiş, var olan ve `etkin`). Ancak hepsi geçerse tek SAVEPOINT içinde
+`kayit` + bütün `kayit_alani` + bütün `kayit_nesne` satırları ve tek denetim
+olayı yazılır. Herhangi bir hata hiçbir parça bırakmaz — çağıran hatayı yutup
+aynı işlemde yazmaya devam etse bile.
+
+Zorunlu alan tamlığı **burada** denetlenir, 4.8'e bırakılmaz (karar
+2026-09-21): kaydın taslak durumu olmadığına göre eksik bir kesin kayıt
+veritabanında bulunamamalıdır. Nesne bağı da aynı gerekçeyle aynı çağrıdadır;
+ayrı bir "alan yaz" / "nesne bağla" kapısı yoktur. Kesin kayıt yalnız etkin
+nesneye bağlanır; birleşmiş (kapalı) nesneye yeni bağ kurulamaz.
+
+Hatalar `KayitHatasi` altında: `KayitBulunamadi`, `KayitKokeniGecersiz`,
+`TanimsizKayitAlani`, `ZorunluKayitAlaniEksik`, `KayitAlaniDegeriGecersiz`,
+`KayitNesneBagiGecersiz`, `KayitYazmaCakismasi` (kilit / eşzamanlı yazma;
+retry döngüsü yoktur, yeniden deneme çağıranındır). Paketin kendisiyle ilgili
+hatalar taslak dünyasının kapısından olduğu gibi gelir (`PaketBulunamadi`,
+`PaketDurumuGecersiz`); kayıt servisi paket durumunu yeniden tanımlamaz.
+
+Okuma: `kayit_getir`, `kayit_alanlarini_oku` (kanonik metin → Python değeri),
+`kaydin_nesneleri`, `nesnenin_kayitlari`, `paketin_kayitlari` ve `kaydin_kokeni`
+(kayıt → paket → okuma → belge → arşiv dosyası; her halka dış anahtarla
+bulunur, tahmin yok). Denetim izi `olaylari_listele(..., kayit_id=...)` ile
+kayda göre süzülür.
+
+**Bilinçli kapsam dışı (4.7/3'te yok):** birleşmede kayıt bağlarının kanonik
+nesneye devri (4.7/4); aday → kesin dönüşüm, paketi kesinleştirme, atomik
+finalizasyon, belgeyi kayıtlı duruma geçirme (4.8); kural ve projection motoru
+(4.9); kayıt silme, alan değiştirme ve geri alma (4.14 — bu modülde öyle bir
+işlev bulunmadığı testle sabitlenir).
 
 ## Mimari sınır: çekirdek ve finans
 

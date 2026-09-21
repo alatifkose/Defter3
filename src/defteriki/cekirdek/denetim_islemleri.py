@@ -46,6 +46,7 @@ def olay_yaz(
     ikincil_nesne_id: int | None = None,
     aday_nesne_id: int | None = None,
     ozellik_tanimi_id: int | None = None,
+    kayit_id: int | None = None,
     gerekce: str | None = None,
 ) -> DenetimIzi:
     """Bir iş olayını denetim izine yazar; satırı döndürür.
@@ -72,6 +73,7 @@ def olay_yaz(
         ikincil_nesne_id=ikincil_nesne_id,
         aday_nesne_id=aday_nesne_id,
         ozellik_tanimi_id=ozellik_tanimi_id,
+        kayit_id=kayit_id,
         gerekce=gerekce,
     )
     oturum.add(satir)
@@ -85,6 +87,7 @@ def olaylari_listele(
     islem_paketi_id: int | None = None,
     karar_talebi_id: int | None = None,
     nesne_id: int | None = None,
+    kayit_id: int | None = None,
 ) -> list[DenetimIzi]:
     """Denetim olayları, kimlik sırasıyla (deterministik).
 
@@ -101,4 +104,6 @@ def olaylari_listele(
             (DenetimIzi.nesne_id == nesne_id)
             | (DenetimIzi.ikincil_nesne_id == nesne_id)
         )
+    if kayit_id is not None:
+        sorgu = sorgu.where(DenetimIzi.kayit_id == kayit_id)
     return list(oturum.execute(sorgu).scalars())

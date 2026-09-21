@@ -760,7 +760,10 @@ KESIN_NESNE_MODULLERI = (
     "defteriki.cekirdek.nesne_tablolari",
     "defteriki.cekirdek.nesne_islemleri",
 )
-KAYIT_MODULLERI = ("defteriki.cekirdek.kayit_tablolari",)
+KAYIT_MODULLERI = (
+    "defteriki.cekirdek.kayit_tablolari",
+    "defteriki.cekirdek.kayit_islemleri",
+)
 """Kesin kayıt modülleri (Aşama 4.7). Kayıt hem kesin nesneye hem işlem
 paketine bağlandığından ``KESIN_NESNE_MODULLERI``ne katılmaz; ayrımı aşağıdaki
 tek yönlü denetimler korur: taslak ve nesne motoru kayıt dünyasına ulaşmaz,
