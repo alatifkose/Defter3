@@ -18,14 +18,14 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from defteriki import ayarlar as ay
-from defteriki.cekirdek import gocler
-from defteriki.cekirdek import tanim_islemleri as ti
-from defteriki.cekirdek import tanim_tablolari as tt
-from defteriki.cekirdek import veritabani as vt
-from defteriki.cekirdek.tanim_tablolari import DegerTuru, YasamDurumu
+from defteruc import ayarlar as ay
+from defteruc.cekirdek import gocler
+from defteruc.cekirdek import tanim_islemleri as ti
+from defteruc.cekirdek import tanim_tablolari as tt
+from defteruc.cekirdek import veritabani as vt
+from defteruc.cekirdek.tanim_tablolari import DegerTuru, YasamDurumu
 
-DEFTERIKI_DEGISKENLERI = (
+DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
     ay.VERI_KOKU_DEGISKENI,
     ay.VERITABANI_YOLU_DEGISKENI,
@@ -37,7 +37,7 @@ DEFTERIKI_DEGISKENLERI = (
 
 @pytest.fixture(autouse=True)
 def temiz_cevre(monkeypatch: pytest.MonkeyPatch) -> None:
-    for degisken in DEFTERIKI_DEGISKENLERI:
+    for degisken in DEFTERUC_DEGISKENLERI:
         monkeypatch.delenv(degisken, raising=False)
 
 

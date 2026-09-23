@@ -202,7 +202,7 @@ wheels = [
 ]
 
 [[package]]
-name = "defteriki"
+name = "defteruc"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

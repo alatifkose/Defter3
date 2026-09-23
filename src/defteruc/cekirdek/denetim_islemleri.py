@@ -1,7 +1,7 @@
 """İş denetim izinin yazma ve okuma işlevleri (Aşama 4.6).
 
 Denetim izi (``denetim_tablolari.DenetimIzi``) iş olaylarının kalıcı
-kaydıdır; teknik hata günlüğünden (``defteriki.gunluk``) ayrıdır ve onunla
+kaydıdır; teknik hata günlüğünden (``defteruc.gunluk``) ayrıdır ve onunla
 birleştirilmez. Her yazma aktörü açıkça alır.
 
 İşlem sınırı 4.1 kuralıdır: her işlev açık bir ``Session`` alır, çağıran
@@ -20,8 +20,8 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from defteriki.cekirdek.denetim_tablolari import Aktor, DenetimIzi, DenetimOlayi
-from defteriki.cekirdek.tanim_tablolari import simdi_utc
+from defteruc.cekirdek.denetim_tablolari import Aktor, DenetimIzi, DenetimOlayi
+from defteruc.cekirdek.tanim_tablolari import simdi_utc
 
 AZAMI_GEREKCE_UZUNLUGU = 500
 """Karakter; aşılırsa ``GecersizDenetimKaydi``. İz bir anlatı deposu değildir."""

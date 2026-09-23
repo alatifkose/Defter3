@@ -31,20 +31,20 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from defteriki import ayarlar as ay
-from defteriki.cekirdek import belge_islemleri as bi
-from defteriki.cekirdek import gocler
-from defteriki.cekirdek import nesne_islemleri as ni
-from defteriki.cekirdek import nesne_tablolari as nt
-from defteriki.cekirdek import tanim_islemleri as ti
-from defteriki.cekirdek import taslak_islemleri as tsi
-from defteriki.cekirdek import taslak_tablolari as tst
-from defteriki.cekirdek import veritabani as vt
-from defteriki.cekirdek.denetim_tablolari import Aktor, AktorTuru
-from defteriki.cekirdek.tanim_tablolari import DegerTuru, YasamDurumu
-from defteriki.cekirdek.taslak_tablolari import PaketDurumu
+from defteruc import ayarlar as ay
+from defteruc.cekirdek import belge_islemleri as bi
+from defteruc.cekirdek import gocler
+from defteruc.cekirdek import nesne_islemleri as ni
+from defteruc.cekirdek import nesne_tablolari as nt
+from defteruc.cekirdek import tanim_islemleri as ti
+from defteruc.cekirdek import taslak_islemleri as tsi
+from defteruc.cekirdek import taslak_tablolari as tst
+from defteruc.cekirdek import veritabani as vt
+from defteruc.cekirdek.denetim_tablolari import Aktor, AktorTuru
+from defteruc.cekirdek.tanim_tablolari import DegerTuru, YasamDurumu
+from defteruc.cekirdek.taslak_tablolari import PaketDurumu
 
-DEFTERIKI_DEGISKENLERI = (
+DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
     ay.VERI_KOKU_DEGISKENI,
     ay.VERITABANI_YOLU_DEGISKENI,
@@ -88,7 +88,7 @@ KESIN_NESNE_TABLOLARI = nt.NESNE_TABLOLARI
 
 @pytest.fixture(autouse=True)
 def temiz_cevre(monkeypatch: pytest.MonkeyPatch) -> None:
-    for degisken in DEFTERIKI_DEGISKENLERI:
+    for degisken in DEFTERUC_DEGISKENLERI:
         monkeypatch.delenv(degisken, raising=False)
 
 

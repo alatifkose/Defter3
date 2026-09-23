@@ -1,4 +1,4 @@
-"""DEFTERIKI teknik hata günlüğü.
+"""DEFTERUC teknik hata günlüğü.
 
 Yalnızca standart kütüphanenin ``logging`` modülü kullanılır. Log dosyası
 merkezi ayarlardan gelen log dizininde açılır; başka bir yere yazılmaz.
@@ -45,10 +45,10 @@ from collections.abc import Iterable, Mapping
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-GUNLUK_ADI = "defteriki"
-GUNLUK_DOSYA_ADI = "defteriki.log"
-DOSYA_ISLEYICI_ADI = "defteriki.dosya"
-KUTUPHANE_ISLEYICI_ADI = "defteriki.kutuphane"
+GUNLUK_ADI = "defteruc"
+GUNLUK_DOSYA_ADI = "defteruc.log"
+DOSYA_ISLEYICI_ADI = "defteruc.dosya"
+KUTUPHANE_ISLEYICI_ADI = "defteruc.kutuphane"
 HATA_TURU_BILINMIYOR = "bilinmiyor"
 AZAMI_DOSYA_BOYUTU = 1_000_000
 """Bayt; aşılınca dosya döndürülür."""
@@ -185,7 +185,7 @@ def kurulu() -> bool:
 
 
 def kutuphane_gunlugunu_yonlendir(ad: str) -> None:
-    """Bir dış kütüphanenin günlüğünü DEFTERIKI dosya günlüğüne bağlar.
+    """Bir dış kütüphanenin günlüğünü DEFTERUC dosya günlüğüne bağlar.
 
     ``ad`` adlı logger (ve altındakiler) aynı dosyaya aynı satır biçimiyle
     yazar; kök logger'a yayılmaz, dolayısıyla stderr'e düşmez. Olay türü

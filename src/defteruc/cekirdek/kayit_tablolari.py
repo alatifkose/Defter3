@@ -55,11 +55,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from defteriki.cekirdek.belge_tablolari import KAYNAK
-from defteriki.cekirdek.nesne_tablolari import NESNE
-from defteriki.cekirdek.tanim_tablolari import KAYIT_ALANI_TANIMI, KAYIT_TURU
-from defteriki.cekirdek.taslak_tablolari import ISLEM_PAKETI
-from defteriki.cekirdek.veritabani import TabloTabani
+from defteruc.cekirdek.belge_tablolari import KAYNAK
+from defteruc.cekirdek.nesne_tablolari import NESNE
+from defteruc.cekirdek.tanim_tablolari import KAYIT_ALANI_TANIMI, KAYIT_TURU
+from defteruc.cekirdek.taslak_tablolari import ISLEM_PAKETI
+from defteruc.cekirdek.veritabani import TabloTabani
 
 KAYIT = "kayit"
 KAYIT_ALANI = "kayit_alani"

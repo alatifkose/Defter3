@@ -1,6 +1,6 @@
 """Test ortamı kontrolü.
 
-Bu dosya DEFTERIKI'nin bir davranışını sınamaz. Yalnızca pytest'in ve
+Bu dosya DEFTERUC'ün bir davranışını sınamaz. Yalnızca pytest'in ve
 geçici dizin fikstürünün bu makinede çalıştığını doğrular.
 """
 

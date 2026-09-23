@@ -14,10 +14,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from defteriki import ayarlar as ay
-from defteriki.cekirdek import veritabani as vt
+from defteruc import ayarlar as ay
+from defteruc.cekirdek import veritabani as vt
 
-DEFTERIKI_DEGISKENLERI = (
+DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
     ay.VERI_KOKU_DEGISKENI,
     ay.VERITABANI_YOLU_DEGISKENI,
@@ -29,7 +29,7 @@ DEFTERIKI_DEGISKENLERI = (
 
 @pytest.fixture(autouse=True)
 def temiz_cevre(monkeypatch: pytest.MonkeyPatch) -> None:
-    for degisken in DEFTERIKI_DEGISKENLERI:
+    for degisken in DEFTERUC_DEGISKENLERI:
         monkeypatch.delenv(degisken, raising=False)
 
 
@@ -92,7 +92,7 @@ def test_url_verilen_mutlak_yoldan_uretilir(ayarlar: ay.Ayarlar) -> None:
 
 def test_goreli_yol_reddedilir() -> None:
     with pytest.raises(ValueError, match="mutlak"):
-        vt.veritabani_url(Path("defteriki.sqlite3"))
+        vt.veritabani_url(Path("defteruc.sqlite3"))
 
 
 def test_motor_calisma_dizininden_bagimsiz(

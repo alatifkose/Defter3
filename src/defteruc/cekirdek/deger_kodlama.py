@@ -25,7 +25,7 @@ ile tam hassasiyette geri döner; dönen değer sayısal olarak aynıdır, ölç
 eşit bir değer okunur. Bu biçim iç depolama içindir, ekrana basılmaz.
 
 Çözme aynı kuralla Python değerine döner. Bu modül veritabanına dokunmaz,
-``defteriki`` içinden yalnız ``tanim_tablolari.DegerTuru``'nü kullanır. Hata
+``defteruc`` içinden yalnız ``tanim_tablolari.DegerTuru``'nü kullanır. Hata
 ``DegerKodlamaHatasi`` (``ValueError``); çağıran modüller bunu kendi hata
 modeline sarar (``OzellikTuruUyusmuyor`` / ``GecersizAdayOzellik``).
 """
@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from defteriki.cekirdek.tanim_tablolari import DegerTuru
+from defteruc.cekirdek.tanim_tablolari import DegerTuru
 
 SIFIR = "0"
 """Bütün sıfır değerlerin (``0``, ``0.00``, ``-0``) tek kanonik metni."""

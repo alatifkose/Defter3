@@ -1,7 +1,7 @@
-# DEFTERIKI
+# DEFTERUC
 
 Kişisel finans kayıt sistemi. Belgeler Cowork tarafından okunur, MCP kapısından
-DEFTERIKI'ye yazılır; uygulama kayıtları tutar, denetler ve gösterir.
+DEFTERUC'e yazılır; uygulama kayıtları tutar, denetler ve gösterir.
 
 ## Durum
 
@@ -9,10 +9,9 @@ Aşama 2 (proje temeli) ve Aşama 3 (gerçek Cowork MCP denemesi) tamamlandı;
 Aşama 3'ün dört teslimi ve ölçümleri "Cowork entegrasyonu" bölümünde, geçici
 deneme araçları kaldırıldı. Aşama 4.0 (2026-09-18): çekirdek / finans mimari
 sınırı kuruldu ve testle korunuyor ("Mimari sınır" bölümü). Bu hat
-(`yeniden-insa`, depo [alatifkose/Defter3](https://github.com/alatifkose/Defter3))
+(`yeniden-insa`, depo [alatifkose/DefterUc](https://github.com/alatifkose/DefterUc))
 Aşama 3 kapısından yeniden başlar; önceki Aşama 4-6 geliştirme hattı
-[alatifkose/DefterIki](https://github.com/alatifkose/DefterIki) deposunun
-`main` dalında yedek olarak durur, oraya yazılmaz. Aşama 4.1 (genel
+bırakıldı. Aşama 4.1 (genel
 veritabanı altyapısı) ve Aşama 4.2 (tanım sistemi) 2026-09-18'de, Aşama 4.3
 (nesne motoru), Aşama 4.4 (belge, arşiv, okuma ve kaynak) ve Aşama 4.5
 (işlem paketi ve taslak durumu) 2026-09-19'da, Aşama 4.6 (onay ve
@@ -30,60 +29,60 @@ servisi) ve 4.7/4 (birleşmede kayıt bağlarının kanonik nesneye devri)
 sıradaki aşama 4.8 (atomik kaydetme).
 Bitenler:
 
-* uv ile paket iskeleti (`src/defteriki`)
-* Merkezi ayar yönetimi (`src/defteriki/ayarlar.py`)
-* Başlangıç akışı: `uv run defteriki` (`src/defteriki/baslangic.py`)
-* Teknik hata günlüğü (`src/defteriki/gunluk.py`)
+* uv ile paket iskeleti (`src/defteruc`)
+* Merkezi ayar yönetimi (`src/defteruc/ayarlar.py`)
+* Başlangıç akışı: `uv run defteruc` (`src/defteruc/baslangic.py`)
+* Teknik hata günlüğü (`src/defteruc/gunluk.py`)
 * Test altyapısı (pytest + Hypothesis)
 * Tek komutluk kalite kontrolü (Ruff, Pyright strict, pytest)
 * `.gitignore` ve `.gitattributes`; kritik dışlama kuralları testle doğrulanır
   (`tests/test_gitignore.py`)
-* MCP kapısı iskeleti: `uv run defteriki-mcp`, tek araç `sistem_durumu`
-  (`src/defteriki/mcp_kapisi.py`); Cowork ile bağlantı, dosya erişimi ve
+* MCP kapısı iskeleti: `uv run defteruc-mcp`, tek araç `sistem_durumu`
+  (`src/defteruc/mcp_kapisi.py`); Cowork ile bağlantı, dosya erişimi ve
   çok adımlı protokol gerçek istemciyle ölçüldü
-* Mimari sınır: `src/defteriki/cekirdek/` (Aşama 4.1'den beri dolu) ve
-  `src/defteriki/finans/` (henüz boş) paketleri ve bağımlılık yönünü koruyan
+* Mimari sınır: `src/defteruc/cekirdek/` (Aşama 4.1'den beri dolu) ve
+  `src/defteruc/finans/` (henüz boş) paketleri ve bağımlılık yönünü koruyan
   AST testi (`tests/test_mimari_sinir.py`)
 * İnceleme düzeltmeleri (2026-09-18): SDK günlüğü gizlilik kuralına bağlandı
   ("Teknik hata günlüğü"), mimari sınır denetimi genişletildi, başlangıç
   testleri gelen dizini değişkenini temizler, test ortamı yol sınırı fiziksel
-  karşılığa bakar ("Ayarlar"), Defter3 yerel verisi eski hattan ayrıldı
-  ("Defter3 yerel kurulumu")
+  karşılığa bakar ("Ayarlar"), yerel veri kendi kökünde durur ("Yerel
+  kurulum")
 * Genel veritabanı altyapısı (Aşama 4.1): SQLAlchemy + Alembic,
-  `defteriki.cekirdek.veritabani` (bağlantı politikası, işlem sınırı) ve
-  `defteriki.cekirdek.gocler` (şema sürümü); ilk göç `0001` uygulama tablosu
+  `defteruc.cekirdek.veritabani` (bağlantı politikası, işlem sınırı) ve
+  `defteruc.cekirdek.gocler` (şema sürümü); ilk göç `0001` uygulama tablosu
   içermez ("Veritabanı" bölümü)
 * Tanım sistemi (Aşama 4.2): tanım paketi, sürüm, nesne türü, özellik,
   ilişki, kayıt türü ve kayıt alanı tanımlarını veri olarak tutan yedi tablo
-  (göç `0002`), `defteriki.cekirdek.tanim_tablolari`,
-  `defteriki.cekirdek.tanim_sorgulari` (okuma; 2026-09-20'de ayrıldı) ve
-  `defteriki.cekirdek.tanim_islemleri` (yazma, ekleme-yalnız kilit); çekirdek
+  (göç `0002`), `defteruc.cekirdek.tanim_tablolari`,
+  `defteruc.cekirdek.tanim_sorgulari` (okuma; 2026-09-20'de ayrıldı) ve
+  `defteruc.cekirdek.tanim_islemleri` (yazma, ekleme-yalnız kilit); çekirdek
   hangi türlerin var olduğunu bilmez, testler nötr sahte paketlerle çalışır
   ("Tanım sistemi" bölümü)
 * Nesne motoru (Aşama 4.3): nesne, nesne özelliği ve nesne ilişkisi
   tabloları, hiyerarşi kuralı, özellik değer türü ve zorunluluğu, tanım
-  sürümü kilidi, yaşam durumu (göç `0004`); `defteriki.cekirdek.nesne_tablolari`
-  ve `defteriki.cekirdek.nesne_islemleri` ("Nesne motoru" bölümü)
+  sürümü kilidi, yaşam durumu (göç `0004`); `defteruc.cekirdek.nesne_tablolari`
+  ve `defteruc.cekirdek.nesne_islemleri` ("Nesne motoru" bölümü)
 * Belge zinciri (Aşama 4.4): gelen dizini sınırı, akışla SHA-256, içerik
   adresli atomik arşiv, belge, okuma sürümleri, kaynak izi ve dosya/DB
-  uzlaştırma (göç `0006`); `defteriki.cekirdek.arsiv`,
-  `defteriki.cekirdek.belge_tablolari`, `defteriki.cekirdek.belge_islemleri`
+  uzlaştırma (göç `0006`); `defteruc.cekirdek.arsiv`,
+  `defteruc.cekirdek.belge_tablolari`, `defteruc.cekirdek.belge_islemleri`
   ("Belge zinciri" bölümü)
 * İşlem paketi ve taslak (Aşama 4.5): "yazmak ≠ kaydetmek"; tamamlanmış
   okumadan doğan işlem paketi (`calisiyor / bekliyor / iptal`), kesin nesne
   tablolarından fiziksel olarak ayrı aday nesne / özellik / ilişki / kayıt
   tabloları ve aday kayıt ↔ aday nesne bağı (göç `0007`);
-  `defteriki.cekirdek.taslak_tablolari`, `defteriki.cekirdek.taslak_islemleri`,
-  ortak değer kodlaması `defteriki.cekirdek.deger_kodlama` ("İşlem paketi ve
+  `defteruc.cekirdek.taslak_tablolari`, `defteruc.cekirdek.taslak_islemleri`,
+  ortak değer kodlaması `defteruc.cekirdek.deger_kodlama` ("İşlem paketi ve
   taslak" bölümü)
 * Onay ve mükerrerlik (Aşama 4.6): kullanıcı tarafından seçilen mükerrerlik
   şartları, iki yönlü tarama, kalıcı şüphe ve kullanıcı karar talebi,
   `BEKLIYOR` protokolü, `AYNI / AYRI / KARARSIZ` kararı, aday → mevcut nesne
   çözümlemesi, iki kesin nesnenin birleştirilmesi, zincirleme denetim ve
   aktörlü iş denetim izi (göç `0008`);
-  `defteriki.cekirdek.mukerrerlik_tablolari`,
-  `defteriki.cekirdek.mukerrerlik_islemleri`,
-  `defteriki.cekirdek.denetim_tablolari`, `defteriki.cekirdek.denetim_islemleri`
+  `defteruc.cekirdek.mukerrerlik_tablolari`,
+  `defteruc.cekirdek.mukerrerlik_islemleri`,
+  `defteruc.cekirdek.denetim_tablolari`, `defteruc.cekirdek.denetim_islemleri`
   ("Onay ve mükerrerlik" bölümü)
 * Aşama 4.6 inceleme düzeltmeleri (2026-09-20, göç `0009`): kararı yalnız
   kullanıcı verir (servis kapısı + kontrol kısıtları), iptal edilen paketin
@@ -145,9 +144,9 @@ Aşama 4.6'nın altı onay / mükerrerlik / denetim tablosu ("Onay ve
 mükerrerlik" bölümü) ve Aşama 4.7'nin üç kesin kayıt tablosudur ("Kesin
 kayıt" bölümü). Finansal tablo yoktur, `finans/` boştur.
 
-**Bağlantı (`src/defteriki/cekirdek/veritabani.py`).** SQLite dosyasının yolu
+**Bağlantı (`src/defteruc/cekirdek/veritabani.py`).** SQLite dosyasının yolu
 tek kaynaktan gelir: `Ayarlar.veritabani_yolu`. Çekirdek bu yolu çağırandan
-`Path` olarak alır; `defteriki.ayarlar`ı import etmez, çalışma dizinine
+`Path` olarak alır; `defteruc.ayarlar`ı import etmez, çalışma dizinine
 bakmaz. Adres metin birleştirilerek değil SQLAlchemy `URL.create` ile üretilir
 (`sqlite+pysqlite`, Windows yolu olduğu gibi); göreli yol reddedilir. Engine
 modül importunda değil `motor_olustur(yol)` ile açıkça kurulur ve kurulmak
@@ -175,7 +174,7 @@ kısa ömürlü oturum = bir transaction. Normal çıkışta `commit`, istisnada
 da ileride gelecek depo kodu kendi başına `commit` etmez; sahip bu bağlam
 yöneticisidir. `kapat()` havuzu boşaltır (Windows'ta dosya kilidi için).
 
-**Göçler ve şema sürümü (`src/defteriki/cekirdek/gocler.py`, `alembic/`).**
+**Göçler ve şema sürümü (`src/defteruc/cekirdek/gocler.py`, `alembic/`).**
 Şema sürümünü Alembic'in kendi `alembic_version` tablosu tutar; ayrı sürüm
 tablosu yoktur. Göçler `alembic/versions/` altında; `0001_genel_altyapi`
 zincirin başıdır ve tablo oluşturmaz, `0002_tanim_sistemi` yedi tanım
@@ -208,10 +207,11 @@ kökenini bir paketten devralmış satır varsa geri alma reddedilir)
 (zincirin başı bugün `0011`; ayrıntı "Nesne motoru",
 "Belge zinciri", "İşlem paketi ve taslak" ve "Onay ve mükerrerlik"
 bölümlerinde).
-**Kalıcı geliştirme veritabanı** (`C:\dev\Defter3-veri\gelistirme\
-defteriki.sqlite3`) bilinçli olarak hâlâ `0003` sürümündedir; `0004`–`0012`
-ona uygulanmamıştır ve yalnız Abdüllatif'in açık talimatıyla uygulanır. Göç
-testleri yalnız `tmp_path` altındaki geçici veritabanlarında çalışır. `0003`
+**Kalıcı geliştirme veritabanı** (`C:\dev\Defter\veri\gelistirme\
+defteruc.sqlite3`) şu an kurulu değildir; hangi şema sürümüyle kurulacağı ve
+göç politikası yeniden belirlenecek (aşağıdaki politika o zamana kadar
+geçerlidir). Göç testleri yalnız `tmp_path` altındaki geçici
+veritabanlarında çalışır. `0003`
 tabloyu açık SQL adımlarıyla yeniden kurar,
 Alembic `batch`
 kipiyle değil: göçler `foreign_keys=ON` bağlantıda ve tek transaction içinde
@@ -232,7 +232,7 @@ modülünü import eder ki `TabloTabani.metadata` dolu olsun (autogenerate ve
 şema karşılaştırması için). `alembic.ini` veritabanı adresi taşımaz;
 `alembic/env.py` yolu merkezi ayarlardan (ortam değişkenleri) alır, komut
 satırında yalnız veritabanı dosyasının dizinini açar. Göç çalıştırma açık bir
-işlemdir; `uv run defteriki` ve `uv run defteriki-mcp` göç çalıştırmaz,
+işlemdir; `uv run defteruc` ve `uv run defteruc-mcp` göç çalıştırmaz,
 veritabanı dosyası oluşturmaz (testle sabit). Resmî komut:
 
 ```bash
@@ -253,22 +253,10 @@ Aynı senaryo eski `sqlite3` kipinde denendiğinde birinci göçün tablosu
 (`sentetik_bir`) ve boş bir `alembic_version` tablosu geride kalıyordu;
 kanıt bu farktır.
 
-Dikkat: komut hangi veritabanına gideceğini ortam değişkenlerinden okur.
-Kullanıcı düzeyi `setx DEFTERIKI_VERI_KOKU` hâlâ eski hattın kökünü
-gösteriyorsa, terminalden düz `uv run alembic upgrade head` eski veritabanını
-hedefler; eski dosya bu zincirde olmayan `0002` sürümünü taşıdığından Alembic
-"Can't locate revision" hatasıyla durur ve hiçbir şey değiştirmez, ama komut
-öncesi `DEFTERIKI_VERI_KOKU=C:\dev\Defter3-veri` açıkça verilmelidir. Defter3
-verisi için ilk göç 2026-09-18'de bu şekilde uygulandı:
-`C:\dev\Defter3-veri\gelistirme\defteriki.sqlite3`, sürüm `0001`; göç `0002` aynı
-gün aynı komutla uygulandı, göç `0003` de aynı gün
-aynı komutla uygulandı. 2026-09-18 akşamı Abdüllatif'in talimatıyla
-geliştirme veritabanı sıfırdan yeniden kuruldu: eski dosya
-`defteriki.sqlite3.eski-2026-09-18` adına alındı, yeni dosya `0001 → 0002 →
-0003` zinciriyle `0003` sürümünde ve boş. Göç `0004`, `0005` ve `0006` bu
-dosyaya uygulanmadı; dosya `0003`te kalır, kod `0006` bekler ve bu bilinçli,
-istenen bir durumdur (2026-09-19'da Aşama 4.4 sonunda yeniden doğrulandı:
-dosyadaki `alembic_version` hâlâ `0003`).
+Dikkat: komut hangi veritabanına gideceğini ortam değişkenlerinden okur
+(`DEFTERUC_VERI_KOKU`, "Yerel kurulum"). Komut öncesi hedef kökün doğru
+olduğu doğrulanmalıdır; yanlış köke yöneltilen göç başka bir veritabanını
+değiştirir.
 
 **Geliştirme veritabanına göç politikası (karar 2026-09-18, Abdüllatif).**
 Geliştirme veritabanı depo dışındadır; commit ve geri alma fiziksel dosyayı
@@ -337,14 +325,14 @@ merkezi yolu kullanır, stdout'a yazmaz, süreç içi göçle aynı şemayı ver
 Aşama 4.2 (2026-09-18; Yeniden İnşa Teknik Planı madde 6 ve 27). Çekirdek
 hangi nesne türlerinin, özelliklerin, ilişkilerin ve kayıt türlerinin var
 olduğunu bilmez; bunları **tanım verisi** olarak tutar. Bir domain (ileride
-`defteriki.finans`) kendi kavramlarını bu tablolara satır olarak yazar.
+`defteruc.finans`) kendi kavramlarını bu tablolara satır olarak yazar.
 Çekirdek `TEST_KISI` ile `BANKA` arasında fark görmez; aynı şema ve işlevler
 kütüphane, envanter ya da sağlık tanımları için de aynen çalışır. Bu aşamada
 gerçek finans tanımı yüklenmez, `finans/` boştur; testler nötr sahte
 paketlerle (`DEMO`: `TEST_KISI`, `TEST_CIHAZ`, `TEST_OLAY`; `ENVANTER`: `DEPO`,
 `RAF`, `URUN`) çalışır.
 
-**Tablolar (`src/defteriki/cekirdek/tanim_tablolari.py`, göç `0002`).** Her
+**Tablolar (`src/defteruc/cekirdek/tanim_tablolari.py`, göç `0002`).** Her
 satır bir üsttekine dış anahtarla (`ON DELETE RESTRICT`) bağlıdır; bütün
 kısıtlar isimlidir (`pk_`, `fk_`, `uq_`, `ck_`, `ix_` kalıbı).
 
@@ -472,7 +460,7 @@ hiyerarşi kuralları tanım verisinden gelir. Aynı kod envanter, kütüphane y
 da başka bir alan için değişmeden çalışır; testler nötr `ENVANTER` dünyasıyla
 (`DEPO`, `BOLGE`, `RAF`, `URUN`) yapılır, `finans/` boştur.
 
-**Tablolar (`src/defteriki/cekirdek/nesne_tablolari.py`, göç `0004`).** Bütün
+**Tablolar (`src/defteruc/cekirdek/nesne_tablolari.py`, göç `0004`).** Bütün
 kısıtlar isimlidir; dış anahtarlar `ON DELETE RESTRICT`.
 
 | Tablo | Ne tutar | Veritabanı düzeyinde korunan |
@@ -517,7 +505,7 @@ yoktur). Değer tanımın türüne göre doğrulanır ve kanonik metin olarak
 saklanır (metin olduğu gibi, `str(int)`, `"1"`/`"0"`, ondalık aşağıdaki
 sayısal kanonik biçimde); `ozellikleri_oku` aynı kuralla Python değerine
 döner. Kodlama kuralı Aşama 4.5'ten itibaren
-`src/defteriki/cekirdek/deger_kodlama.py` içindedir ve aday özellikle
+`src/defteruc/cekirdek/deger_kodlama.py` içindedir ve aday özellikle
 (`taslak_islemleri`) ortaktır; nesne motoru hatayı kendi modeline
 (`OzellikTuruUyusmuyor`) sarar. Yanlış tür `OzellikTuruUyusmuyor`, tanımsız ya da başka türün
 özelliği `GecersizOzellik`, eksik zorunlu özellik `ZorunluOzellikEksik` verir.
@@ -652,7 +640,7 @@ atlayan yazmaya karşı son savunmadır.
 `Veritabani.islem()` sahibidir. Nesne, özellikleri, bağlantıları ve sürüm
 kilidi tek transaction'dadır; ortada hata çıkarsa hiçbir parça kalmaz.
 
-**Servis yüzeyi (`src/defteriki/cekirdek/nesne_islemleri.py`):**
+**Servis yüzeyi (`src/defteruc/cekirdek/nesne_islemleri.py`):**
 `nesne_olustur`, `nesne_getir`, `nesneleri_listele`,
 `yasam_durumunu_degistir`, `ozellik_yaz`, `ozellik_sil`, `ozellikleri_oku`,
 `iliski_kur`, `iliski_kaldir`, `iliskileri_listele`; `UstBaglanti`
@@ -739,10 +727,10 @@ semantiği yoktur ("Yazmak ve kayıt etmek" ayrımı, Aşama 4.5 ve sonrası).
 
 **Ayarlar ve bağımlılık.** Gelen dizini `Ayarlar.gelen_dizini`, arşiv dizini
 `Ayarlar.belge_dizini`dir; çekirdek modüller (`arsiv`, `belge_islemleri`)
-`defteriki.ayarlar`ı import etmez, iki dizini çağırandan `Path` olarak alır.
+`defteruc.ayarlar`ı import etmez, iki dizini çağırandan `Path` olarak alır.
 Import edildiklerinde dizin / dosya oluşturmaz, ortam değişkeni okumaz.
 
-**Gelen dizini sınırı (`src/defteriki/cekirdek/arsiv.py`,
+**Gelen dizini sınırı (`src/defteruc/cekirdek/arsiv.py`,
 `gelen_dosyayi_dogrula`).** Dosya yalnız izinli gelen dizininden alınır.
 Sırayla: yol boş olamaz → mutlak olmalı → `..` parçası olamaz → sözlüksel
 olarak gelen dizininin altında olmalı (Windows'ta büyük-küçük harf ayrımsız;
@@ -793,7 +781,7 @@ sayılmaz, onarılmaz). Eşzamanlı iki süreç aynı içeriği getirirse ikisi 
 aynı baytları aynı yola bırakır; sonuç tek geçerli dosyadır. Windows'ta hedef
 o an açıkken taşıma reddedilirse hedef yine özetle doğrulanır.
 
-**Tablolar (`src/defteriki/cekirdek/belge_tablolari.py`, göç `0006`).** Bütün
+**Tablolar (`src/defteruc/cekirdek/belge_tablolari.py`, göç `0006`).** Bütün
 kısıtlar isimlidir; dış anahtarlar `ON DELETE RESTRICT`.
 
 | Tablo | Ne tutar | Veritabanı düzeyinde korunan |
@@ -803,7 +791,7 @@ kısıtlar isimlidir; dış anahtarlar `ON DELETE RESTRICT`.
 | `okuma` | `belge_id`, `surum_no`, `durum`, `icerik` (JSON metni), `olusturma_zamani`, `tamamlanma_zamani` | `(belge_id, surum_no)` benzersiz; `(id, belge_id)` benzersiz (kaynağın bileşik dış anahtar hedefi); `typeof(surum_no) = 'integer' AND surum_no > 0`; durum ile içerik / tamamlanma zamanı tutarlılığı (`basladi` ⇒ ikisi NULL, `tamamlandi` ⇒ ikisi dolu; başka durum değeri yok); `icerik IS NULL OR json_valid(icerik)` |
 | `kaynak` | `belge_id`, `okuma_id`, `konum` (JSON metni, isteğe bağlı), `olusturma_zamani` | `(okuma_id, belge_id)` bileşik dış anahtarla `okuma (id, belge_id)`: okumanın gerçekten o belgeye ait olduğu zorlanır, iki bağımsız dış anahtar yoktur; `konum IS NULL OR json_valid(konum)`; belge ve okuma indeksleri; `(id, okuma_id)` benzersiz indeksi (göç `0007`; aday nesne / aday kayıt provenance bileşik dış anahtarının hedefi) |
 
-**Servisler (`src/defteriki/cekirdek/belge_islemleri.py`).** Her servis açık
+**Servisler (`src/defteruc/cekirdek/belge_islemleri.py`).** Her servis açık
 `Session` alır; çağıran `Veritabani.islem` işleminin sahibidir. Servis hata
 atomikliği 4.3 kuralıyla sürer: doğrulama yazmadan önce, yazma kendi
 SAVEPOINT'inde (`begin_nested`); başarısız çağrı aynı dış işlemde yakalansa
@@ -1000,7 +988,7 @@ kesin nesne tablolarını import ettiğinden taslak onu import etmez.
 Aday nesne `nesne.id` üretmez; aday kimliği kesin nesne kimliği değildir.
 Aday nesne oluşturmak tanım sürümünü kilitlemez.
 
-**Tablolar (`src/defteriki/cekirdek/taslak_tablolari.py`, göç `0007`).**
+**Tablolar (`src/defteruc/cekirdek/taslak_tablolari.py`, göç `0007`).**
 Bütün kısıtlar isimlidir; dış anahtarlar `ON DELETE RESTRICT`.
 
 | Tablo | Ne tutar | Veritabanı düzeyinde korunan |
@@ -1336,7 +1324,7 @@ benzersiz indeksle veritabanı düzeyinde, çözülmüş talep servis denetimiyl
 bu adım birleştirme yapmaz.
 
 **Aktörlü iş denetim izi.** `denetim_izi` tablosu teknik hata günlüğünden
-(`defteriki.gunluk`) ayrıdır; ikisi birleştirilmez. Her satır olay türü, olay
+(`defteruc.gunluk`) ayrıdır; ikisi birleştirilmez. Her satır olay türü, olay
 zamanı, `aktor_turu` (`kullanici` / `ajan` / `sistem`), `aktor_kimligi` ve
 olayı anlamaya yetecek kimlik referansları taşır. 4.6'nın durum değiştiren
 bütün servisleri aktörü açıkça alır. Ayırt edilen olaylar: mükerrerlik şartı
@@ -1818,7 +1806,7 @@ bir kavram yoktur; sayısal alan değeri de `deger_kodlama` ile kanonik metne
 çevrilir (ölçek ve birim, gerekirse, tanım verisinin ya da domain katmanının
 işidir).
 
-**Tablolar (`src/defteriki/cekirdek/kayit_tablolari.py`, göç `0014`).**
+**Tablolar (`src/defteruc/cekirdek/kayit_tablolari.py`, göç `0014`).**
 
 | Tablo | Ne tutar | Veritabanı düzeyinde korunan |
 |---|---|---|
@@ -1882,7 +1870,7 @@ hedef ve olmayan nesne reddedilir. Birleşme tarafında: kayıtlar kanonik
 nesneden görünür ve kaynakta kalmaz, iki uca bağlı kayıt tek satıra iner,
 hiyerarşi ihlali birleşmeyi düşürünce bağlar da yerinde kalır.
 
-**Servis (`src/defteriki/cekirdek/kayit_islemleri.py`, Aşama 4.7/3).** Kesin
+**Servis (`src/defteruc/cekirdek/kayit_islemleri.py`, Aşama 4.7/3).** Kesin
 kayıt tek kapıdan doğar:
 
 ```
@@ -1946,10 +1934,10 @@ GIDER), yön (ARTTIR / AZALT), HESAP_HAREKETI, bakiye ve ekstre mutabakatı
 ortak katmana girdi. Yeniden inşada finans bilgisi yok edilmez; yeri
 belirlenir.
 
-* DEFTERIKI iki kavramsal katmana ayrılır: genel **çekirdek**
-  (`defteriki.cekirdek`) ve finansal **domain** (`defteriki.finans`).
+* DEFTERUC iki kavramsal katmana ayrılır: genel **çekirdek**
+  (`defteruc.cekirdek`) ve finansal **domain** (`defteruc.finans`).
 * `finans → çekirdek` bağımlılığına izin vardır: finans çekirdeği kullanabilir.
-* `çekirdek → finans` bağımlılığı yasaktır: çekirdek `defteriki.finans`
+* `çekirdek → finans` bağımlılığı yasaktır: çekirdek `defteruc.finans`
   paketini ve alt modüllerini hiçbir import biçimiyle kullanamaz.
 * Çekirdek finansal anlam taşımaz: finansal tip, enum, iş kuralı çekirdekte
   bulunmaz.
@@ -1962,12 +1950,12 @@ belirlenir.
   bilmeden taşır ve denetler.
 * Bu sınır otomatik testle korunur.
 
-Test (`tests/test_mimari_sinir.py`) `src/defteriki/cekirdek/**/*.py`
-dosyalarını Python AST ile okur; `defteriki.finans` bağımlılığı bulursa dosya
+Test (`tests/test_mimari_sinir.py`) `src/defteruc/cekirdek/**/*.py`
+dosyalarını Python AST ile okur; `defteruc.finans` bağımlılığı bulursa dosya
 ve satırla, dolaylı bağımlılık bulursa modül zinciriyle düşer. Kapsam:
 
-* `import defteriki.finans[.x]` (`as` ile de), `from defteriki.finans[.x]
-  import y`, `from defteriki import finans`;
+* `import defteruc.finans[.x]` (`as` ile de), `from defteruc.finans[.x]
+  import y`, `from defteruc import finans`;
 * göreli import: `from .. import finans`, `from ..finans import x`, derin
   paketlerde `...`;
 * metin hedefli dinamik import: `importlib.import_module(...)` ve
@@ -1976,13 +1964,13 @@ ve satırla, dolaylı bağımlılık bulursa modül zinciriyle düşer. Kapsam:
   `import importlib as il` ve `from importlib import import_module as im`
   takma adları;
 * fonksiyon gövdesi içindeki importlar;
-* dolaylı bağımlılık: çekirdek modülünün `defteriki` içindeki statik import
+* dolaylı bağımlılık: çekirdek modülünün `defteruc` içindeki statik import
   grafiği üzerinden (aynı biçimlerle) finansa ulaşması, örneğin çekirdek →
-  `defteriki.yardimci` → `defteriki.finans`. Python bir alt modülü yüklerken
+  `defteruc.yardimci` → `defteruc.finans`. Python bir alt modülü yüklerken
   üst paketlerin `__init__.py` dosyalarını da çalıştırdığından bunlar grafiğe
-  dahildir: `from defteriki.yardimci.alt import veri` yazan bir çekirdek
+  dahildir: `from defteruc.yardimci.alt import veri` yazan bir çekirdek
   modülü, `alt.py` temiz olsa bile `yardimci/__init__.py` finansı yüklüyorsa
-  ihlaldir; başlangıç modülünün kendi üst paketleri de (`defteriki/__init__`,
+  ihlaldir; başlangıç modülünün kendi üst paketleri de (`defteruc/__init__`,
   `cekirdek/__init__`) sayılır. Zincir en kısa yol olarak ve üst paket adımı
   `(üst paket, X yüklenirken)` etiketiyle raporlanır; her modül bir kez
   ziyaret edilir, döngüler taramayı bitirir.
@@ -2000,7 +1988,7 @@ başına kanıt sayılmaz.
 **Finansal ad denetimi (Aşama 4.2, 2026-09-18).** Bağımlılık yönü tek başına
 yetmez: çekirdek finansı import etmeden de `BANKA = "BANKA"` ya da `class
 HesapHareketi` yazarak finansal anlam taşıyabilir. Aynı test dosyasındaki
-ikinci denetim `src/defteriki/cekirdek/**/*.py` ve `alembic/versions/*.py`
+ikinci denetim `src/defteruc/cekirdek/**/*.py` ve `alembic/versions/*.py`
 dosyalarını AST ile okur; tanımlayıcıları (değişken, sınıf, fonksiyon,
 parametre, nitelik, anahtar argüman, import adı) ve metin sabitlerini
 (f-string parçaları dahil) parçalara ayırır (`HesapHareketi` → HESAP,
@@ -2041,7 +2029,7 @@ kapanınca silinir.
 **1. Göç kaynakları kaynak dizini düzenine bağlı; paketlenmiş uygulamada
 çalışmaz.** Üç yer birlikte bu varsayımı taşır:
 
-* `src/defteriki/cekirdek/gocler.py`: `PROJE_KOKU = Path(__file__).resolve().parents[3]`
+* `src/defteruc/cekirdek/gocler.py`: `PROJE_KOKU = Path(__file__).resolve().parents[3]`
   ile `alembic.ini` ve `alembic/` dizini modül konumundan üç klasör yukarıda
   aranır; bu yalnız düzenlenebilir (editable) kaynak kurulumunda doğrudur.
 * `alembic.ini` içindeki `prepend_sys_path = src`: paketi kaynak ağacından
@@ -2052,11 +2040,11 @@ kapanınca silinir.
 Yürütme planındaki Windows masaüstü paketi ve "önceki sürümden yükseltme"
 adımında `parents[3]` yanlış yere düşer ve şema yükseltme çalışmaz. Hedef
 çözüm (paketleme aşamasından önce, kod o zaman yazılır): göç betikleri
-`src/defteriki/` altında paket kaynağı olarak dağıtılır; yol `importlib.resources`
+`src/defteruc/` altında paket kaynağı olarak dağıtılır; yol `importlib.resources`
 ya da paketleme biçimine uygun eşdeğer mekanizmayla, dizin varsayımı
 olmadan bulunur; `alembic.ini` gerekliliği kalkar, yapılandırma programda
 üretilir; şema yükseltmesi uygulamanın kendi komutuyla yapılır (örneğin
-`defteriki sema-yukselt`). Korunacak karar: şema yükseltmesi uygulama
+`defteruc sema-yukselt`). Korunacak karar: şema yükseltmesi uygulama
 başlangıcında otomatik yapılmaz, açık bir işlem olarak çalıştırılır.
 `uv run alembic upgrade head` biçiminin aynen korunması ürün gereksinimi
 değildir.
@@ -2122,7 +2110,7 @@ uv run pre-commit install
 ## Başlatma
 
 ```bash
-uv run defteriki
+uv run defteruc
 ```
 
 Komut sırayla ayarları ortam değişkenlerinden yükler, seçilen ortamın
@@ -2131,7 +2119,7 @@ kurar ve başlangıç olayını günlüğe yazar. Başarılıysa tek satırlık 
 (ortam, veri kökü, günlük dosyası) basar ve `0` ile çıkar. Henüz veritabanı
 oluşturmaz; finansal iş yapmaz.
 
-Herhangi bir adım başarısızsa (`DEFTERIKI_ORTAM` bilinmeyen değer, test
+Herhangi bir adım başarısızsa (`DEFTERUC_ORTAM` bilinmeyen değer, test
 ortamında veri kökü verilmemiş, dizin yerine dosya var, log dosyası
 açılamıyor...) anlaşılır bir hata stderr'e yazılır ve çıkış kodu `1` olur.
 Günlük kurulamadıysa başarılı başlangıç mesajı verilmez. Yollar
@@ -2140,13 +2128,13 @@ edildiğinde dizin ya da dosya oluşturulmaz.
 
 ## MCP kapısı
 
-Cowork'un DEFTERIKI'ye ulaştığı tek kapı. stdio taşımasıyla çalışır:
+Cowork'un DEFTERUC'e ulaştığı tek kapı. stdio taşımasıyla çalışır:
 
 ```bash
-uv run defteriki-mcp
+uv run defteruc-mcp
 ```
 
-Komut `uv run defteriki` ile aynı hazırlığı yapar (ayarlar, dizinler, günlük),
+Komut `uv run defteruc` ile aynı hazırlığı yapar (ayarlar, dizinler, günlük),
 ardından MCP sunucusunu stdin/stdout üzerinde çalıştırır. İstemci bağlantıyı
 kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çıkış kodu
 `1` olur; stdout'a hiçbir şey yazılmaz.
@@ -2161,13 +2149,13 @@ dosya yok, dosya var ama göçsüz ve göç uygulanmış senaryolarını süreç
 ve stdio üzerinden ayrı ayrı sınar. Ürün verisi yazan araç henüz yoktur. Aşama 3'te kullanılan
 geçici deneme araçları (`dosya_dene`, `deneme_baslat`, `deneme_durumu`)
 kapı temizliğinde kaldırıldı; ne ölçtükleri "Cowork entegrasyonu"
-bölümünde. Gelen dizini ayarı (`DEFTERIKI_GELEN_DIZINI`) kaldı: Aşama 4'te
+bölümünde. Gelen dizini ayarı (`DEFTERUC_GELEN_DIZINI`) kaldı: Aşama 4'te
 belge alımı Cowork'un bu dizine bıraktığı dosyanın yoluyla yapılır.
 
 Kurallar:
 
 * stdout yalnız protokolündür. SDK'nın stdio taşıması sunucu çalışırken
-  dosya tanımlayıcısı 1'i stderr'e çevirir; DEFTERIKI ayrıca hiç `print`
+  dosya tanımlayıcısı 1'i stderr'e çevirir; DEFTERUC ayrıca hiç `print`
   kullanmaz. Test, stdout'un yalnız JSON-RPC satırları taşıdığını doğrular.
 * Bütün tanı çıktısı teknik günlüğe gider. SDK'nın `mcp` günlüğü de aynı
   dosyaya bağlanır (olay sütunu `-`), stderr'e düşmez.
@@ -2194,14 +2182,14 @@ yöntemi Cowork'la çalışır, talep durumu veritabanında tutulur.
 | Teslim | Konu | Sonuç |
 |---|---|---|
 | 3.1 | MCP SDK ve sunucu iskeleti | Bitti. `mcp` 2.2.0 `uv.lock` ile kilitli. SDK 2.x'te `FastMCP` adı `MCPServer` oldu (`mcp.server.mcpserver`); 1.x örnekleri doğrudan çalışmaz. Araç dönüş tipi `slots=True` dataclass olamaz, SDK şemayı düşürüyor. Yerel istemciyle protokol sürümü `2025-06-18` müzakere edildi. |
-| 3.2 | Gerçek Cowork bağlantısı | Bitti (2026-09-15). Ayar: Claude masaüstü `claude_desktop_config.json` → `mcpServers`, komut `uv.exe run --directory C:/dev/DefterIki defteriki-mcp`, ortam değişkeni yok, veri `%LOCALAPPDATA%/DEFTERIKI/gelistirme`. Ölçüm (`mcp_el_sikisma`): istemci `local-agent-mode-defteriki 1.0.0`; müzakere edilen protokol sürümü **2025-11-25** (sunucunun en yükseği 2026-07-28, istemci daha eskisini seçti); istemci yetenekleri `roots.listChanged=true` ve `io.modelcontextprotocol/ui` uzantısı (`text/html;profile=mcp-app`); sampling ve elicitation bildirilmedi. Uygulama açılışta sunucuyu üç kez başlatıyor: biri 10 ms içinde kapanan yoklama, ikisi kalıcı (Cowork ve Claude Code). Zaman aşımı gözlenmedi: başlatmadan araç yanıtına kadar sorun yok, uygulama kapanınca sunucular EOF ile temiz çıktı. Uygulamanın kendi MCP günlüğü boş; ölçüm sunucu günlüğünden alındı. |
-| 3.3 | Dosya erişim denemesi | **Bitti (2026-09-15): dosya yolu yöntemi çalıştı, parça yükleme gerekmez.** Araç `dosya_dene` yazıldı ve testlendi (izinli dosya, boş dosya, alt dizin, dizin dışı, `..`, göreli yol, olmayan dosya, dizin, okuma hatası, stdio üzerinden okuma ve red; simgesel bağlantı testleri Windows'ta bağlantı yetkisi yoksa atlanır). Cowork ayarı: `mcpServers.defteriki.env` → `DEFTERIKI_GELEN_DIZINI=C:/dev/DefterIki-gelen`; uygulama yeniden başlayınca dizin kendiliğinden oluştu. Deneme ~402 KB'lik gerçek bir hesap özeti PDF'iyle iki senaryoda yapıldı: (a) dosya elle gelen dizinine kopyalandı, Cowork'a yol söylendi → `sonuc=okundu`; (b) PDF Cowork'a yüklendi, gelen dizinine bırakması istendi → Cowork dosyayı dizine yazdı ve `dosya_dene` ile okuttu → `sonuc=okundu`. İki dosyanın SHA-256 özeti birebir aynı; Cowork dosyayı bozmadan aktarıyor. Günlükte iki `mcp_dosya_deneme` satırı, red ya da hata yok. Aşama 4 belge alımı bu yöntemle kurulacak: Cowork dosyayı gelen dizinine bırakır, yolu MCP aracına verir. |
+| 3.2 | Gerçek Cowork bağlantısı | Bitti (2026-09-15). Ayar: Claude masaüstü `claude_desktop_config.json` → `mcpServers`, komut `uv.exe run --directory <proje dizini> defteruc-mcp`, ortam değişkeni yok, veri `%LOCALAPPDATA%/DEFTERUC/gelistirme`. Ölçüm (`mcp_el_sikisma`): istemci `local-agent-mode-defteruc 1.0.0`; müzakere edilen protokol sürümü **2025-11-25** (sunucunun en yükseği 2026-07-28, istemci daha eskisini seçti); istemci yetenekleri `roots.listChanged=true` ve `io.modelcontextprotocol/ui` uzantısı (`text/html;profile=mcp-app`); sampling ve elicitation bildirilmedi. Uygulama açılışta sunucuyu üç kez başlatıyor: biri 10 ms içinde kapanan yoklama, ikisi kalıcı (Cowork ve Claude Code). Zaman aşımı gözlenmedi: başlatmadan araç yanıtına kadar sorun yok, uygulama kapanınca sunucular EOF ile temiz çıktı. Uygulamanın kendi MCP günlüğü boş; ölçüm sunucu günlüğünden alındı. |
+| 3.3 | Dosya erişim denemesi | **Bitti (2026-09-15): dosya yolu yöntemi çalıştı, parça yükleme gerekmez.** Araç `dosya_dene` yazıldı ve testlendi (izinli dosya, boş dosya, alt dizin, dizin dışı, `..`, göreli yol, olmayan dosya, dizin, okuma hatası, stdio üzerinden okuma ve red; simgesel bağlantı testleri Windows'ta bağlantı yetkisi yoksa atlanır). Cowork ayarı: `mcpServers.defteruc.env` → `DEFTERUC_GELEN_DIZINI=<gelen dizini>`; uygulama yeniden başlayınca dizin kendiliğinden oluştu. Deneme ~402 KB'lik gerçek bir hesap özeti PDF'iyle iki senaryoda yapıldı: (a) dosya elle gelen dizinine kopyalandı, Cowork'a yol söylendi → `sonuc=okundu`; (b) PDF Cowork'a yüklendi, gelen dizinine bırakması istendi → Cowork dosyayı dizine yazdı ve `dosya_dene` ile okuttu → `sonuc=okundu`. İki dosyanın SHA-256 özeti birebir aynı; Cowork dosyayı bozmadan aktarıyor. Günlükte iki `mcp_dosya_deneme` satırı, red ya da hata yok. Aşama 4 belge alımı bu yöntemle kurulacak: Cowork dosyayı gelen dizinine bırakır, yolu MCP aracına verir. |
 | 3.4 | Çok adımlı protokol denemesi | **Bitti (2026-09-16): Cowork BEKLIYOR döngüsünü kendi başına, sadakatle yürüttü.** Araç çifti `deneme_baslat` / `deneme_durumu` yazıldı ve testlendi (süreç içi sahte saatle bekle→tamamla geçişi, aynı anahtar aynı kimlik, boş anahtar reddi, bilinmeyen kimlik, yanıt ve günlükte anahtar yok; stdio üzerinden başlat→durum→bilinmeyen→tekrar başlat döngüsü). Cowork'a tek cümle verildi: "bir deneme işi başlat; bekliyor dönerse aynı anahtarla durumu sor, tamamlanınca bildir." Günlük (`mcp_deneme`): `deneme_baslat` → BEKLIYOR, talep kimliği verildi; `deneme_durumu` üç kez soruldu: 3,1 s (BEKLIYOR), 17,4 s (BEKLIYOR), 42,5 s (TAMAMLANDI). Sorgu aralıkları yaklaşık 3 s, 14 s, 25 s; Cowork bekleme süresini kendi uzattı, vazgeçmedi, kimliği doğru taşıdı, anahtarı değiştirmedi, aynı işi yeniden başlatmadı. Hiçbir çağrı açık kalmadı; durum sorguları anında döndü. Dört çağrı da aynı sunucu sürecinden (`surec` eşit) geldi: Claude masaüstü sunucuyu yine iki kalıcı süreç olarak başlattı ama tek sohbetin bütün çağrıları tek sürece gitti; BILINMIYOR görülmedi. Aşama 5 için çıkarım: BEKLIYOR + talep kimliği + istemcinin tekrar sorması çalışan bir yöntem; talep durumu yine de belleğe değil veritabanına yazılır, çünkü sohbetler ve uygulama yeniden başlatmaları arası süreç garantisi yok. |
 
 ## Teknik hata günlüğü
 
-Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteriki.log`
-(varsayılan `<veri kökü>/<ortam>/logs/defteriki.log`). Standart kütüphanenin
+Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteruc.log`
+(varsayılan `<veri kökü>/<ortam>/logs/defteruc.log`). Standart kütüphanenin
 `logging` modülü kullanılır; ek bağımlılık yoktur.
 
 Her satır `zaman | seviye | olay | mesaj` biçimindedir; olay türleri
@@ -2210,7 +2198,7 @@ Her satır `zaman | seviye | olay | mesaj` biçimindedir; olay türleri
 kayıtlarında olay `-` olur.
 
 Saklama sınırı: dosya 1.000.000 baytı aşınca döndürülür, en fazla 5 eski
-dosya (`defteriki.log.1` ... `.5`) tutulur; toplam en çok ~6 MB. Kurulum
+dosya (`defteruc.log.1` ... `.5`) tutulur; toplam en çok ~6 MB. Kurulum
 tekrar çağrılırsa önceki handler kapatılıp kaldırılır, aynı olay birden
 fazla yazılmaz.
 
@@ -2276,11 +2264,11 @@ okuyarak denetlemek zorundadır.
 
 ## Ayarlar
 
-Bütün yollar `defteriki.ayarlar` modülünden gelir; uygulamanın nereden
+Bütün yollar `defteruc.ayarlar` modülünden gelir; uygulamanın nereden
 başlatıldığı yolları değiştirmez.
 
 ```python
-from defteriki.ayarlar import ayarlari_yukle, dizinleri_hazirla
+from defteruc.ayarlar import ayarlari_yukle, dizinleri_hazirla
 
 ayarlar = ayarlari_yukle()  # ortam değişkenlerini okur, diske yazmaz
 dizinleri_hazirla(ayarlar)  # gerekli dizinleri açar, dosya oluşturmaz
@@ -2290,23 +2278,23 @@ Ortam değişkenleri (öncelik yukarıdan aşağıya):
 
 | Değişken | Anlamı |
 |---|---|
-| `DEFTERIKI_VERITABANI_YOLU` | Veritabanı dosyası; türetilmiş yolun yerine geçer |
-| `DEFTERIKI_BELGE_DIZINI` | Belge arşivi dizini; türetilmiş yolun yerine geçer |
-| `DEFTERIKI_LOG_DIZINI` | Log dizini; türetilmiş yolun yerine geçer |
-| `DEFTERIKI_GELEN_DIZINI` | Gelen dizini: Cowork'un dosya bıraktığı, MCP araçlarının okumaya izinli olduğu tek dizin; türetilmiş yolun yerine geçer |
-| `DEFTERIKI_VERI_KOKU` | Ortamların ortak üst dizini; ortam adı altına eklenir |
-| `DEFTERIKI_ORTAM` | `gelistirme` (varsayılan), `test`, `gercek` |
+| `DEFTERUC_VERITABANI_YOLU` | Veritabanı dosyası; türetilmiş yolun yerine geçer |
+| `DEFTERUC_BELGE_DIZINI` | Belge arşivi dizini; türetilmiş yolun yerine geçer |
+| `DEFTERUC_LOG_DIZINI` | Log dizini; türetilmiş yolun yerine geçer |
+| `DEFTERUC_GELEN_DIZINI` | Gelen dizini: Cowork'un dosya bıraktığı, MCP araçlarının okumaya izinli olduğu tek dizin; türetilmiş yolun yerine geçer |
+| `DEFTERUC_VERI_KOKU` | Ortamların ortak üst dizini; ortam adı altına eklenir |
+| `DEFTERUC_ORTAM` | `gelistirme` (varsayılan), `test`, `gercek` |
 
-Varsayılan veri kökü Windows'ta `%LOCALAPPDATA%\DEFTERIKI\<ortam>`, Linux'ta
-`$XDG_DATA_HOME/DEFTERIKI/<ortam>` (yoksa `~/.local/share/...`), macOS'ta
-`~/Library/Application Support/DEFTERIKI/<ortam>`. Bu kökten
-`defteriki.sqlite3`, `belgeler/`, `logs/` ve `gelen/` türetilir.
+Varsayılan veri kökü Windows'ta `%LOCALAPPDATA%\DEFTERUC\<ortam>`, Linux'ta
+`$XDG_DATA_HOME/DEFTERUC/<ortam>` (yoksa `~/.local/share/...`), macOS'ta
+`~/Library/Application Support/DEFTERUC/<ortam>`. Bu kökten
+`defteruc.sqlite3`, `belgeler/`, `logs/` ve `gelen/` türetilir.
 
 Kurallar:
 
 * Yollar mutlak olmalı; boş veya göreli değer hata verir.
 * Bilinmeyen ortam adı hata verir.
-* `test` ortamı `DEFTERIKI_VERI_KOKU` ister ve tekil yolların bu kökün dışına
+* `test` ortamı `DEFTERUC_VERI_KOKU` ister ve tekil yolların bu kökün dışına
   çıkmasına izin vermez. Sınır yolun yazılı biçimine değil fiziksel
   karşılığına bakar (2026-09-18, `Path.resolve`): kök içindeki bir simgesel
   bağlantı ya da junction dışarıyı gösteriyorsa yol reddedilir ve hiçbir dizin
@@ -2317,41 +2305,39 @@ Kurallar:
   ile kaçış (yalnız Windows), kök içini gösteren bağlantı.
 * Tekil yol değişkenleri diğer ortamlarda ortam ayrımını geçersiz kılabilir.
 
-### Defter3 yerel kurulumu (2026-09-18)
+### Yerel kurulum
 
-Bu hattın yerel verisi eski hattan ayrıdır. Claude masaüstü
-`claude_desktop_config.json` içindeki `mcpServers.defteriki` girdisi bu
-depoyu (`uv run --directory C:\dev\DefterIki defteriki-mcp`) şu ortam
-değişkenleriyle çalıştırır:
+Proje ve yerel verisi tek üst klasörde durur:
+
+```
+C:\dev\Defter\
+  DefterUc\   proje (bu depo)
+  veri\       veri kökü: veritabanı, belge arşivi, günlükler
+  gelen\      gelen dizini: Cowork'ün okuyacağı belgeler
+```
+
+Claude masaüstü `claude_desktop_config.json` içindeki `mcpServers.defteruc`
+girdisi sunucuyu (`uv run --directory C:\dev\Defter\DefterUc defteruc-mcp`)
+şu ortam değişkenleriyle çalıştırır; kullanıcı düzeyi ortam değişkenleri de
+aynı değerleri taşır, böylece terminal ve Cowork aynı kökü kullanır:
 
 | Değişken | Değer |
 |---|---|
-| `DEFTERIKI_VERI_KOKU` | `C:\dev\Defter3-veri` |
-| `DEFTERIKI_GELEN_DIZINI` | `C:\dev\Defter3-gelen` |
+| `DEFTERUC_VERI_KOKU` | `C:\dev\Defter\veri` |
+| `DEFTERUC_GELEN_DIZINI` | `C:\dev\Defter\gelen` |
 
-Türetilen yollar: `C:\dev\Defter3-veri\gelistirme\defteriki.sqlite3`,
-`...\belgeler`, `...\logs`; gelen dizini `C:\dev\Defter3-gelen`. Bu dosya
-Git'e girmez; kurulum yalnız bu makinede geçerlidir. Paket ve komut adları
-(`defteriki`, `defteriki-mcp`) değişmedi; ayrım yalnız veri kökündedir.
-
-Düzeltme (2026-09-19): bu bölüm 2026-09-18'de MCP girdisinin Defter3
-köklerine çevrildiğini yazıyordu, ama dosya gerçekte değiştirilmemişti ve
-girdi eski `C:\dev\DefterIki-veri` / `C:\dev\DefterIki-gelen` köklerini
-gösteriyordu; Claude masaüstü her açılışta MCP sunucusunu başlatınca sunucu
-eski klasörleri yeniden oluşturuyordu. 2026-09-19'da girdi gerçekten
-düzeltildi (yedek `claude_desktop_config.json.yedek-2026-09-19`), kullanıcı
-düzeyindeki `setx` değişkenleri de aynı köklere çevrildi ve eski hattın
-`C:\dev\DefterIki-veri` / `C:\dev\DefterIki-gelen` klasörleri silindi
-(içlerinde veritabanı yoktu). Artık terminal ve Cowork aynı kökleri kullanır.
+Türetilen yollar: `C:\dev\Defter\veri\gelistirme\defteruc.sqlite3`,
+`...\belgeler`, `...\logs`. Bu kurulum Git'e girmez; yalnız bu makinede
+geçerlidir.
 
 ## Dizin düzeni
 
 ```
-src/defteriki/    uygulama paketi
+src/defteruc/    uygulama paketi
   ayarlar.py      merkezi ayarlar (ortam, yollar)
-  baslangic.py    uv run defteriki giriş noktası; ortak hazırlık (ortami_hazirla)
+  baslangic.py    uv run defteruc giriş noktası; ortak hazırlık (ortami_hazirla)
   gunluk.py       teknik hata günlüğü
-  mcp_kapisi.py   uv run defteriki-mcp; MCP sunucusu ve araçları
+  mcp_kapisi.py   uv run defteruc-mcp; MCP sunucusu ve araçları
   cekirdek/       genel çekirdek; finansı tanımaz
     veritabani.py   SQLite bağlantı politikası, TabloTabani, işlem sınırı
     gocler.py       Alembic şema sürümü ve süreç içi göç
@@ -2392,7 +2378,7 @@ Bu projede kullanılacak teknoloji. Mutlak değil; ihtiyaç duyulması halinde d
 * SQLAlchemy 2.x — ORM / veritabanı erişimi
 * Alembic — migration
 * Pydantic 2.x — MCP giriş/çıkış ve veri doğrulama
-* MCP Python SDK 2.x (`mcp`, `MCPServer`) — Cowork ↔ DEFTERIKI kapısı
+* MCP Python SDK 2.x (`mcp`, `MCPServer`) — Cowork ↔ DEFTERUC kapısı
 * PySide6 — masaüstü GUI için
 * pytest — test
 * Hypothesis — property-based test

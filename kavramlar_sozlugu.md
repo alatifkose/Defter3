@@ -1,8 +1,8 @@
-# DEFTERIKI — Kavramlar Sözlüğü
+# DEFTERUC — Kavramlar Sözlüğü
 
 ## Amaç
 
-Bu sözlük, DEFTERIKI projesinde geçen kavramların tek ve ortak tanımını tutar. Aynı kavramı proje sahibi (Abdüllatif), kodu yazan ajan (Claude Code) ve Cowork'un aynı anlamda kullanmasını sağlamak için vardır. Bir kavram burada nasıl tanımlandıysa kodda, dokümanlarda ve sohbetlerde o anlamda kullanılır; farklı bir anlam gerekiyorsa önce bu sözlük güncellenir.
+Bu sözlük, DEFTERUC projesinde geçen kavramların tek ve ortak tanımını tutar. Aynı kavramı proje sahibi (Abdüllatif), kodu yazan ajan (Claude Code) ve Cowork'un aynı anlamda kullanmasını sağlamak için vardır. Bir kavram burada nasıl tanımlandıysa kodda, dokümanlarda ve sohbetlerde o anlamda kullanılır; farklı bir anlam gerekiyorsa önce bu sözlük güncellenir.
 
 **Kural:** Sözlüğe kavram ekleme, mevcut bir tanımı değiştirme veya silme yalnızca Abdüllatif'in onayıyla yapılır. Ajanlar (Claude Code, Cowork) onaysız ekleme yapamaz.
 
@@ -10,7 +10,7 @@ Bu sözlük, DEFTERIKI projesinde geçen kavramların tek ve ortak tanımını t
 
 ### Nesne
 
-Dış dünyadaki bir varlığın yapılandırılarak DEFTERIKI'ye kaydedilmesiyle nesne olur. Yapılandırmaya uğramayan şeyler nesne değildir; belgenin kendisi (PDF, fotoğraf) nesne değildir. Finansal hareketler nesne değildir; bire bir işlenir ve nesnelere bağlı, kendi işlem kurallarıyla tutulan kayıtlardır.
+Dış dünyadaki bir varlığın yapılandırılarak DEFTERUC'e kaydedilmesiyle nesne olur. Yapılandırmaya uğramayan şeyler nesne değildir; belgenin kendisi (PDF, fotoğraf) nesne değildir. Finansal hareketler nesne değildir; bire bir işlenir ve nesnelere bağlı, kendi işlem kurallarıyla tutulan kayıtlardır.
 
 Her nesnenin benzersiz kimliği ve Cowork'un belirlediği serbest özellikleri vardır. Nesneler seviyeli bir hiyerarşide durur: seviye 0 hiçbir üst nesneye bağlı değildir; diğer nesneler hemen önceki seviyedeki en az bir nesneye bağlıdır; seviye atlanamaz; bir nesne birden fazla üst nesneye bağlanabilir. Sistem nesnenin banka, hesap ya da fiş olduğunu yorumlamaz; bağlantıları ve seviye kurallarını denetler.
 
@@ -18,7 +18,7 @@ _(Abdüllatif'in onayıyla eklendi, 2026-09-11.)_
 
 ### Mükerrerlik protokolü
 
-DEFTERIKI'de aynı varlığı temsil etme ihtimali bulunan nesneleri tespit etmek, ilgili faaliyetleri durdurmak ve mükerrerliği çözmek için uygulanan kurallar bütünüdür.
+DEFTERUC'te aynı varlığı temsil etme ihtimali bulunan nesneleri tespit etmek, ilgili faaliyetleri durdurmak ve mükerrerliği çözmek için uygulanan kurallar bütünüdür.
 
 1. **Şartın belirlenmesi:** Yeni nesne açılışında kullanıcı, nesnenin özelliklerinden birini veya birkaçını mükerrerlik şartı olarak seçer. Seçim o nesnede kalıcı olarak saklanır. Şart seçilmeyen nesne de olabilir; o nesne için protokol işletilmez. Üst nesnenin mükerrerliği yine altına eklenen nesnenin şartıyla ortaya çıkabilir.
 2. **Şüphenin oluşması:** Seçilen özelliklerden herhangi birinin başka bir nesnenin karşılık gelen alanındaki değerle birebir eşleşmesi protokolü başlatır. Birden fazla özellik seçilmişse VEYA mantığı uygulanır. Eşleşme, tek başına kesin mükerrerlik kararı değildir.
@@ -31,7 +31,7 @@ _(Abdüllatif'in onayıyla eklendi, 2026-09-11.)_
 
 ### Yazmak (write) ve kayıt etmek (save)
 
-Yazmak ve kayıt etmek farklı şeylerdir; DEFTERIKI'de ayrı tutulur. İşlemleri deftere yazmak kayıt etmek değildir; kayıt etmek ayrı bir adımdır ve belge kaydının tanımlanmasıyla olur. İleriki sürümlerde bir ajan yazıp bir ajan kontrol edebilir; yazan ajan kontrol ajanının onayıyla kaydeder (ihtimal, karar değil).
+Yazmak ve kayıt etmek farklı şeylerdir; DEFTERUC'te ayrı tutulur. İşlemleri deftere yazmak kayıt etmek değildir; kayıt etmek ayrı bir adımdır ve belge kaydının tanımlanmasıyla olur. İleriki sürümlerde bir ajan yazıp bir ajan kontrol edebilir; yazan ajan kontrol ajanının onayıyla kaydeder (ihtimal, karar değil).
 
 _(Abdüllatif'in onayıyla eklendi, 2026-09-11.)_
 

@@ -138,7 +138,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from defteriki.cekirdek.belge_islemleri import (
+from defteruc.cekirdek.belge_islemleri import (
     OkumaDurumuGecersiz,
     belge_getir,
     json_coz,
@@ -146,33 +146,33 @@ from defteriki.cekirdek.belge_islemleri import (
     kaynak_getir,
     okuma_getir,
 )
-from defteriki.cekirdek.belge_tablolari import Belge, Kaynak, OkumaDurumu
-from defteriki.cekirdek.deger_kodlama import (
+from defteruc.cekirdek.belge_tablolari import Belge, Kaynak, OkumaDurumu
+from defteruc.cekirdek.deger_kodlama import (
     DegerKodlamaHatasi,
     degeri_coz,
     degeri_kodla,
 )
-from defteriki.cekirdek.denetim_islemleri import olay_yaz
-from defteriki.cekirdek.denetim_tablolari import Aktor, DenetimOlayi
-from defteriki.cekirdek.mukerrerlik_tablolari import (
+from defteruc.cekirdek.denetim_islemleri import olay_yaz
+from defteruc.cekirdek.denetim_tablolari import Aktor, DenetimOlayi
+from defteruc.cekirdek.mukerrerlik_tablolari import (
     AdayNesneCozumlemesi,
     AdayNesneMukerrerlikSarti,
     KararTalebi,
     KararTalebiPaketi,
     TalepDurumu,
 )
-from defteriki.cekirdek.tanim_sorgulari import (
+from defteruc.cekirdek.tanim_sorgulari import (
     iliski_tanimi_getir,
     kayit_turu_getir,
     nesne_turu_getir,
 )
-from defteriki.cekirdek.tanim_tablolari import (
+from defteruc.cekirdek.tanim_tablolari import (
     IliskiTanimi,
     NesneTuru,
     OzellikTanimi,
     simdi_utc,
 )
-from defteriki.cekirdek.taslak_tablolari import (
+from defteruc.cekirdek.taslak_tablolari import (
     ADAY_KAYIT_NESNE,
     ADAY_NESNE_ILISKISI,
     ADAY_NESNE_OZELLIGI,

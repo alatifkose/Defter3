@@ -24,21 +24,21 @@ import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
-from defteriki import ayarlar as ay
-from defteriki.cekirdek import belge_islemleri as bi
-from defteriki.cekirdek import denetim_islemleri as di
-from defteriki.cekirdek import denetim_tablolari as dnt
-from defteriki.cekirdek import gocler
-from defteriki.cekirdek import kayit_islemleri as ki
-from defteriki.cekirdek import kayit_tablolari as kt
-from defteriki.cekirdek import nesne_islemleri as ni
-from defteriki.cekirdek import tanim_islemleri as ti
-from defteriki.cekirdek import taslak_islemleri as tsi
-from defteriki.cekirdek import veritabani as vt
-from defteriki.cekirdek.denetim_tablolari import Aktor, AktorTuru
-from defteriki.cekirdek.tanim_tablolari import DegerTuru, YasamDurumu
+from defteruc import ayarlar as ay
+from defteruc.cekirdek import belge_islemleri as bi
+from defteruc.cekirdek import denetim_islemleri as di
+from defteruc.cekirdek import denetim_tablolari as dnt
+from defteruc.cekirdek import gocler
+from defteruc.cekirdek import kayit_islemleri as ki
+from defteruc.cekirdek import kayit_tablolari as kt
+from defteruc.cekirdek import nesne_islemleri as ni
+from defteruc.cekirdek import tanim_islemleri as ti
+from defteruc.cekirdek import taslak_islemleri as tsi
+from defteruc.cekirdek import veritabani as vt
+from defteruc.cekirdek.denetim_tablolari import Aktor, AktorTuru
+from defteruc.cekirdek.tanim_tablolari import DegerTuru, YasamDurumu
 
-DEFTERIKI_DEGISKENLERI = (
+DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
     ay.VERI_KOKU_DEGISKENI,
     ay.VERITABANI_YOLU_DEGISKENI,
@@ -55,7 +55,7 @@ KULLANICI = Aktor(AktorTuru.KULLANICI, "test-kullanici")
 
 @pytest.fixture(autouse=True)
 def temiz_cevre(monkeypatch: pytest.MonkeyPatch) -> None:
-    for degisken in DEFTERIKI_DEGISKENLERI:
+    for degisken in DEFTERUC_DEGISKENLERI:
         monkeypatch.delenv(degisken, raising=False)
 
 

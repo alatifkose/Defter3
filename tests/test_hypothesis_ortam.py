@@ -1,6 +1,6 @@
 """Hypothesis ortam kontrolü.
 
-Bu dosya DEFTERIKI'nin bir davranışını sınamaz. Yalnızca Hypothesis'in
+Bu dosya DEFTERUC'ün bir davranışını sınamaz. Yalnızca Hypothesis'in
 özellik tabanlı testleri üretip çalıştırabildiğini doğrular.
 """
 

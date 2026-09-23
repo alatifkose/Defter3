@@ -1,6 +1,6 @@
-"""DEFTERIKI MCP kapısı.
+"""DEFTERUC MCP kapısı.
 
-Cowork'un DEFTERIKI'ye ulaştığı tek kapı. ``uv run defteriki-mcp`` bu modülün
+Cowork'un DEFTERUC'e ulaştığı tek kapı. ``uv run defteruc-mcp`` bu modülün
 ``main`` fonksiyonunu çalıştırır; sunucu stdio taşımasıyla konuşur.
 
 Kapsam: tek araç ``sistem_durumu``. Ürün verisi yazılmaz; göç çalıştırılmaz.
@@ -31,19 +31,19 @@ from typing import Any
 
 from mcp.server.mcpserver import Context, MCPServer
 
-from defteriki import gunluk
-from defteriki.ayarlar import Ayarlar
-from defteriki.baslangic import (
+from defteruc import gunluk
+from defteruc.ayarlar import Ayarlar
+from defteruc.baslangic import (
     CIKIS_BASARILI,
     CIKIS_HATALI,
     BaslangicHatasi,
     ortami_hazirla,
 )
-from defteriki.cekirdek import gocler
-from defteriki.cekirdek.veritabani import Veritabani
+from defteruc.cekirdek import gocler
+from defteruc.cekirdek.veritabani import Veritabani
 
-SUNUCU_ADI = "defteriki"
-PAKET_ADI = "defteriki"
+SUNUCU_ADI = "defteruc"
+PAKET_ADI = "defteruc"
 KUTUPHANE_GUNLUK_ADI = "mcp"
 
 ARAC_SISTEM_DURUMU = "sistem_durumu"
@@ -57,11 +57,11 @@ OLAY_MCP_EL_SIKISMA = "mcp_el_sikisma"
 ISTEMCI_BILINMIYOR = "bilinmiyor"
 
 SUNUCU_TALIMATI = (
-    "DEFTERIKI kişisel finans kayıt sisteminin MCP kapısı. Bu sürümde yalnız "
+    "DEFTERUC kişisel finans kayıt sisteminin MCP kapısı. Bu sürümde yalnız "
     "sistem_durumu aracı vardır; finansal kayıt yazılmaz."
 )
 ARAC_SISTEM_DURUMU_ACIKLAMASI = (
-    "DEFTERIKI'nin durumunu döndürür: uygulama sürümü, çalışma ortamı, şema "
+    "DEFTERUC'ün durumunu döndürür: uygulama sürümü, çalışma ortamı, şema "
     "sürümü ve bu sunucunun yetenek listesi. Yol, anahtar ya da ortam "
     "değişkeni içermez."
 )
@@ -188,4 +188,4 @@ def main() -> int:
 
 
 def _hata_yaz(mesaj: str) -> None:
-    print(f"DEFTERIKI MCP kapısı başlatılamadı. {mesaj}", file=sys.stderr, flush=True)
+    print(f"DEFTERUC MCP kapısı başlatılamadı. {mesaj}", file=sys.stderr, flush=True)

@@ -1,6 +1,6 @@
-"""DEFTERIKI uygulama başlangıcı.
+"""DEFTERUC uygulama başlangıcı.
 
-``uv run defteriki`` bu modülün ``main`` fonksiyonunu çalıştırır. Sıra:
+``uv run defteruc`` bu modülün ``main`` fonksiyonunu çalıştırır. Sıra:
 
 1. ``ayarlari_yukle()`` ile ayarlar ortam değişkenlerinden okunur.
 2. ``dizinleri_hazirla()`` ile seçilen ortamın dizinleri açılır.
@@ -22,8 +22,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from defteriki import gunluk
-from defteriki.ayarlar import (
+from defteruc import gunluk
+from defteruc.ayarlar import (
     AyarHatasi,
     Ayarlar,
     DizinHazirlamaHatasi,
@@ -96,11 +96,11 @@ def _baslat() -> int:
 
 def _basariyi_bildir(ayarlar: Ayarlar, log_dosyasi: Path) -> None:
     print(
-        f"DEFTERIKI başlatıldı. Ortam: {ayarlar.ortam.value}. "
+        f"DEFTERUC başlatıldı. Ortam: {ayarlar.ortam.value}. "
         f"Veri kökü: {ayarlar.veri_koku}. Günlük: {log_dosyasi}",
         flush=True,
     )
 
 
 def _hata_yaz(mesaj: str) -> None:
-    print(f"DEFTERIKI başlatılamadı. {mesaj}", file=sys.stderr, flush=True)
+    print(f"DEFTERUC başlatılamadı. {mesaj}", file=sys.stderr, flush=True)

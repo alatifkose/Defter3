@@ -73,39 +73,39 @@ import re
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
-from defteriki.cekirdek.nesne_tablolari import Nesne, NesneIliskisi
-from defteriki.cekirdek.tanim_sorgulari import TanimBulunamadi as TanimBulunamadi
-from defteriki.cekirdek.tanim_sorgulari import TanimHatasi as TanimHatasi
-from defteriki.cekirdek.tanim_sorgulari import (
+from defteruc.cekirdek.nesne_tablolari import Nesne, NesneIliskisi
+from defteruc.cekirdek.tanim_sorgulari import TanimBulunamadi as TanimBulunamadi
+from defteruc.cekirdek.tanim_sorgulari import TanimHatasi as TanimHatasi
+from defteruc.cekirdek.tanim_sorgulari import (
     hiyerarsi_kurallarini_listele as hiyerarsi_kurallarini_listele,
 )
-from defteriki.cekirdek.tanim_sorgulari import (
+from defteruc.cekirdek.tanim_sorgulari import (
     iliski_tanimi_getir as iliski_tanimi_getir,
 )
-from defteriki.cekirdek.tanim_sorgulari import (
+from defteruc.cekirdek.tanim_sorgulari import (
     iliski_tanimlarini_listele as iliski_tanimlarini_listele,
 )
-from defteriki.cekirdek.tanim_sorgulari import (
+from defteruc.cekirdek.tanim_sorgulari import (
     kayit_alani_tanimlarini_listele as kayit_alani_tanimlarini_listele,
 )
-from defteriki.cekirdek.tanim_sorgulari import (
+from defteruc.cekirdek.tanim_sorgulari import (
     kayit_turlerini_listele as kayit_turlerini_listele,
 )
-from defteriki.cekirdek.tanim_sorgulari import kayit_turu_getir as kayit_turu_getir
-from defteriki.cekirdek.tanim_sorgulari import (
+from defteruc.cekirdek.tanim_sorgulari import kayit_turu_getir as kayit_turu_getir
+from defteruc.cekirdek.tanim_sorgulari import (
     nesne_turlerini_listele as nesne_turlerini_listele,
 )
-from defteriki.cekirdek.tanim_sorgulari import nesne_turu_getir as nesne_turu_getir
-from defteriki.cekirdek.tanim_sorgulari import (
+from defteruc.cekirdek.tanim_sorgulari import nesne_turu_getir as nesne_turu_getir
+from defteruc.cekirdek.tanim_sorgulari import (
     ozellik_tanimlarini_listele as ozellik_tanimlarini_listele,
 )
-from defteriki.cekirdek.tanim_sorgulari import paket_bul as paket_bul
-from defteriki.cekirdek.tanim_sorgulari import paket_getir as paket_getir
-from defteriki.cekirdek.tanim_sorgulari import paketleri_listele as paketleri_listele
-from defteriki.cekirdek.tanim_sorgulari import surum_getir as surum_getir
-from defteriki.cekirdek.tanim_sorgulari import surum_kilitli_mi as surum_kilitli_mi
-from defteriki.cekirdek.tanim_sorgulari import surumleri_listele as surumleri_listele
-from defteriki.cekirdek.tanim_tablolari import (
+from defteruc.cekirdek.tanim_sorgulari import paket_bul as paket_bul
+from defteruc.cekirdek.tanim_sorgulari import paket_getir as paket_getir
+from defteruc.cekirdek.tanim_sorgulari import paketleri_listele as paketleri_listele
+from defteruc.cekirdek.tanim_sorgulari import surum_getir as surum_getir
+from defteruc.cekirdek.tanim_sorgulari import surum_kilitli_mi as surum_kilitli_mi
+from defteruc.cekirdek.tanim_sorgulari import surumleri_listele as surumleri_listele
+from defteruc.cekirdek.tanim_tablolari import (
     DegerTuru,
     HiyerarsiKurali,
     IliskiTanimi,

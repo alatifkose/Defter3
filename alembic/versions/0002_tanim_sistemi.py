@@ -2,7 +2,7 @@
 
 Yedi tablo: ``tanim_paketi``, ``tanim_surumu``, ``nesne_turu``,
 ``ozellik_tanimi``, ``iliski_tanimi``, ``kayit_turu``, ``kayit_alani_tanimi``.
-Şema ``defteriki.cekirdek.tanim_tablolari`` ile birebirdir; kısıt adları
+Şema ``defteruc.cekirdek.tanim_tablolari`` ile birebirdir; kısıt adları
 ``veritabani.KISIT_ADLANDIRMA`` kalıbıyla açıkça yazılmıştır (testte ORM
 metadata'sı ile karşılaştırılır). Hiçbir satır yazılmaz: tanım verisi (hangi
 türler, özellikler, ilişkiler) domain paketinin işidir, göçün değil.

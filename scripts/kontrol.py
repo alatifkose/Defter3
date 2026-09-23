@@ -1,4 +1,4 @@
-"""DEFTERIKI toplu kalite kontrolü.
+"""DEFTERUC toplu kalite kontrolü.
 
 Proje kökünden tek komutla çalışır::
 

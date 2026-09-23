@@ -29,14 +29,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from defteriki import ayarlar as ay
-from defteriki.cekirdek import arsiv, gocler
-from defteriki.cekirdek import belge_islemleri as bi
-from defteriki.cekirdek import belge_tablolari as bt
-from defteriki.cekirdek import veritabani as vt
-from defteriki.cekirdek.belge_tablolari import OkumaDurumu
+from defteruc import ayarlar as ay
+from defteruc.cekirdek import arsiv, gocler
+from defteruc.cekirdek import belge_islemleri as bi
+from defteruc.cekirdek import belge_tablolari as bt
+from defteruc.cekirdek import veritabani as vt
+from defteruc.cekirdek.belge_tablolari import OkumaDurumu
 
-DEFTERIKI_DEGISKENLERI = (
+DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
     ay.VERI_KOKU_DEGISKENI,
     ay.VERITABANI_YOLU_DEGISKENI,
@@ -57,7 +57,7 @@ KONUM: dict[str, Any] = {"sayfa": 1, "satir": 3}
 
 @pytest.fixture(autouse=True)
 def temiz_cevre(monkeypatch: pytest.MonkeyPatch) -> None:
-    for degisken in DEFTERIKI_DEGISKENLERI:
+    for degisken in DEFTERUC_DEGISKENLERI:
         monkeypatch.delenv(degisken, raising=False)
 
 
@@ -821,7 +821,7 @@ def test_senaryo_4_ve_5_arsiv_basarili_db_hatali_sonra_yeniden_deneme(
 
 def test_senaryo_4_gercek_veritabani_hatasi(ortam: Ortam, tmp_path: Path) -> None:
     """Enjeksiyonsuz: açılamayan veritabanı dosyası. Arşiv adımı biter, DB düşer."""
-    bozuk = vt.Veritabani(tmp_path / "yok" / "olmayan" / "defteriki.sqlite3")
+    bozuk = vt.Veritabani(tmp_path / "yok" / "olmayan" / "defteruc.sqlite3")
     try:
         with pytest.raises(OperationalError):
             bi.belge_al(

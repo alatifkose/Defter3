@@ -4,7 +4,7 @@ Zincir bu aşamada ``DOSYA → ARŞİV → BELGE → OKUMA → KAYNAK`` ile bite
 nesne, işlem paketi, onay, mükerrerlik ve kesin kayıt sonraki aşamalardır;
 burada "okuma tamamlandı = deftere kaydedildi" semantiği yoktur. Çekirdek
 belgeyi kendisi okumaz, LLM çağırmaz; okuma içeriği dış okuyucudan gelir ve
-domain bağımsız JSON olarak saklanır. Bu modül ``defteriki.ayarlar`` okumaz;
+domain bağımsız JSON olarak saklanır. Bu modül ``defteruc.ayarlar`` okumaz;
 arşiv dizini ve gelen dizini çağırandan gelir.
 
 **İşlem sınırı** 4.1 kuralıdır: her servis açık bir ``Session`` alır, çağıran
@@ -96,16 +96,16 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from defteriki.cekirdek import arsiv
-from defteriki.cekirdek.belge_tablolari import (
+from defteruc.cekirdek import arsiv
+from defteruc.cekirdek.belge_tablolari import (
     ArsivDosyasi,
     Belge,
     Kaynak,
     Okuma,
     OkumaDurumu,
 )
-from defteriki.cekirdek.tanim_tablolari import simdi_utc
-from defteriki.cekirdek.veritabani import Veritabani
+from defteruc.cekirdek.tanim_tablolari import simdi_utc
+from defteruc.cekirdek.veritabani import Veritabani
 
 AZAMI_OKUMA_ICERIGI_BOYUTU = 4 * 1024 * 1024
 """Kanonik JSON metninin UTF-8 bayt sınırı; teknik sınır, domain kuralı değil."""

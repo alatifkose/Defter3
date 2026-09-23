@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from defteriki import ayarlar as ay
-from defteriki import baslangic, gunluk
+from defteruc import ayarlar as ay
+from defteruc import baslangic, gunluk
 
-DEFTERIKI_DEGISKENLERI = (
+DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
     ay.VERI_KOKU_DEGISKENI,
     ay.VERITABANI_YOLU_DEGISKENI,
@@ -27,7 +27,7 @@ DEFTERIKI_DEGISKENLERI = (
 
 @pytest.fixture(autouse=True)
 def temiz_cevre_ve_gunluk(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    for degisken in DEFTERIKI_DEGISKENLERI:
+    for degisken in DEFTERUC_DEGISKENLERI:
         monkeypatch.delenv(degisken, raising=False)
     gunluk.gunlugu_kapat()
     yield
@@ -58,7 +58,7 @@ def test_basarili_baslangic_sifir_doner_ve_mesaj_verir(
     cikti = capsys.readouterr()
     assert kod == 0
     assert cikti.err == ""
-    assert "DEFTERIKI başlatıldı" in cikti.out
+    assert "DEFTERUC başlatıldı" in cikti.out
     assert "Ortam: test" in cikti.out
     assert str(test_koku) in cikti.out
 
@@ -121,7 +121,7 @@ def test_ayar_hatasi_stderr_e_yazilir_ve_sifirdan_farkli_doner(
     cikti = capsys.readouterr()
     assert kod != 0
     assert cikti.out == ""
-    assert "DEFTERIKI başlatılamadı" in cikti.err
+    assert "DEFTERUC başlatılamadı" in cikti.err
     assert "Ayar hatası" in cikti.err
     assert ay.ORTAM_DEGISKENI in cikti.err
     assert not (tmp_path / "kok").exists()
@@ -203,10 +203,10 @@ def test_gunluk_kurulmadan_olusan_beklenmeyen_hata_stderr_e_gider(
 def _ayri_surecte_baslat(
     cwd: Path, cevre: dict[str, str]
 ) -> subprocess.CompletedProcess[str]:
-    temiz = {k: v for k, v in os.environ.items() if not k.startswith("DEFTERIKI_")}
+    temiz = {k: v for k, v in os.environ.items() if not k.startswith("DEFTERUC_")}
     temiz.update(cevre)
     temiz["PYTHONUTF8"] = "1"
-    komut = "import sys; from defteriki.baslangic import main; sys.exit(main())"
+    komut = "import sys; from defteruc.baslangic import main; sys.exit(main())"
     return subprocess.run(
         [sys.executable, "-c", komut],
         cwd=cwd,
@@ -228,7 +228,7 @@ def test_ayri_surecte_basarili_baslangic_sifir_cikis_kodu(tmp_path: Path) -> Non
     )
 
     assert sonuc.returncode == 0, sonuc.stderr
-    assert "DEFTERIKI başlatıldı" in sonuc.stdout
+    assert "DEFTERUC başlatıldı" in sonuc.stdout
     assert (kok / "test" / ay.LOG_DIZIN_ADI / gunluk.GUNLUK_DOSYA_ADI).is_file()
     assert not any(calisma.iterdir())
 
@@ -241,5 +241,5 @@ def test_ayri_surecte_basarisiz_baslangic_sifirdan_farkli_cikis_kodu(
 
     assert sonuc.returncode == 1
     assert sonuc.stdout == ""
-    assert "DEFTERIKI başlatılamadı" in sonuc.stderr
+    assert "DEFTERUC başlatılamadı" in sonuc.stderr
     assert ay.VERI_KOKU_DEGISKENI in sonuc.stderr

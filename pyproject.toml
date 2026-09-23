@@ -1,5 +1,5 @@
 [project]
-name = "defteriki"
+name = "defteruc"
 version = "0.1.0"
 description = "Kişisel finans kayıt sistemi; belgeler Cowork tarafından okunur, MCP kapısından yazılır"
 readme = "README.md"
@@ -14,8 +14,8 @@ dependencies = [
 ]
 
 [project.scripts]
-defteriki = "defteriki.baslangic:main"
-defteriki-mcp = "defteriki.mcp_kapisi:main"
+defteruc = "defteruc.baslangic:main"
+defteruc-mcp = "defteruc.mcp_kapisi:main"
 
 [build-system]
 requires = ["uv_build>=0.12.7,<0.13.0"]
@@ -44,7 +44,7 @@ extend-exclude = [".venv", ".uv", "build", "dist", "wheels"]
 select = ["E", "F", "I"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["defteriki", "kontrol"]
+known-first-party = ["defteruc", "kontrol"]
 
 [tool.pyright]
 pythonVersion = "3.13"

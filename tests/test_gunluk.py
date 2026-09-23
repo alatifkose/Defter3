@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from defteriki import gunluk
+from defteruc import gunluk
 
 
 @pytest.fixture(autouse=True)

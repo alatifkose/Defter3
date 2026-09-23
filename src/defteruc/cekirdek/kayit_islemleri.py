@@ -44,43 +44,43 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from defteriki.cekirdek.belge_islemleri import (
+from defteruc.cekirdek.belge_islemleri import (
     arsiv_dosyasi_getir,
     belge_getir,
     okuma_getir,
 )
-from defteriki.cekirdek.belge_tablolari import ArsivDosyasi, Belge, Kaynak, Okuma
-from defteriki.cekirdek.deger_kodlama import (
+from defteruc.cekirdek.belge_tablolari import ArsivDosyasi, Belge, Kaynak, Okuma
+from defteruc.cekirdek.deger_kodlama import (
     DegerKodlamaHatasi,
     degeri_coz,
     degeri_kodla,
 )
-from defteriki.cekirdek.denetim_islemleri import olay_yaz
-from defteriki.cekirdek.denetim_tablolari import Aktor, DenetimOlayi
-from defteriki.cekirdek.kayit_tablolari import (
+from defteruc.cekirdek.denetim_islemleri import olay_yaz
+from defteruc.cekirdek.denetim_tablolari import Aktor, DenetimOlayi
+from defteruc.cekirdek.kayit_tablolari import (
     KAYIT_ALANI,
     KAYIT_NESNE,
     Kayit,
     KayitAlani,
     KayitNesne,
 )
-from defteriki.cekirdek.nesne_tablolari import Nesne
-from defteriki.cekirdek.tanim_sorgulari import (
+from defteruc.cekirdek.nesne_tablolari import Nesne
+from defteruc.cekirdek.tanim_sorgulari import (
     kayit_alani_tanimlarini_listele,
     kayit_turu_getir,
 )
-from defteriki.cekirdek.tanim_tablolari import (
+from defteruc.cekirdek.tanim_tablolari import (
     KayitAlaniTanimi,
     KayitTuru,
     YasamDurumu,
     simdi_utc,
 )
-from defteriki.cekirdek.taslak_islemleri import (
+from defteruc.cekirdek.taslak_islemleri import (
     benzersizlik_ihlali_mi,
     kilit_cakismasi_mi,
     yazilabilir_paket,
 )
-from defteriki.cekirdek.taslak_tablolari import IslemPaketi
+from defteruc.cekirdek.taslak_tablolari import IslemPaketi
 
 
 class KayitHatasi(Exception):

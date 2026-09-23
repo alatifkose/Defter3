@@ -1,9 +1,9 @@
 """Alembic ortamı: veritabanı yolu yalnız merkezi ayarlardan.
 
-Komut satırından (``uv run alembic upgrade head``) çalışınca ``defteriki.ayarlar``
+Komut satırından (``uv run alembic upgrade head``) çalışınca ``defteruc.ayarlar``
 ortam değişkenlerini okur, ``Ayarlar.veritabani_yolu`` için engine kurar ve
 göçleri uygular; yalnız veritabanı dosyasının dizinini açar, başka dizin
-oluşturmaz. Süreç içinden (``defteriki.cekirdek.gocler.semayi_yukselt``)
+oluşturmaz. Süreç içinden (``defteruc.cekirdek.gocler.semayi_yukselt``)
 çağrılınca hazır bağlantıyı (``config.attributes["connection"]``) kullanır;
 ayar okumaz. ``fileConfig`` çağrılmaz; stdout'a hiçbir şey yazılmaz.
 """
@@ -13,8 +13,8 @@ from __future__ import annotations
 from alembic import context
 from sqlalchemy import Connection
 
-from defteriki.ayarlar import ayarlari_yukle
-from defteriki.cekirdek import (
+from defteruc.ayarlar import ayarlari_yukle
+from defteruc.cekirdek import (
     belge_tablolari,
     denetim_tablolari,
     kayit_tablolari,
@@ -23,7 +23,7 @@ from defteriki.cekirdek import (
     tanim_tablolari,
     taslak_tablolari,
 )
-from defteriki.cekirdek.veritabani import TabloTabani, motor_olustur, veritabani_url
+from defteruc.cekirdek.veritabani import TabloTabani, motor_olustur, veritabani_url
 
 yapilandirma = context.config
 hedef_metadata = TabloTabani.metadata

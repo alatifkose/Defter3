@@ -1,4 +1,4 @@
-"""DEFTERIKI merkezi ayar yönetimi.
+"""DEFTERUC merkezi ayar yönetimi.
 
 Çalışma ortamı, veri kökü, veritabanı dosyası, belge arşivi, log dizini ve
 gelen dizini yalnızca buradan belirlenir. Yollar uygulamanın nereden başlatıldığına
@@ -10,8 +10,8 @@ Ayarlar ``ayarlari_yukle()`` ile açıkça yüklenir; gerekli dizinler ayrıca
 
 Öncelik sırası (yüksekten düşüğe):
 
-1. ``DEFTERIKI_VERITABANI_YOLU``, ``DEFTERIKI_BELGE_DIZINI``,
-   ``DEFTERIKI_LOG_DIZINI``, ``DEFTERIKI_GELEN_DIZINI``: verilmişse ilgili
+1. ``DEFTERUC_VERITABANI_YOLU``, ``DEFTERUC_BELGE_DIZINI``,
+   ``DEFTERUC_LOG_DIZINI``, ``DEFTERUC_GELEN_DIZINI``: verilmişse ilgili
    türetilmiş yolun yerine geçer. Gelen dizini, Cowork'un belge dosyalarını
    bıraktığı ve MCP araçlarının okumaya izinli olduğu tek dizindir. Bu
    tekil yollar ortam ayrımını geçersiz kılabilir; yani ``gelistirme``
@@ -22,16 +22,16 @@ Ayarlar ``ayarlari_yukle()`` ile açıkça yüklenir; gerekli dizinler ayrıca
    içindeki bir simgesel bağlantı ya da junction dışarıyı gösteriyorsa yol
    reddedilir ve hiçbir dizin oluşturulmaz. Diğer ortamların yol politikası
    değişmez.
-2. ``DEFTERIKI_VERI_KOKU``: ortamların ortak üst dizini. Seçilen ortamın
+2. ``DEFTERUC_VERI_KOKU``: ortamların ortak üst dizini. Seçilen ortamın
    adı bunun altına eklenir (``<kök>/<ortam>``), türetilmiş yollar bu
    ortam kökünden üretilir.
-3. Platform varsayılanı: Windows'ta ``%LOCALAPPDATA%\\DEFTERIKI``,
-   macOS'ta ``~/Library/Application Support/DEFTERIKI``, diğer
-   sistemlerde ``$XDG_DATA_HOME/DEFTERIKI`` ya da
-   ``~/.local/share/DEFTERIKI``. ``test`` ortamında platform varsayılanına
-   düşülmez; ``DEFTERIKI_VERI_KOKU`` zorunludur.
+3. Platform varsayılanı: Windows'ta ``%LOCALAPPDATA%\\DEFTERUC``,
+   macOS'ta ``~/Library/Application Support/DEFTERUC``, diğer
+   sistemlerde ``$XDG_DATA_HOME/DEFTERUC`` ya da
+   ``~/.local/share/DEFTERUC``. ``test`` ortamında platform varsayılanına
+   düşülmez; ``DEFTERUC_VERI_KOKU`` zorunludur.
 
-``DEFTERIKI_ORTAM`` verilmezse ``gelistirme`` kullanılır. Bilinmeyen ya da
+``DEFTERUC_ORTAM`` verilmezse ``gelistirme`` kullanılır. Bilinmeyen ya da
 boş ortam değeri, boş ya da göreli yol değeri açık hatayla reddedilir.
 """
 
@@ -43,18 +43,18 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-UYGULAMA_DIZIN_ADI = "DEFTERIKI"
-VERITABANI_DOSYA_ADI = "defteriki.sqlite3"
+UYGULAMA_DIZIN_ADI = "DEFTERUC"
+VERITABANI_DOSYA_ADI = "defteruc.sqlite3"
 BELGE_DIZIN_ADI = "belgeler"
 LOG_DIZIN_ADI = "logs"
 GELEN_DIZIN_ADI = "gelen"
 
-ORTAM_DEGISKENI = "DEFTERIKI_ORTAM"
-VERI_KOKU_DEGISKENI = "DEFTERIKI_VERI_KOKU"
-VERITABANI_YOLU_DEGISKENI = "DEFTERIKI_VERITABANI_YOLU"
-BELGE_DIZINI_DEGISKENI = "DEFTERIKI_BELGE_DIZINI"
-LOG_DIZINI_DEGISKENI = "DEFTERIKI_LOG_DIZINI"
-GELEN_DIZINI_DEGISKENI = "DEFTERIKI_GELEN_DIZINI"
+ORTAM_DEGISKENI = "DEFTERUC_ORTAM"
+VERI_KOKU_DEGISKENI = "DEFTERUC_VERI_KOKU"
+VERITABANI_YOLU_DEGISKENI = "DEFTERUC_VERITABANI_YOLU"
+BELGE_DIZINI_DEGISKENI = "DEFTERUC_BELGE_DIZINI"
+LOG_DIZINI_DEGISKENI = "DEFTERUC_LOG_DIZINI"
+GELEN_DIZINI_DEGISKENI = "DEFTERUC_GELEN_DIZINI"
 
 
 class Ortam(StrEnum):

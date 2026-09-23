@@ -2,7 +2,7 @@
 
 Çekirdek hangi nesne türlerinin, özelliklerin, ilişkilerin ve kayıt türlerinin
 var olduğunu bilmez; bunları **veri** olarak tutar. Bir domain (ileride
-``defteriki.finans``; testlerde nötr sahte paketler) kendi kavramlarını bu
+``defteruc.finans``; testlerde nötr sahte paketler) kendi kavramlarını bu
 tablolara tanım satırları olarak yazar. Buradaki hiçbir sınıf, sütun ya da
 kısıt belirli bir domain'e ait anlam taşımaz; aynı şema kütüphane, envanter
 ya da sağlık tanımları için de aynen kullanılır.
@@ -45,7 +45,7 @@ biçiminde), ``gosterim_adi`` insan için başlıktır; ikisi karıştırılmaz.
 Zaman damgaları UTC'dir ve saat dilimi bilgisi olmadan saklanır (SQLite
 ``DateTime`` saat dilimi taşımaz).
 
-Bu modül yalnız şemadır: satır yazmaz, doğrulama yapmaz, ``defteriki``
+Bu modül yalnız şemadır: satır yazmaz, doğrulama yapmaz, ``defteruc``
 içinden başka modül import etmez (``veritabani.TabloTabani`` dışında).
 Yazma ve okuma ``tanim_islemleri`` üzerinden yapılır; ORM sınıfları
 ``Veritabani.islem`` dışında doğrudan kullanılmaz. Sınıflarda ``relationship``
@@ -73,7 +73,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from defteriki.cekirdek.veritabani import TabloTabani
+from defteruc.cekirdek.veritabani import TabloTabani
 
 TANIM_PAKETI = "tanim_paketi"
 TANIM_SURUMU = "tanim_surumu"

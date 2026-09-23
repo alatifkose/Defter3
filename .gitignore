@@ -45,7 +45,7 @@ logs/
 secrets.*
 
 # Yerel çalışma belgeleri (planlar depoya girmez)
-DEFTERIKI-*-Plani*.md
+DEFTERUC-*-Plani*.md
 
 # Claude masaüstü çıktı klasörü (beceri taslakları); depoya girmez
 Claude\ outputs/

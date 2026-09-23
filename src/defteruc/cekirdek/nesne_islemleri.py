@@ -91,18 +91,18 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from defteriki.cekirdek.deger_kodlama import (
+from defteruc.cekirdek.deger_kodlama import (
     DegerKodlamaHatasi,
     degeri_coz,
     degeri_kodla,
 )
-from defteriki.cekirdek.nesne_tablolari import Nesne, NesneIliskisi, NesneOzelligi
-from defteriki.cekirdek.tanim_sorgulari import (
+from defteruc.cekirdek.nesne_tablolari import Nesne, NesneIliskisi, NesneOzelligi
+from defteruc.cekirdek.tanim_sorgulari import (
     TanimBulunamadi,
     iliski_tanimi_getir,
     nesne_turu_getir,
 )
-from defteriki.cekirdek.tanim_tablolari import (
+from defteruc.cekirdek.tanim_tablolari import (
     HiyerarsiKurali,
     IliskiTanimi,
     OzellikTanimi,

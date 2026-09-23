@@ -56,7 +56,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from defteriki.cekirdek.veritabani import TabloTabani
+from defteruc.cekirdek.veritabani import TabloTabani
 
 ARSIV_DOSYASI = "arsiv_dosyasi"
 BELGE = "belge"

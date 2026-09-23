@@ -74,14 +74,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from defteriki.cekirdek.belge_tablolari import KAYNAK, OKUMA
-from defteriki.cekirdek.tanim_tablolari import (
+from defteruc.cekirdek.belge_tablolari import KAYNAK, OKUMA
+from defteruc.cekirdek.tanim_tablolari import (
     ILISKI_TANIMI,
     KAYIT_TURU,
     NESNE_TURU,
     OZELLIK_TANIMI,
 )
-from defteriki.cekirdek.veritabani import TabloTabani
+from defteruc.cekirdek.veritabani import TabloTabani
 
 ISLEM_PAKETI = "islem_paketi"
 ADAY_NESNE = "aday_nesne"

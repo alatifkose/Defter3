@@ -35,19 +35,19 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from defteriki import ayarlar as ay
-from defteriki import baslangic, gunluk
-from defteriki.cekirdek import belge_tablolari as bt
-from defteriki.cekirdek import denetim_tablolari as dnt
-from defteriki.cekirdek import gocler
-from defteriki.cekirdek import kayit_tablolari as kt
-from defteriki.cekirdek import mukerrerlik_tablolari as mt
-from defteriki.cekirdek import nesne_tablolari as nt
-from defteriki.cekirdek import tanim_tablolari as tt
-from defteriki.cekirdek import taslak_tablolari as tst
-from defteriki.cekirdek import veritabani as vt
+from defteruc import ayarlar as ay
+from defteruc import baslangic, gunluk
+from defteruc.cekirdek import belge_tablolari as bt
+from defteruc.cekirdek import denetim_tablolari as dnt
+from defteruc.cekirdek import gocler
+from defteruc.cekirdek import kayit_tablolari as kt
+from defteruc.cekirdek import mukerrerlik_tablolari as mt
+from defteruc.cekirdek import nesne_tablolari as nt
+from defteruc.cekirdek import tanim_tablolari as tt
+from defteruc.cekirdek import taslak_tablolari as tst
+from defteruc.cekirdek import veritabani as vt
 
-DEFTERIKI_DEGISKENLERI = (
+DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
     ay.VERI_KOKU_DEGISKENI,
     ay.VERITABANI_YOLU_DEGISKENI,
@@ -83,7 +83,7 @@ GUNCEL_TABLOLAR = sorted((gocler.SURUM_TABLOSU, *UYGULAMA_TABLOLARI))
 
 @pytest.fixture(autouse=True)
 def temiz_cevre(monkeypatch: pytest.MonkeyPatch) -> None:
-    for degisken in DEFTERIKI_DEGISKENLERI:
+    for degisken in DEFTERUC_DEGISKENLERI:
         monkeypatch.delenv(degisken, raising=False)
     gunluk.gunlugu_kapat()
 
@@ -1205,7 +1205,7 @@ def test_dusen_goc_adimi_ddl_dahil_tamamen_geri_alinir(
 def test_baslangic_goc_calistirmaz(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``uv run defteriki`` hazırlığı veritabanı dosyası oluşturmaz, göç uygulamaz."""
+    """``uv run defteruc`` hazırlığı veritabanı dosyası oluşturmaz, göç uygulamaz."""
     monkeypatch.setenv(ay.ORTAM_DEGISKENI, "test")
     monkeypatch.setenv(ay.VERI_KOKU_DEGISKENI, str(tmp_path / "kok"))
 
@@ -1225,7 +1225,7 @@ def test_alembic_ini_veritabani_adresi_tasimaz() -> None:
 
 
 def _cevre(kok: Path) -> dict[str, str]:
-    temiz = {k: v for k, v in os.environ.items() if not k.startswith("DEFTERIKI_")}
+    temiz = {k: v for k, v in os.environ.items() if not k.startswith("DEFTERUC_")}
     temiz[ay.ORTAM_DEGISKENI] = "test"
     temiz[ay.VERI_KOKU_DEGISKENI] = str(kok)
     temiz["PYTHONUTF8"] = "1"
@@ -1261,7 +1261,7 @@ def test_komut_satiri_upgrade_head_merkezi_yolu_kullanir(
     assert sonuc.returncode == 0, sonuc.stderr
     assert sonuc.stdout == ""  # stdout'a hiçbir şey yazılmaz
     assert list(calisma.iterdir()) == []  # çalışma dizininde dosya yok
-    assert not (gocler.PROJE_KOKU / "defteriki.sqlite3").exists()
+    assert not (gocler.PROJE_KOKU / "defteruc.sqlite3").exists()
     ayar = _test_ayarlari(kok, monkeypatch)
     assert ayar.veritabani_yolu.is_file()
     v = vt.Veritabani(ayar.veritabani_yolu)

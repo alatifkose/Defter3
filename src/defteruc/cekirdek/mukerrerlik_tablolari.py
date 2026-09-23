@@ -92,10 +92,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from defteriki.cekirdek.denetim_tablolari import AktorTuru
-from defteriki.cekirdek.tanim_tablolari import OZELLIK_TANIMI
-from defteriki.cekirdek.taslak_tablolari import ADAY_NESNE, ISLEM_PAKETI
-from defteriki.cekirdek.veritabani import TabloTabani
+from defteruc.cekirdek.denetim_tablolari import AktorTuru
+from defteruc.cekirdek.tanim_tablolari import OZELLIK_TANIMI
+from defteruc.cekirdek.taslak_tablolari import ADAY_NESNE, ISLEM_PAKETI
+from defteruc.cekirdek.veritabani import TabloTabani
 
 KESIN_NESNE = "nesne"
 """``nesne_tablolari.NESNE`` ile aynı ad; oradan import edilmez (modül

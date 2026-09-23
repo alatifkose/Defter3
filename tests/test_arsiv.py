@@ -20,7 +20,7 @@ from typing import BinaryIO
 
 import pytest
 
-from defteriki.cekirdek import arsiv
+from defteruc.cekirdek import arsiv
 
 PDF = b"%PDF-1.7\n% envanter listesi: raf A1, 12 kalem\n"
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24

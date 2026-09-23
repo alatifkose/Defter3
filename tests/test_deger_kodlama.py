@@ -14,8 +14,8 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from defteriki.cekirdek import deger_kodlama as dk
-from defteriki.cekirdek.tanim_tablolari import DegerTuru
+from defteruc.cekirdek import deger_kodlama as dk
+from defteruc.cekirdek.tanim_tablolari import DegerTuru
 
 ONDALIK = DegerTuru.ONDALIK.value
 

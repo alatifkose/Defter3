@@ -14,7 +14,7 @@ Her işlev açık bir ``Session`` alır ve ``Veritabani.islem`` bağlamı içind
 listeleme boş liste yerine bu hatayı verir, böylece boş liste ile "üst kayıt
 yok" karışmaz. ``paket_bul`` arama sonucudur, yoksa ``None`` döner.
 
-Bu modül veritabanına yazmaz, ``defteriki`` içinden yalnız ``tanim_tablolari``
+Bu modül veritabanına yazmaz, ``defteruc`` içinden yalnız ``tanim_tablolari``
 kullanır ve domain bilmez.
 """
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from defteriki.cekirdek.tanim_tablolari import (
+from defteruc.cekirdek.tanim_tablolari import (
     HiyerarsiKurali,
     IliskiTanimi,
     KayitAlaniTanimi,

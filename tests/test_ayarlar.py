@@ -1,6 +1,6 @@
 """Merkezi ayar yönetimi testleri.
 
-Bütün yollar tmp_path altındadır. Kullanıcının kendi DEFTERIKI_* ortam
+Bütün yollar tmp_path altındadır. Kullanıcının kendi DEFTERUC_* ortam
 değişkenleri her testten önce temizlenir; gerçek kullanıcı dizinlerine
 dokunulmaz.
 """
@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from defteriki import ayarlar as ay
+from defteruc import ayarlar as ay
 
-DEFTERIKI_DEGISKENLERI = (
+DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
     ay.VERI_KOKU_DEGISKENI,
     ay.VERITABANI_YOLU_DEGISKENI,
@@ -22,13 +22,13 @@ DEFTERIKI_DEGISKENLERI = (
     ay.LOG_DIZINI_DEGISKENI,
     ay.GELEN_DIZINI_DEGISKENI,
 )
-YOL_DEGISKENLERI = DEFTERIKI_DEGISKENLERI[1:]
-TEKIL_YOL_DEGISKENLERI = DEFTERIKI_DEGISKENLERI[2:]
+YOL_DEGISKENLERI = DEFTERUC_DEGISKENLERI[1:]
+TEKIL_YOL_DEGISKENLERI = DEFTERUC_DEGISKENLERI[2:]
 
 
 @pytest.fixture(autouse=True)
 def temiz_cevre(monkeypatch: pytest.MonkeyPatch) -> None:
-    for degisken in DEFTERIKI_DEGISKENLERI:
+    for degisken in DEFTERUC_DEGISKENLERI:
         monkeypatch.delenv(degisken, raising=False)
 
 
@@ -47,7 +47,7 @@ def test_ortam_verilmezse_gelistirme_kullanilir(ortak_kok: Path) -> None:
 
     assert ayar.ortam is ay.Ortam.GELISTIRME
     assert ayar.veri_koku == ortak_kok / "gelistirme"
-    assert ayar.veritabani_yolu == ortak_kok / "gelistirme" / "defteriki.sqlite3"
+    assert ayar.veritabani_yolu == ortak_kok / "gelistirme" / "defteruc.sqlite3"
     assert ayar.belge_dizini == ortak_kok / "gelistirme" / "belgeler"
     assert ayar.log_dizini == ortak_kok / "gelistirme" / "logs"
     assert ayar.gelen_dizini == ortak_kok / "gelistirme" / "gelen"
@@ -94,7 +94,7 @@ def test_windows_varsayilan_kok_localappdata_altindadir(
 
     ayar = ay.ayarlari_yukle()
 
-    assert ayar.veri_koku == tmp_path / "Local" / "DEFTERIKI" / "gelistirme"
+    assert ayar.veri_koku == tmp_path / "Local" / "DEFTERUC" / "gelistirme"
 
 
 def test_windows_localappdata_yoksa_aciklayici_hata(
@@ -122,12 +122,12 @@ def test_linux_varsayilan_kok_xdg_veya_ev_altindadir(
 
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     assert ay.ayarlari_yukle().veri_koku == (
-        tmp_path / "ev" / ".local" / "share" / "DEFTERIKI" / "gelistirme"
+        tmp_path / "ev" / ".local" / "share" / "DEFTERUC" / "gelistirme"
     )
 
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     assert ay.ayarlari_yukle().veri_koku == (
-        tmp_path / "xdg" / "DEFTERIKI" / "gelistirme"
+        tmp_path / "xdg" / "DEFTERUC" / "gelistirme"
     )
 
 
@@ -138,7 +138,7 @@ def test_macos_varsayilan_kok_application_support_altindadir(
     _ev_dizinini_sabitle(monkeypatch, tmp_path / "ev")
 
     assert ay.ayarlari_yukle().veri_koku == (
-        tmp_path / "ev" / "Library" / "Application Support" / "DEFTERIKI" / "gelistirme"
+        tmp_path / "ev" / "Library" / "Application Support" / "DEFTERUC" / "gelistirme"
     )
 
 
@@ -174,7 +174,7 @@ def test_tekil_yol_degiskenleri_turetilmis_yollari_gecer(
 def test_tekil_yol_ortam_ayrimini_gecersiz_kilabilir(
     ortak_kok: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    gercek_vt = ortak_kok / "gercek" / "defteriki.sqlite3"
+    gercek_vt = ortak_kok / "gercek" / "defteruc.sqlite3"
     monkeypatch.setenv(ay.ORTAM_DEGISKENI, "gelistirme")
     monkeypatch.setenv(ay.VERITABANI_YOLU_DEGISKENI, str(gercek_vt))
 
@@ -323,7 +323,7 @@ def test_test_ortami_verilen_kokun_altina_turetir(
 
     assert ayar.ortam is ay.Ortam.TEST
     assert ayar.veri_koku == ortak_kok / "test"
-    assert ayar.veritabani_yolu == ortak_kok / "test" / "defteriki.sqlite3"
+    assert ayar.veritabani_yolu == ortak_kok / "test" / "defteruc.sqlite3"
 
 
 def test_test_ortaminda_kok_ici_tekil_yol_kabul_edilir(

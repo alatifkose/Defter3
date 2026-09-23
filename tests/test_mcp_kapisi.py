@@ -21,12 +21,12 @@ import anyio
 import pytest
 from sqlalchemy import text
 
-from defteriki import ayarlar as ay
-from defteriki import gunluk, mcp_kapisi
-from defteriki.cekirdek import gocler
-from defteriki.cekirdek.veritabani import Veritabani
+from defteruc import ayarlar as ay
+from defteruc import gunluk, mcp_kapisi
+from defteruc.cekirdek import gocler
+from defteruc.cekirdek.veritabani import Veritabani
 
-DEFTERIKI_DEGISKENLERI = (
+DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
     ay.VERI_KOKU_DEGISKENI,
     ay.VERITABANI_YOLU_DEGISKENI,
@@ -45,7 +45,7 @@ ILK_ISTEKLER: tuple[dict[str, Any], ...] = (
         "params": {
             "protocolVersion": ISTEMCI_PROTOKOL_SURUMU,
             "capabilities": {},
-            "clientInfo": {"name": "defteriki-test", "version": "0"},
+            "clientInfo": {"name": "defteruc-test", "version": "0"},
         },
     },
     {"jsonrpc": "2.0", "method": "notifications/initialized"},
@@ -61,7 +61,7 @@ ILK_ISTEKLER: tuple[dict[str, Any], ...] = (
 
 @pytest.fixture(autouse=True)
 def temiz_cevre_ve_gunluk(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    for degisken in DEFTERIKI_DEGISKENLERI:
+    for degisken in DEFTERUC_DEGISKENLERI:
         monkeypatch.delenv(degisken, raising=False)
     gunluk.gunlugu_kapat()
     yield
@@ -119,7 +119,7 @@ def test_sistem_durumu_goc_uygulanmis_veritabaninin_gercek_surumunu_verir(
 
     assert durum.sema_surumu == gocler.beklenen_sema_surumu()
     metin = json.dumps(dataclasses.asdict(durum), ensure_ascii=False)
-    assert str(test_koku) not in metin and "DEFTERIKI_" not in metin
+    assert str(test_koku) not in metin and "DEFTERUC_" not in metin
 
 
 def test_sistem_durumu_goc_uygulanmamis_dosyada_yok_der(test_koku: Path) -> None:
@@ -142,7 +142,7 @@ def test_sistem_durumu_yol_ve_ortam_degiskeni_icermez(test_koku: Path) -> None:
 
     assert str(test_koku) not in metin
     assert str(test_koku.parent) not in metin
-    assert "DEFTERIKI_" not in metin
+    assert "DEFTERUC_" not in metin
 
 
 def test_sunucu_yalniz_sistem_durumu_aracini_sunar(test_koku: Path) -> None:
@@ -169,12 +169,12 @@ def test_import_sunucu_kurmaz_ve_dosya_olusturmaz(tmp_path: Path) -> None:
 
 # --- ayrı süreçte stdio ----------------------------------------------------
 
-SUNUCU_KOMUTU = "import sys; from defteriki.mcp_kapisi import main; sys.exit(main())"
+SUNUCU_KOMUTU = "import sys; from defteruc.mcp_kapisi import main; sys.exit(main())"
 BEKLEME_SANIYE = 60
 
 
 def _cevre(cevre: dict[str, str]) -> dict[str, str]:
-    temiz = {k: v for k, v in os.environ.items() if not k.startswith("DEFTERIKI_")}
+    temiz = {k: v for k, v in os.environ.items() if not k.startswith("DEFTERUC_")}
     temiz.update(cevre)
     temiz["PYTHONUTF8"] = "1"
     return temiz
@@ -318,7 +318,7 @@ def test_stdio_sunucusu_gunluge_yazar_stdout_a_yazmaz(
     )
     assert f"| INFO | {mcp_kapisi.OLAY_MCP_BASLANGIC} | ortam=test" in icerik
     assert (
-        f"| INFO | {mcp_kapisi.OLAY_MCP_EL_SIKISMA} | istemci=defteriki-test 0 "
+        f"| INFO | {mcp_kapisi.OLAY_MCP_EL_SIKISMA} | istemci=defteruc-test 0 "
         f"protokol={ISTEMCI_PROTOKOL_SURUMU} yetenekler={{}}"
     ) in icerik
     assert f"| INFO | {mcp_kapisi.OLAY_MCP_KAPANIS} |" in icerik
@@ -329,7 +329,7 @@ def test_stdio_sunucusu_gunluge_yazar_stdout_a_yazmaz(
 GIZLI_METIN = "SENTETIK-GIZLI IBAN TR00 0000 0000 0000 0000 00"
 HATALI_SUNUCU_KOMUTU = (
     "import sys\n"
-    "from defteriki import mcp_kapisi\n"
+    "from defteruc import mcp_kapisi\n"
     "def patlat(ayarlar):\n"
     f"    raise ValueError({GIZLI_METIN!r})\n"
     "mcp_kapisi.sistem_durumu = patlat\n"
@@ -339,7 +339,7 @@ HATALI_SUNUCU_KOMUTU = (
 
 BEKLENEN_HATALI_SUNUCU_KOMUTU = (
     "import sys\n"
-    "from defteriki import mcp_kapisi\n"
+    "from defteruc import mcp_kapisi\n"
     "from mcp.server.mcpserver.exceptions import ToolError\n"
     "def patlat(ayarlar):\n"
     f"    raise ToolError({GIZLI_METIN!r})\n"
@@ -401,6 +401,6 @@ def test_ayar_hatasinda_stdout_bos_stderr_aciklayici(tmp_path: Path) -> None:
 
     assert sonuc.returncode == 1
     assert sonuc.stdout == ""
-    assert "DEFTERIKI MCP kapısı başlatılamadı" in sonuc.stderr
+    assert "DEFTERUC MCP kapısı başlatılamadı" in sonuc.stderr
     assert "Ayar hatası" in sonuc.stderr
     assert ay.VERI_KOKU_DEGISKENI in sonuc.stderr

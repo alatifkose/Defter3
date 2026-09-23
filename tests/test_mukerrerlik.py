@@ -32,25 +32,25 @@ from sqlalchemy import inspect, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from defteriki import ayarlar as ay
-from defteriki.cekirdek import belge_islemleri as bi
-from defteriki.cekirdek import denetim_islemleri as di
-from defteriki.cekirdek import denetim_tablolari as dt
-from defteriki.cekirdek import gocler
-from defteriki.cekirdek import kayit_islemleri as ki
-from defteriki.cekirdek import mukerrerlik_islemleri as mu
-from defteriki.cekirdek import mukerrerlik_tablolari as mt
-from defteriki.cekirdek import nesne_islemleri as ni
-from defteriki.cekirdek import nesne_tablolari as nt
-from defteriki.cekirdek import tanim_islemleri as ti
-from defteriki.cekirdek import taslak_islemleri as tsi
-from defteriki.cekirdek import veritabani as vt
-from defteriki.cekirdek.denetim_tablolari import Aktor, AktorTuru, DenetimOlayi
-from defteriki.cekirdek.mukerrerlik_tablolari import Karar, TalepDurumu
-from defteriki.cekirdek.tanim_tablolari import DegerTuru, OzellikTanimi, YasamDurumu
-from defteriki.cekirdek.taslak_tablolari import PaketDurumu
+from defteruc import ayarlar as ay
+from defteruc.cekirdek import belge_islemleri as bi
+from defteruc.cekirdek import denetim_islemleri as di
+from defteruc.cekirdek import denetim_tablolari as dt
+from defteruc.cekirdek import gocler
+from defteruc.cekirdek import kayit_islemleri as ki
+from defteruc.cekirdek import mukerrerlik_islemleri as mu
+from defteruc.cekirdek import mukerrerlik_tablolari as mt
+from defteruc.cekirdek import nesne_islemleri as ni
+from defteruc.cekirdek import nesne_tablolari as nt
+from defteruc.cekirdek import tanim_islemleri as ti
+from defteruc.cekirdek import taslak_islemleri as tsi
+from defteruc.cekirdek import veritabani as vt
+from defteruc.cekirdek.denetim_tablolari import Aktor, AktorTuru, DenetimOlayi
+from defteruc.cekirdek.mukerrerlik_tablolari import Karar, TalepDurumu
+from defteruc.cekirdek.tanim_tablolari import DegerTuru, OzellikTanimi, YasamDurumu
+from defteruc.cekirdek.taslak_tablolari import PaketDurumu
 
-DEFTERIKI_DEGISKENLERI = (
+DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
     ay.VERI_KOKU_DEGISKENI,
     ay.VERITABANI_YOLU_DEGISKENI,
@@ -70,7 +70,7 @@ HAM_DB_HATALARI = (IntegrityError, OperationalError)
 
 @pytest.fixture(autouse=True)
 def temiz_cevre(monkeypatch: pytest.MonkeyPatch) -> None:
-    for degisken in DEFTERIKI_DEGISKENLERI:
+    for degisken in DEFTERUC_DEGISKENLERI:
         monkeypatch.delenv(degisken, raising=False)
 
 
@@ -1274,7 +1274,7 @@ def test_iptal_ile_karar_yarisi_tutarsizlik_uretmez(
 
 @pytest.mark.parametrize(
     "aktor",
-    [Aktor(AktorTuru.AJAN, "tarayici"), Aktor(AktorTuru.SISTEM, "defteriki")],
+    [Aktor(AktorTuru.AJAN, "tarayici"), Aktor(AktorTuru.SISTEM, "defteruc")],
 )
 @pytest.mark.parametrize("karar", [Karar.AYNI, Karar.AYRI, Karar.KARARSIZ])
 def test_kullanici_disindaki_aktor_karar_veremez(
@@ -2818,7 +2818,7 @@ def test_denetim_tablolarinin_yerel_tablo_adlari_dogrudur() -> None:
 def test_taslak_tablolari_hala_kesin_nesneye_baglanmaz(ortam: Ortam) -> None:
     """4.6 tabloları köprüyü kurar; taslak tablolarının kendisi kesin nesne
     tablolarına bağlanmaz (Aşama 4.5 ayrımı korunur)."""
-    from defteriki.cekirdek import taslak_tablolari as tst
+    from defteruc.cekirdek import taslak_tablolari as tst
 
     with ortam.veritabani.motor.connect() as baglanti:
         denetci = inspect(baglanti)
@@ -2837,7 +2837,7 @@ def test_dort_altiya_ait_moduller_finansa_baglanmaz() -> None:
     ``tests/test_mimari_sinir.py``; burada doğrudan import sınanır)."""
     import ast
 
-    kok = Path(__file__).resolve().parent.parent / "src" / "defteriki" / "cekirdek"
+    kok = Path(__file__).resolve().parent.parent / "src" / "defteruc" / "cekirdek"
     for ad in (
         "mukerrerlik_tablolari.py",
         "mukerrerlik_islemleri.py",

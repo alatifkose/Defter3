@@ -4,16 +4,16 @@
 sürüm tablosu yoktur. Göçler ``alembic/versions`` altındadır; ilk göç
 ``0001`` uygulama tablosu içermez (genel altyapı).
 
-Göç çalıştırmak açık bir işlemdir: uygulama başlangıcı (``uv run defteriki``,
-``uv run defteriki-mcp``) göç çalıştırmaz. Resmî yol komut satırıdır::
+Göç çalıştırmak açık bir işlemdir: uygulama başlangıcı (``uv run defteruc``,
+``uv run defteruc-mcp``) göç çalıştırmaz. Resmî yol komut satırıdır::
 
     uv run alembic upgrade head
 
 Komut veritabanı yolunu ``alembic.ini``'den değil merkezi ayarlardan alır
-(``alembic/env.py`` → ``defteriki.ayarlar``). Aynı iş süreç içinde
+(``alembic/env.py`` → ``defteruc.ayarlar``). Aynı iş süreç içinde
 ``semayi_yukselt`` ile de yapılır (testler); ikisi aynı ``env.py``'den geçer.
 
-Bu modül finansı bilmez; ``defteriki.ayarlar``ı da import etmez, yolu
+Bu modül finansı bilmez; ``defteruc.ayarlar``ı da import etmez, yolu
 çağıranın verdiği ``Veritabani`` üzerinden kullanır.
 """
 
@@ -26,7 +26,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 
-from defteriki.cekirdek.veritabani import Veritabani
+from defteruc.cekirdek.veritabani import Veritabani
 
 PROJE_KOKU = Path(__file__).resolve().parents[3]
 ALEMBIC_INI = PROJE_KOKU / "alembic.ini"

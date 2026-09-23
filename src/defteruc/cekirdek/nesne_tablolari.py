@@ -49,13 +49,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from defteriki.cekirdek.tanim_tablolari import (
+from defteruc.cekirdek.tanim_tablolari import (
     ILISKI_TANIMI,
     NESNE_TURU,
     OZELLIK_TANIMI,
     YASAM_DURUMU_KOSULU,
 )
-from defteriki.cekirdek.veritabani import TabloTabani
+from defteruc.cekirdek.veritabani import TabloTabani
 
 NESNE = "nesne"
 NESNE_OZELLIGI = "nesne_ozelligi"

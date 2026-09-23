@@ -153,10 +153,10 @@ from sqlalchemy import Select, and_, func, or_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from defteriki.cekirdek.denetim_islemleri import AZAMI_GEREKCE_UZUNLUGU, olay_yaz
-from defteriki.cekirdek.denetim_tablolari import Aktor, AktorTuru, DenetimOlayi
-from defteriki.cekirdek.kayit_islemleri import kayit_baglarini_devret
-from defteriki.cekirdek.mukerrerlik_tablolari import (
+from defteruc.cekirdek.denetim_islemleri import AZAMI_GEREKCE_UZUNLUGU, olay_yaz
+from defteruc.cekirdek.denetim_tablolari import Aktor, AktorTuru, DenetimOlayi
+from defteruc.cekirdek.kayit_islemleri import kayit_baglarini_devret
+from defteruc.cekirdek.mukerrerlik_tablolari import (
     KARAR_TALEBI,
     NESNE_BIRLESIMI,
     AdayNesneCozumlemesi,
@@ -168,20 +168,20 @@ from defteriki.cekirdek.mukerrerlik_tablolari import (
     NesneMukerrerlikSarti,
     TalepDurumu,
 )
-from defteriki.cekirdek.nesne_islemleri import (
+from defteruc.cekirdek.nesne_islemleri import (
     DevirOzeti,
     iliskileri_devret,
     nesne_getir,
     yasam_durumunu_degistir,
 )
-from defteriki.cekirdek.nesne_tablolari import Nesne, NesneIliskisi, NesneOzelligi
-from defteriki.cekirdek.tanim_tablolari import (
+from defteruc.cekirdek.nesne_tablolari import Nesne, NesneIliskisi, NesneOzelligi
+from defteruc.cekirdek.tanim_tablolari import (
     HiyerarsiKurali,
     OzellikTanimi,
     YasamDurumu,
     simdi_utc,
 )
-from defteriki.cekirdek.taslak_islemleri import (
+from defteruc.cekirdek.taslak_islemleri import (
     PaketDurumuGecersiz,
     aday_nesne_getir,
     benzersizlik_ihlali_mi,
@@ -191,7 +191,7 @@ from defteriki.cekirdek.taslak_islemleri import (
     paketi_devam_et,
     yazilabilir_paket,
 )
-from defteriki.cekirdek.taslak_tablolari import (
+from defteruc.cekirdek.taslak_tablolari import (
     AdayNesne,
     AdayNesneOzelligi,
     IslemPaketi,

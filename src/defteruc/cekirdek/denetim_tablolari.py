@@ -1,6 +1,6 @@
 """İş denetim izinin tablosu ve aktör modeli (Aşama 4.6).
 
-Teknik hata günlüğü (``defteriki.gunluk``) ile iş denetim izi **ayrı**
+Teknik hata günlüğü (``defteruc.gunluk``) ile iş denetim izi **ayrı**
 mekanizmalardır: günlük teknik arıza içindir ve dosyaya yazar, denetim izi
 işin kendisinin kalıcı kaydıdır ve veritabanında durur. İkisi birleştirilmez.
 
@@ -48,9 +48,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from defteriki.cekirdek.tanim_tablolari import OZELLIK_TANIMI
-from defteriki.cekirdek.taslak_tablolari import ISLEM_PAKETI
-from defteriki.cekirdek.veritabani import TabloTabani
+from defteruc.cekirdek.tanim_tablolari import OZELLIK_TANIMI
+from defteruc.cekirdek.taslak_tablolari import ISLEM_PAKETI
+from defteruc.cekirdek.veritabani import TabloTabani
 
 KESIN_NESNE = "nesne"
 """``nesne_tablolari.NESNE`` ile aynı ad; oradan import edilmez (modül
@@ -118,7 +118,7 @@ class Aktor:
     """Olayı yapan taraf: tür ve serbest kimlik metni.
 
     Kimlik çekirdek için anlamsız bir etikettir (kullanıcı adı, ajan adı,
-    ``defteriki``); çekirdek onu yorumlamaz, yalnız kaydeder.
+    ``defteruc``); çekirdek onu yorumlamaz, yalnız kaydeder.
     """
 
     tur: AktorTuru
