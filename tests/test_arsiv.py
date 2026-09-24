@@ -547,6 +547,25 @@ def test_eszamanli_ayni_icerik_tek_gecerli_dosya(
     assert _dosyalar(arsiv_dizini) == {_yol(icerik)}
     assert arsiv.arsiv_yolu(arsiv_dizini, _yol(icerik)).read_bytes() == icerik
     assert _gecici_yok(arsiv_dizini)
+    yeni_yazanlar = [s for s in sonuclar if not s.diskte_zaten_vardi]
+    assert yeni_yazanlar
+    if os.name == "nt":
+        # Hedef bir kez oluştuktan sonra üstüne yazılmaz: yalnız ilk taşıyan yazar.
+        assert len(yeni_yazanlar) == 1
+
+
+@pytest.mark.skipif(
+    os.name != "nt", reason="POSIX rename var olan hedefin üstüne yazar"
+)
+def test_tasima_var_olan_hedefin_ustune_yazmaz(arsiv_dizini: Path) -> None:
+    """İçerik adresli hedef oluştuktan sonra değişmez; ikinci taşıma reddedilir ve
+    hedefteki baytlar olduğu gibi kalır (Windows)."""
+    hedef = _yaz(arsiv.arsiv_yolu(arsiv_dizini, _yol(PDF)), PDF)
+    gecici = _yaz(arsiv.gecici_dizin(arsiv_dizini) / "x.tmp", PDF)
+    with pytest.raises(FileExistsError):
+        arsiv._yerine_koy(gecici, hedef)  # pyright: ignore[reportPrivateUsage]
+    assert hedef.read_bytes() == PDF
+    assert gecici.is_file()
 
 
 def test_import_dizin_olusturmaz_arsivleme_kendi_dizinini_kurar(

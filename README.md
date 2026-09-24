@@ -164,8 +164,15 @@ test kökünde oluşur.
 Cowork dosyayı gelen dizinine bırakır; arşiv dosyayı denetler, akışla
 kopyalar, SHA-256 parmak izini ve boyutunu gerçek baytlardan hesaplar,
 içerik adresli kalıcı yola (`<ilk iki hex>/<sha256>`) atomik taşır. Aynı
-içerik hangi adla gelirse gelsin tek fiziksel dosyadır. Veritabanına dokunmaz;
-ayrıntılı kurallar modülün docstring'indedir, testler `tests/test_arsiv.py`.
+içerik hangi adla gelirse gelsin tek fiziksel dosyadır. Hedef bir kez
+oluştuktan sonra üstüne yazılmaz: taşıma `os.rename` ile "yoksa oluştur"
+anlamındadır (2026-09-24 düzeltmesi; `os.replace` Windows'ta eşzamanlı
+doğrulamayla çakışıyordu). Not: bu garanti yalnız Windows'ta vardır;
+Linux/macOS'ta `os.rename` mevcut hedefin üstüne yazar. Proje bugün yalnız
+Windows'tur; ileride Linux/macOS desteği düşünülürse platformlar arası atomik
+bir "üstüne yazmadan taşı" yöntemi gerekir (ayrıntı modül docstring'inde).
+Veritabanına dokunmaz; ayrıntılı kurallar modülün docstring'indedir, testler
+`tests/test_arsiv.py`.
 
 ## Mimari sınır: çekirdek ve finans
 
