@@ -55,7 +55,8 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   ekler, sütun özelliği değiştirir. Tek motor vardır; ikinci motor olmayacak
   (karar 2026-09-24). Sütun özelliği isteğin içinde gider ve **koda gömülü
   değildir**: istekte ne geldiyse (`Sutun.ozellikler`) sütun adından sonra
-  olduğu gibi yazılır, geçerliliğini SQLite belirler. Motor hazır tablo
+  olduğu gibi yazılır, geçerliliğini SQLite belirler; motor yalnız parçanın
+  tek sütunun tanımında kaldığını denetler. Motor hazır tablo
   taşımaz ve hiçbir özelliği ismen bilmez: sütunların görünen adı gibi tanım
   bilgileri de sıradan bir tablodur, Cowork o tabloyu da motorla açar ve
   eşleşmeleri satır olarak yazar (kayıt). Tablo/sütun adları sade ve Türkçe
@@ -78,15 +79,21 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   `SutunlarUyusmuyor` verir. **Bağlı nesneler taşınır:** tablonun
   indeksleri ile veritabanındaki bütün görünüm ve trigger'lar (hangisinin
   tabloya değindiği ayrıştırmadan bilinemez) `sqlite_master`'daki saklı
-  oluşturma cümleleriyle işten önce silinir, tablo kurulduktan sonra aynı
-  sırayla aynı cümleyle geri açılır; kayıpsızdır. **Sessiz kayıp yok:** tablo düzeyi kısıtlar (`UNIQUE (a, b)`,
+  oluşturma cümleleriyle işten önce silinir (önce trigger'lar, sonra
+  görünümler, oluşturma sırasının tersinden), tablo kurulduktan sonra aynı
+  sırayla aynı cümleyle geri açılır; kayıpsızdır. `AUTOINCREMENT` sayacı
+  (`sqlite_sequence`) işten önce okunur, sonra geri yazılır; silinmiş
+  kimlikler yeniden dağıtılmaz. **Sessiz kayıp yok:** tablo düzeyi kısıtlar (`UNIQUE (a, b)`,
   `CHECK (...)`, `FOREIGN KEY ...`, `CONSTRAINT ...`), tablo seçenekleri
   (`WITHOUT ROWID`, `STRICT`) ve üretilen sütunlar `CREATE TABLE` metninin
   içindedir ve istek onları taşımaz; henüz desteklenmez, motor DDL'den önce
   tespit edip `DesteklenmeyenYapi` ile reddeder. Tespit metni ayrıştırmaz:
   en dış parantezdeki üst düzey parça sayısı sütun sayısından fazlaysa sütun
-  olmayan parça vardır. Motorun kendi açtığı tablolarda bunlar olmaz. Bu
-  okumalar yalnız taşımak ve reddetmek içindir.
+  olmayan parça vardır. Motorun kendi açtığı tablolarda bunlar olmaz: bir
+  özellik parçası üst düzeyde virgül ya da noktalı virgül taşıyamaz,
+  parantez ve tırnakları dengeli olmalıdır (`ozelligi_dogrula`,
+  `GecersizOzellik`); `"TEXT, UNIQUE(a)"` gibi bir parça sütun tanımından
+  çıkamaz. Bu okumalar yalnız taşımak ve reddetmek içindir.
 
 Henüz yok: uygulamanın onay penceresi, motoru Cowork'e açan MCP araçları,
 yeni mükerrerlik tasarımı.

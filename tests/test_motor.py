@@ -620,3 +620,155 @@ def test_tablo_duzeyi_kisit_secenek_ve_gizli_sutun_reddedilir(
 )
 def test_ust_duzey_parca_sayisi(sql: str, beklenen: tuple[int, str]) -> None:
     assert m._ust_duzey_parca_sayisi(sql) == beklenen  # pyright: ignore[reportPrivateUsage]
+
+
+# --- inceleme bulguları (2026-09-24): INSTEAD OF trigger, AUTOINCREMENT, özellik sınırı
+
+
+def test_gorunumun_instead_of_triggeri_silme_sirasini_bozmaz(
+    veritabani: vt.Veritabani,
+) -> None:
+    """Görünüm silinince INSTEAD OF trigger'ı kendiliğinden gider; trigger'lar
+    görünümlerden önce silinmezse ikinci DROP düşerdi."""
+    _kisileri_doldur(veritabani)
+    with veritabani.islem() as oturum:
+        oturum.execute(text("CREATE VIEW g AS SELECT id, ad_soyad FROM kisiler"))
+        oturum.execute(
+            text(
+                "CREATE TRIGGER g_ekle INSTEAD OF INSERT ON g BEGIN "
+                "INSERT INTO kisiler (ad_soyad) VALUES (NEW.ad_soyad); END"
+            )
+        )
+    oncesi = _nesneler(veritabani)
+
+    m.sutun_ozelligi_degistir(veritabani, KISILER_YENI)
+
+    assert _nesneler(veritabani) == oncesi
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO g (ad_soyad) VALUES ('Can')"))
+    assert _satirlar(veritabani, "SELECT ad_soyad FROM kisiler WHERE id = 3") == [
+        ("Can",)
+    ]
+
+
+def test_autoincrement_sayaci_korunur(veritabani: vt.Veritabani) -> None:
+    """Silinmiş kimlik yeniden dağıtılmaz: sayaç yeniden kurmadan sonra da 2'de."""
+    m.tablo_olustur(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "sira",
+            (m.Sutun("id", ("INTEGER", "PRIMARY KEY", "AUTOINCREMENT")), m.Sutun("ad")),
+        ),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO sira (ad) VALUES ('a'), ('b')"))
+        oturum.execute(text("DELETE FROM sira WHERE id = 2"))
+
+    m.sutun_ozelligi_degistir(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "sira",
+            (
+                m.Sutun("id", ("INTEGER", "PRIMARY KEY", "AUTOINCREMENT")),
+                m.Sutun("ad", ("TEXT",)),
+            ),
+        ),
+    )
+
+    assert _satirlar(
+        veritabani, "SELECT seq FROM sqlite_sequence WHERE name='sira'"
+    ) == [(2,)]
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO sira (ad) VALUES ('c')"))
+    assert _satirlar(veritabani, "SELECT id FROM sira ORDER BY id") == [(1,), (3,)]
+
+
+def test_autoincrement_olmayan_tabloda_sayac_islemi_yok(
+    veritabani: vt.Veritabani,
+) -> None:
+    _kisileri_doldur(veritabani)
+    m.sutun_ozelligi_degistir(veritabani, KISILER_YENI)
+    assert "sqlite_sequence" not in _tablolar(veritabani)
+
+
+@pytest.mark.parametrize(
+    "parca",
+    [
+        'TEXT, UNIQUE("a")',  # sütun tanımından çıkıp tablo düzeyi kısıt yazardı
+        "TEXT)",
+        "TEXT) , (b",
+        "TEXT; DROP TABLE kisiler",
+        "CHECK (a > 0",
+        "TEXT DEFAULT 'kapanmayan",
+        "TEXT /* kapanmayan",
+        "",
+        "   ",
+    ],
+)
+def test_sutun_tanimindan_cikan_ozellik_dokunmadan_reddedilir(
+    veritabani: vt.Veritabani, parca: str
+) -> None:
+    with pytest.raises(m.GecersizOzellik):
+        m.tablo_olustur(
+            veritabani, m.TabloOlusturmaIstegi("t", (m.Sutun("a", (parca,)),))
+        )
+    with pytest.raises(m.GecersizOzellik):
+        m.sutun_ekle(veritabani, m.SutunEklemeIstegi("t", m.Sutun("a", (parca,))))
+    with pytest.raises(m.GecersizOzellik):
+        m.sutun_ozelligi_degistirme_sql(
+            m.SutunOzelligiDegistirmeIstegi("t", (m.Sutun("a", (parca,)),))
+        )
+
+    assert not veritabani.yol.exists()
+
+
+@pytest.mark.parametrize(
+    "parca",
+    [
+        "CHECK (a IN ('x,y', 'z'))",
+        "REFERENCES t(a, b)",
+        "DEFAULT ','",
+        "DEFAULT ';'",
+        "DEFAULT '(' -- yorum, virgüllü",
+        "CHECK (length(a) > 0 AND a NOT LIKE '%;%')",
+        'COLLATE "NO,CASE"',
+    ],
+)
+def test_parantez_ve_tirnak_icindeki_virgul_noktali_virgul_serbest(parca: str) -> None:
+    assert m.ozelligi_dogrula(parca) == parca
+    assert (
+        m.tablo_olusturma_sql(m.TabloOlusturmaIstegi("t", (m.Sutun("a", (parca,)),)))
+        == f'CREATE TABLE "t" ("a" {parca})'
+    )
+
+
+def test_motorun_actigi_tabloda_tablo_duzeyi_kisit_olamaz(
+    veritabani: vt.Veritabani,
+) -> None:
+    """README iddiası: özellik parçası sınırı sayesinde motor tablo düzeyi kısıt
+    yazamaz; dolayısıyla kendi açtığı tabloda yeniden kurma hiç reddedilmez."""
+    m.tablo_olustur(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "t",
+            (
+                m.Sutun("a", ("INTEGER", "PRIMARY KEY")),
+                m.Sutun("b", ("TEXT", "UNIQUE", "CHECK (b IN ('x', 'y'))")),
+                m.Sutun("c", ("INTEGER", "REFERENCES t(a)")),
+            ),
+        ),
+    )
+
+    m.sutun_ozelligi_degistir(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "t",
+            (
+                m.Sutun("a", ("INTEGER", "PRIMARY KEY")),
+                m.Sutun("b", ("TEXT", "NOT NULL")),
+                m.Sutun("c", ("INTEGER",)),
+            ),
+        ),
+    )
+
+    assert _sutunlar(veritabani, "t")[1] == ("b", "TEXT", 1, None)

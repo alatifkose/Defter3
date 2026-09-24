@@ -27,10 +27,14 @@ Motorun yapmadıkları:
   ``MotorHatasi`` olarak yükselir. (Tek istisna: sütun özelliği değiştirmenin
   yalnız reddetmek için yaptığı ön denetim, aşağıda.)
 * Bir şey göstermez ve karar vermez: dönüş değeri yoktur.
-* Kural koymaz. Tek teknik sınır ad biçimidir (``AD_BICIMI``): tablo ve sütun
-  adları sade yazılır, Türkçe karakter yoktur (karar 2026-09-24). Bu sınır
-  SQL'e adın güvenle yazılabilmesi içindir. Tek istisna sütun özelliği
-  değiştirmenin emniyet kurallarıdır (aşağıda).
+* Kural koymaz. İki teknik sınır vardır, ikisi de SQL'e güvenle yazılabilmek
+  içindir: ad biçimi (``AD_BICIMI``: tablo ve sütun adları sade, Türkçe
+  karaktersiz; karar 2026-09-24) ve özellik parçası bütünlüğü
+  (``ozelligi_dogrula``: bir parça tek sütunun tanımında kalır; üst düzeyde
+  virgül ya da noktalı virgül taşıyamaz, parantez ve tırnakları dengeli
+  olmalıdır). İkincisi olmadan ``"TEXT, UNIQUE(a)"`` gibi bir parça sütun
+  tanımından çıkıp tablo düzeyi kısıt yazardı. Bunlar dışında tek istisna
+  sütun özelliği değiştirmenin emniyet kurallarıdır (aşağıda).
 
 Sütun özelliği değiştirme (karar 2026-09-24):
 
@@ -55,10 +59,16 @@ Sütun özelliği değiştirme (karar 2026-09-24):
   indekslerini ve veritabanındaki **bütün** görünüm ve trigger'ları
   ``sqlite_master``'dan **oluşturma cümleleriyle** alır (SQLite cümleyi
   olduğu gibi saklar; ayrıştırma yoktur), görünüm ve trigger'ları işten
-  önce siler, tabloyu kurar, sonra hepsini oluşturma sırasıyla aynı
-  cümleyle geri açar. Aynı transaction'da aynı cümleyle geri açılan nesne
-  kayıpsızdır. Bir cümle yeni tanıma uymuyorsa SQLite düşürür, iş geri
-  alınır.
+  önce siler (önce bütün trigger'lar, sonra görünümler, her biri oluşturma
+  sırasının tersinden: görünüm silinince ``INSTEAD OF`` trigger'ı da
+  gider, tersi sırada ikinci ``DROP`` düşerdi), tabloyu kurar, sonra
+  hepsini oluşturma sırasıyla aynı cümleyle geri açar. Aynı transaction'da
+  aynı cümleyle geri açılan nesne kayıpsızdır. Bir cümle yeni tanıma
+  uymuyorsa SQLite düşürür, iş geri alınır.
+* **AUTOINCREMENT sayacı korunur:** tablo silinince ``sqlite_sequence``
+  kaydı da silinir, yeni tablonun sayacı taşınan en büyük kimlikten başlar
+  ve silinmiş kimlikler yeniden dağıtılırdı. Motor sayacı işten önce okur,
+  yeniden kurmadan sonra aynı değere geri yazar.
 * **Sessiz kayıp yok:** tablo düzeyi kısıtlar (``PRIMARY KEY (a, b)``,
   ``UNIQUE (...)``, ``CHECK (...)``, ``FOREIGN KEY ...``, ``CONSTRAINT ...``)
   ve tablo seçenekleri (``WITHOUT ROWID``, ``STRICT``) ``CREATE TABLE``
@@ -102,6 +112,12 @@ class MotorHatasi(Exception):
 
 class GecersizAd(MotorHatasi, ValueError):
     """Tablo ya da sütun adı ``AD_BICIMI``'ne uymuyor."""
+
+
+class GecersizOzellik(MotorHatasi, ValueError):
+    """Özellik parçası tek sütunun tanımında kalmıyor (üst düzeyde virgül ya da
+    noktalı virgül, dengesiz parantez, kapanmayan tırnak/yorum) ya da boş.
+    Veritabanına dokunulmadı."""
 
 
 class SutunlarUyusmuyor(MotorHatasi):
@@ -163,8 +179,35 @@ def adi_dogrula(ad: str, ne: str) -> str:
     return ad
 
 
+def ozelligi_dogrula(parca: str) -> str:
+    """Özellik parçasının tek sütunun tanımında kaldığını denetler; kalmıyorsa
+    ``GecersizOzellik``. Parçanın anlamına bakılmaz (onu SQLite belirler);
+    yalnız sınırı aşıp aşmadığına bakılır: üst düzeyde ``,`` ya da ``;`` yok,
+    parantezler dengeli, tırnak ve yorumlar kapalı, boş değil."""
+    if not parca.strip():
+        raise GecersizOzellik("özellik parçası boş olamaz")
+    try:
+        karakterler, son_derinlik = _acik_karakterler(parca)
+    except ValueError as hata:
+        raise GecersizOzellik(f"özellik parçası: {hata}: {parca!r}") from None
+    for _, c, derinlik in karakterler:
+        if derinlik == 0 and c in ",;":
+            raise GecersizOzellik(
+                f"özellik parçası tek sütunun tanımında kalmalı; üst düzeyde "
+                f"{c!r} olamaz: {parca!r}"
+            )
+        if c == ")" and derinlik == 0:
+            raise GecersizOzellik(f"özellik parçasında parantez dengesiz: {parca!r}")
+    if son_derinlik != 0:
+        raise GecersizOzellik(f"özellik parçasında parantez dengesiz: {parca!r}")
+    return parca
+
+
 def _sutun_tanimi(sutun: Sutun) -> str:
-    parcalar = [f'"{adi_dogrula(sutun.ad, "sütun")}"', *sutun.ozellikler]
+    parcalar = [
+        f'"{adi_dogrula(sutun.ad, "sütun")}"',
+        *(ozelligi_dogrula(p) for p in sutun.ozellikler),
+    ]
     return " ".join(parcalar)
 
 
@@ -224,8 +267,11 @@ def sutun_ozelligi_degistir(
             baglanti = oturum.connection()
             _yeniden_kurma_on_denetimi(baglanti, istek)
             bagli = _bagli_nesneler(baglanti, istek.tablo)
+            sayac = _sayaci_oku(baglanti, istek.tablo)
             for ddl in (*bagli.once_silinecek, *adimlar, *bagli.sonra_kurulacak):
                 baglanti.exec_driver_sql(ddl)
+            if sayac is not None:
+                _sayaci_yaz(baglanti, istek.tablo, sayac)
     except YabanciAnahtarIhlali as hata:
         raise MotorHatasi(f"istek uygulanamadı, geri alındı: {hata}") from hata
     except SQLAlchemyError as hata:
@@ -258,7 +304,10 @@ def _yeniden_kurma_on_denetimi(
     tanim = baglanti.exec_driver_sql(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (tablo,)
     ).scalar_one()
-    parca_sayisi, kuyruk = _ust_duzey_parca_sayisi(str(tanim))
+    try:
+        parca_sayisi, kuyruk = _ust_duzey_parca_sayisi(str(tanim))
+    except ValueError as hata:
+        raise DesteklenmeyenYapi(f"{tablo}: tanım metni okunamadı: {hata}") from None
     if parca_sayisi != len(mevcut):
         raise DesteklenmeyenYapi(
             f"{tablo}: tablo düzeyi kısıt var (sütun olmayan "
@@ -287,7 +336,8 @@ def _bagli_nesneler(baglanti: Connection, tablo: str) -> _BagliNesneler:
         "WHERE type IN ('index', 'trigger', 'view') AND sql IS NOT NULL "
         "ORDER BY rowid"
     ).all()
-    silinecek: list[str] = []
+    triggerlar: list[str] = []
+    gorunumler: list[str] = []
     kurulacak: list[str] = []
     for tur, ad, tbl, sql in (
         (str(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in satirlar
@@ -295,31 +345,62 @@ def _bagli_nesneler(baglanti: Connection, tablo: str) -> _BagliNesneler:
         if tur == "index":
             if tbl == tablo:
                 kurulacak.append(sql)
-        else:
-            silinecek.append(f'DROP {tur.upper()} "{ad.replace(chr(34), chr(34) * 2)}"')
-            kurulacak.append(sql)
-    return _BagliNesneler(tuple(silinecek), tuple(kurulacak))
+            continue
+        kurulacak.append(sql)
+        dusur = f'DROP {tur.upper()} "{ad.replace(chr(34), chr(34) * 2)}"'
+        (triggerlar if tur == "trigger" else gorunumler).append(dusur)
+    # Önce bütün trigger'lar, sonra görünümler; ikisi de oluşturma sırasının
+    # tersinden. Görünüm silinince INSTEAD OF trigger'ı kendiliğinden gider.
+    silinecek = (*reversed(triggerlar), *reversed(gorunumler))
+    return _BagliNesneler(silinecek, tuple(kurulacak))
 
 
-def _ust_duzey_parca_sayisi(sql: str) -> tuple[int, str]:
-    """``CREATE TABLE`` metninin en dış parantezindeki üst düzey (virgülle
-    ayrılmış) parça sayısı ve kapanış parantezinden sonraki kuyruk.
+def _sayaci_oku(baglanti: Connection, tablo: str) -> int | None:
+    """Tablonun ``AUTOINCREMENT`` sayacı (``sqlite_sequence``); yoksa ``None``."""
+    var = baglanti.exec_driver_sql(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'"
+    ).first()
+    if var is None:
+        return None
+    satir = baglanti.exec_driver_sql(
+        "SELECT seq FROM sqlite_sequence WHERE name = ?", (tablo,)
+    ).first()
+    return None if satir is None else int(satir[0])
+
+
+def _sayaci_yaz(baglanti: Connection, tablo: str, sayac: int) -> None:
+    """``sqlite_sequence``'ta ad benzersiz değildir; ``INSERT OR REPLACE`` ikinci
+    satır açar. Var olan satır güncellenir, yoksa eklenir."""
+    sonuc = baglanti.exec_driver_sql(
+        "UPDATE sqlite_sequence SET seq = ? WHERE name = ?", (sayac, tablo)
+    )
+    if sonuc.rowcount == 0:
+        baglanti.exec_driver_sql(
+            "INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", (tablo, sayac)
+        )
+
+
+def _acik_karakterler(sql: str) -> tuple[list[tuple[int, str, int]], int]:
+    """Tırnak ve yorum dışındaki karakterler ``(konum, karakter, derinlik)``
+    olarak, ve bitişteki parantez derinliği. Tırnaklı bölüm tek bir ``"``
+    karakteri olarak temsil edilir (içeriği önemsiz, varlığı önemli).
+    ``(`` kendi açtığı, ``)`` kendi kapattığı derinlikle verilir.
 
     Ayrıştırma değildir: yalnız tırnak (``"``, ``'``, backtick, ``[ ]``),
-    yorum (``--``, ``/* */``) ve parantez derinliği izlenir. Boş gövde 0
-    parçadır.
+    yorum (``--``, ``/* */``) ve parantez derinliği izlenir. Kapanmayan tırnak
+    ya da yorum ``ValueError``.
     """
-    i, n = 0, len(sql)
-    derinlik = 0
-    parca = 0
-    govde_dolu = False
+    sonuc: list[tuple[int, str, int]] = []
+    i, n, derinlik = 0, len(sql), 0
     while i < n:
         c = sql[i]
         if c in "\"'`[":
             kapanis = "]" if c == "[" else c
             j = sql.find(kapanis, i + 1)
-            i = n if j < 0 else j + 1
-            govde_dolu = govde_dolu or derinlik == 1
+            if j < 0:
+                raise ValueError(f"kapanmayan tırnak {c}")
+            sonuc.append((i, '"', derinlik))
+            i = j + 1
             continue
         if sql.startswith("--", i):
             j = sql.find("\n", i)
@@ -327,24 +408,40 @@ def _ust_duzey_parca_sayisi(sql: str) -> tuple[int, str]:
             continue
         if sql.startswith("/*", i):
             j = sql.find("*/", i + 2)
-            i = n if j < 0 else j + 2
+            if j < 0:
+                raise ValueError("kapanmayan yorum")
+            i = j + 2
             continue
         if c == "(":
             derinlik += 1
-            if derinlik == 1:
-                parca, govde_dolu = 0, False
-            else:
-                govde_dolu = True
+            sonuc.append((i, c, derinlik))
         elif c == ")":
+            sonuc.append((i, c, derinlik))
             derinlik -= 1
-            if derinlik == 0:
-                return (parca + 1 if govde_dolu else 0, sql[i + 1 :].strip())
-        elif derinlik == 1:
-            if c == ",":
-                parca += 1
-            elif not c.isspace():
-                govde_dolu = True
+        else:
+            sonuc.append((i, c, derinlik))
         i += 1
+    return sonuc, derinlik
+
+
+def _ust_duzey_parca_sayisi(sql: str) -> tuple[int, str]:
+    """``CREATE TABLE`` metninin en dış parantezindeki üst düzey (virgülle
+    ayrılmış) parça sayısı ve kapanış parantezinden sonraki kuyruk. Boş gövde
+    0 parçadır. Ayrıştırma değildir (``_acik_karakterler``)."""
+    karakterler, _ = _acik_karakterler(sql)
+    parca = 0
+    govde_dolu = False
+    for konum, c, derinlik in karakterler:
+        if derinlik == 0:
+            continue
+        if c == "(" and derinlik == 1:
+            parca, govde_dolu = 0, False
+        elif c == ")" and derinlik == 1:
+            return (parca + 1 if govde_dolu else 0, sql[konum + 1 :].strip())
+        elif derinlik == 1 and c == ",":
+            parca += 1
+        elif not c.isspace():
+            govde_dolu = True
     return 0, ""
 
 
