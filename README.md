@@ -51,49 +51,54 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
 * Mimari sınır: `cekirdek/` ve `finans/` paketleri, bağımlılık yönünü ve
   çekirdekte finansal ad yasağını koruyan AST testi
 
-* **Motor** (`cekirdek/motor.py`, 2026-09-24): tablo oluşturur, sütun
-  ekler, sütun özelliği değiştirir. Tek motor vardır; ikinci motor olmayacak
-  (karar 2026-09-24). Sütun özelliği isteğin içinde gider ve **koda gömülü
-  değildir**: istekte ne geldiyse (`Sutun.ozellikler`) sütun adından sonra
-  olduğu gibi yazılır, geçerliliğini SQLite belirler; motor yalnız parçanın
-  tek sütunun tanımında kaldığını denetler. Motor hazır tablo
-  taşımaz ve hiçbir özelliği ismen bilmez: sütunların görünen adı gibi tanım
-  bilgileri de sıradan bir tablodur, Cowork o tabloyu da motorla açar ve
-  eşleşmeleri satır olarak yazar (kayıt). Tablo/sütun adları sade ve Türkçe
-  karaktersizdir (`AD_BICIMI`). Motor yapıyı okumaz, onay almaz (onayı
+* **Motor** (`cekirdek/motor.py`, 2026-09-24): tek motor, beş iş: tablo
+  oluşturma, sütun ekleme, sütun özelliği değiştirme, indeks oluşturma, indeks
+  silme. İkinci motor olmayacak (karar 2026-09-24). İstek ne taşırsa o
+  yazılır, **hiçbir özellik, kısıt ya da seçenek koda gömülü değildir**,
+  geçerliliğini SQLite belirler: sütun özellikleri (`Sutun.ozellikler`, ör.
+  `NOT NULL`, `REFERENCES`, `GENERATED ALWAYS AS (...)`), tablo düzeyi kısıtlar
+  (`kisitlar`: `PRIMARY KEY (a, b)`, `UNIQUE`, `CHECK`, `FOREIGN KEY`,
+  `CONSTRAINT`), tablo seçenekleri (`secenekler`: `WITHOUT ROWID`, `STRICT`),
+  indeks sütun/ifadeleri, benzersizlik ve kısmi indeks koşulu. Motor hazır
+  tablo taşımaz ve hiçbir özelliği ismen bilmez: sütunların görünen adı gibi
+  tanım bilgileri de sıradan bir tablodur, Cowork o tabloyu da motorla açar ve
+  eşleşmeleri satır olarak yazar (kayıt). İki teknik sınır vardır, ikisi de
+  SQL'e güvenle yazılabilmek içindir: adlar sade ve Türkçe karaktersizdir
+  (`AD_BICIMI`); her parça kendi yerinde kalır, üst düzeyde virgül ya da
+  noktalı virgül taşıyamaz, parantez ve tırnakları dengelidir
+  (`parcayi_dogrula`, `GecersizParca`), yani `"TEXT, UNIQUE(a)"` gibi bir
+  özellik sütun tanımından çıkamaz. Motor yapıyı okumaz, onay almaz (onayı
   uygulama alır, motoru onaydan sonra çağırır); bir iş = bir transaction.
 
-* **Sütun özelliği değiştirme** (`sutun_ozelligi_degistir`, 2026-09-24).
-  SQLite sütunu yerinde değiştiremez; tablo, isteğin taşıdığı **tam yeni
-  tanımla** (bütün sütunlar, yeni özellikleriyle) SQLite'ın resmî tarifiyle
+* **Sütun özelliği değiştirme** (`sutun_ozelligi_degistir`). SQLite sütunu
+  yerinde değiştiremez; tablo, isteğin taşıdığı **tam yeni tanımla** (bütün
+  sütunlar, tablo düzeyi kısıtlar ve seçenekler) SQLite'ın resmî tarifiyle
   yeniden kurulur: geçici adla yeni tablo, satırların aynı adlı sütunlarla
   taşınması, eskinin silinmesi, geçicinin eski adı alması. Hepsi
   `foreign_keys=OFF` ile tek transaction'dadır
   (`Veritabani.islem_yabanci_anahtar_denetimsiz`); `commit` öncesi
   `PRAGMA foreign_key_check` çalışır, ihlal ya da herhangi bir adımın düşmesi
   (örn. yeni özelliğe uymayan satır) işi bütünüyle geri alır, eski tablo
-  eksiksiz kalır. **Emniyet kuralı:** bu iş yalnız mevcut sütunların
+  eksiksiz kalır. **Emniyet kuralları:** bu iş yalnız mevcut sütunların
   özelliğini değiştirir; sütun ekleyemez, silemez, adını ve sırasını
-  değiştiremez. Motor DDL'den önce `PRAGMA table_xinfo` ile mevcut sütun
-  adlarını okur, istekle sırasıyla birebir aynı değilse hiçbir şey yapmadan
-  `SutunlarUyusmuyor` verir. **Bağlı nesneler taşınır:** tablonun
-  indeksleri ile veritabanındaki bütün görünüm ve trigger'lar (hangisinin
-  tabloya değindiği ayrıştırmadan bilinemez) `sqlite_master`'daki saklı
-  oluşturma cümleleriyle işten önce silinir (önce trigger'lar, sonra
-  görünümler, oluşturma sırasının tersinden), tablo kurulduktan sonra aynı
-  sırayla aynı cümleyle geri açılır; kayıpsızdır. `AUTOINCREMENT` sayacı
-  (`sqlite_sequence`) işten önce okunur, sonra geri yazılır; silinmiş
-  kimlikler yeniden dağıtılmaz. **Sessiz kayıp yok:** tablo düzeyi kısıtlar (`UNIQUE (a, b)`,
-  `CHECK (...)`, `FOREIGN KEY ...`, `CONSTRAINT ...`), tablo seçenekleri
-  (`WITHOUT ROWID`, `STRICT`) ve üretilen sütunlar `CREATE TABLE` metninin
-  içindedir ve istek onları taşımaz; henüz desteklenmez, motor DDL'den önce
-  tespit edip `DesteklenmeyenYapi` ile reddeder. Tespit metni ayrıştırmaz:
-  en dış parantezdeki üst düzey parça sayısı sütun sayısından fazlaysa sütun
-  olmayan parça vardır. Motorun kendi açtığı tablolarda bunlar olmaz: bir
-  özellik parçası üst düzeyde virgül ya da noktalı virgül taşıyamaz,
-  parantez ve tırnakları dengeli olmalıdır (`ozelligi_dogrula`,
-  `GecersizOzellik`); `"TEXT, UNIQUE(a)"` gibi bir parça sütun tanımından
-  çıkamaz. Bu okumalar yalnız taşımak ve reddetmek içindir.
+  değiştiremez (DDL'den önce `PRAGMA table_xinfo` ile adlar okunur, birebir
+  aynı değilse `SutunlarUyusmuyor`). Tablo düzeyi kısıtlar ve seçenekler
+  `CREATE TABLE` metninin içindedir, ayrıştırılmadan geri yazılamaz; bu yüzden
+  istek onları da taşır ve sessiz kayıp iki denetimle önlenir: mevcut kısıt
+  sayısı istektekine eşit olmalı (kısıt ekleme/silme bu işin dışındadır,
+  içeriği değişebilir), seçenekler aynı olmalı (`KisitlarUyusmuyor`). Sayım
+  ayrıştırma değildir: en dış parantezdeki üst düzey parça sayısı eksi sütun
+  sayısı. **Üretilen sütunlar** kopyalanmaz, yeniden hesaplanır; hangi sütunun
+  üretildiğini geçici tablonun `table_xinfo`'su söyler, motor anahtar kelime
+  bilmez; sıradan sütun üretilen sütuna çevrilebilir. **Bağlı nesneler
+  taşınır:** tablonun indeksleri ile veritabanındaki bütün görünüm ve
+  trigger'lar (hangisinin tabloya değindiği ayrıştırmadan bilinemez)
+  `sqlite_master`'daki saklı oluşturma cümleleriyle işten önce silinir (önce
+  trigger'lar, sonra görünümler, oluşturma sırasının tersinden), tablo
+  kurulduktan sonra aynı sırayla aynı cümleyle geri açılır; kayıpsızdır.
+  `AUTOINCREMENT` sayacı (`sqlite_sequence`) işten önce okunur, sonra geri
+  yazılır; silinmiş kimlikler yeniden dağıtılmaz. Bu okumalar yalnız bu işe
+  özeldir.
 
 Henüz yok: uygulamanın onay penceresi, motoru Cowork'e açan MCP araçları,
 yeni mükerrerlik tasarımı.

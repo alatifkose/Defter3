@@ -1,4 +1,4 @@
-"""Motor: tablo oluşturur, sütun ekler, sütun özelliği değiştirir (karar 2026-09-24).
+"""Motor: tablo, sütun, sütun özelliği ve indeks işleri (karar 2026-09-24).
 
 Motor yalnız bir araçtır. Cowork belgeyi okur, ne gerektiğine karar verir ve
 motoru kullanır; **kullanıcı onayını uygulama alır**. Bu modül onay almaz ve
@@ -6,15 +6,28 @@ onay sormaz: motoru yalnız uygulama, onay alındıktan sonra çağırır.
 
 Motorun yaptıkları:
 
-* ``tablo_olustur``: verilen adla, verilen sütunlarla tablo açar.
+* ``tablo_olustur``: verilen adla, verilen sütunlar, tablo düzeyi kısıtlar ve
+  tablo seçenekleriyle tablo açar.
 * ``sutun_ekle``: var olan tabloya sütun ekler.
 * ``sutun_ozelligi_degistir``: var olan sütunların özelliğini değiştirir.
   SQLite sütunu yerinde değiştiremez; tablo, isteğin taşıdığı **tam** yeni
   tanımla yeniden kurulur (aşağıda "Sütun özelliği değiştirme").
-* Sütun özelliği, ekleme isteğinin içinde gider: ``Sutun.ozellikler`` sütun
-  adından sonra yazılacak parçalardır (ör. ``("TEXT", "NOT NULL")``,
-  ``("INTEGER", "REFERENCES kisiler(id)")``). **Özellik listesi koda gömülü
-  değildir;** istekte ne geldiyse o yazılır. Geçerliliğini SQLite belirler.
+* ``indeks_olustur`` / ``indeks_sil``: tabloya indeks açar, indeksi siler.
+
+İstek ne taşırsa o yazılır; **hiçbir özellik, kısıt ya da seçenek koda gömülü
+değildir**, geçerliliğini SQLite belirler:
+
+* Sütun özelliği: ``Sutun.ozellikler``, sütun adından sonra sırayla yazılan
+  parçalar (``("TEXT", "NOT NULL")``, ``("INTEGER", "REFERENCES kisiler(id)")``,
+  ``("INTEGER", "GENERATED ALWAYS AS (adet * fiyat) STORED")``).
+* Tablo düzeyi kısıt: ``kisitlar``, sütunlardan sonra yazılan parçalar
+  (``"PRIMARY KEY (a, b)"``, ``"UNIQUE (a, b)"``, ``"CHECK (a < b)"``,
+  ``"FOREIGN KEY (a) REFERENCES t(x)"``, ``"CONSTRAINT ad UNIQUE (a)"``).
+* Tablo seçeneği: ``secenekler``, kapanış parantezinden sonra yazılan parçalar
+  (``"WITHOUT ROWID"``, ``"STRICT"``).
+* İndeks: ``IndeksOlusturmaIstegi.sutunlar`` sütun adı ya da ifade parçaları
+  (``"ad_soyad"``, ``"lower(ad_soyad)"``, ``"tarih DESC"``), ``benzersiz``,
+  ``kosul`` (kısmi indeks ``WHERE`` ifadesi).
 
 Motorun yapmadıkları:
 
@@ -25,32 +38,49 @@ Motorun yapmadıkları:
 * Mevcut yapıyı okumaz: tablonun var olup olmadığına, sütunun daha önce
   eklenip eklenmediğine bakmaz. Uygun düşmeyen istek SQLite'ta düşer ve
   ``MotorHatasi`` olarak yükselir. (Tek istisna: sütun özelliği değiştirmenin
-  yalnız reddetmek için yaptığı ön denetim, aşağıda.)
+  emniyet denetimi ve kopyalama listesi, aşağıda.)
 * Bir şey göstermez ve karar vermez: dönüş değeri yoktur.
 * Kural koymaz. İki teknik sınır vardır, ikisi de SQL'e güvenle yazılabilmek
-  içindir: ad biçimi (``AD_BICIMI``: tablo ve sütun adları sade, Türkçe
-  karaktersiz; karar 2026-09-24) ve özellik parçası bütünlüğü
-  (``ozelligi_dogrula``: bir parça tek sütunun tanımında kalır; üst düzeyde
-  virgül ya da noktalı virgül taşıyamaz, parantez ve tırnakları dengeli
-  olmalıdır). İkincisi olmadan ``"TEXT, UNIQUE(a)"`` gibi bir parça sütun
-  tanımından çıkıp tablo düzeyi kısıt yazardı. Bunlar dışında tek istisna
-  sütun özelliği değiştirmenin emniyet kurallarıdır (aşağıda).
+  içindir: ad biçimi (``AD_BICIMI``: tablo, sütun ve indeks adları sade,
+  Türkçe karaktersiz; karar 2026-09-24) ve parça bütünlüğü
+  (``parcayi_dogrula``: bir parça kendi yerinde kalır; üst düzeyde virgül ya
+  da noktalı virgül taşıyamaz, parantez ve tırnakları dengeli olmalıdır,
+  boş olamaz). İkincisi olmadan ``"TEXT, UNIQUE(a)"`` gibi bir özellik parçası
+  sütun tanımından çıkıp tablo düzeyi kısıt yazardı. Bunlar dışında tek
+  istisna sütun özelliği değiştirmenin emniyet kurallarıdır (aşağıda).
 
 Sütun özelliği değiştirme (karar 2026-09-24):
 
 * İstek (``SutunOzelligiDegistirmeIstegi``) tablonun **yeni hâlini bütün
-  sütunlarıyla** taşır; motor tanımı okuyup türetmez. Adımlar SQLite'ın resmî
-  tablo yeniden kurma tarifidir: geçici adla yeni tablo, satırların aynı adlı
-  sütunlar üzerinden taşınması, eski tablonun silinmesi, geçici tablonun eski
-  adı alması. Hepsi ``foreign_keys=OFF`` ile tek transaction'dadır
+  sütunları, tablo düzeyi kısıtları ve seçenekleriyle** taşır; motor tanımı
+  okuyup türetmez. Adımlar SQLite'ın resmî tablo yeniden kurma tarifidir:
+  geçici adla yeni tablo, satırların aynı adlı sütunlar üzerinden taşınması,
+  eski tablonun silinmesi, geçici tablonun eski adı alması. Hepsi
+  ``foreign_keys=OFF`` ile tek transaction'dadır
   (``Veritabani.islem_yabanci_anahtar_denetimsiz``); ``commit`` öncesi
   ``PRAGMA foreign_key_check`` çalışır. Herhangi bir adım düşerse (örn. yeni
   özelliğe uymayan satır) iş bütünüyle geri alınır, eski tablo eksiksiz kalır.
-* **Emniyet kuralı:** bu iş yalnız mevcut sütunların özelliğini değiştirir;
-  sütun ekleyemez, silemez, adını ya da sırasını değiştiremez. Motor DDL'den
-  önce ``PRAGMA table_xinfo`` ile mevcut sütun adlarını okur; istekteki
-  adlarla sırasıyla birebir aynı değilse (eksik, fazla, farklı) hiçbir şey
-  yapmadan ``SutunlarUyusmuyor`` verir.
+* **Emniyet kuralı (sütunlar):** bu iş yalnız mevcut sütunların özelliğini
+  değiştirir; sütun ekleyemez, silemez, adını ya da sırasını değiştiremez.
+  Motor DDL'den önce ``PRAGMA table_xinfo`` ile mevcut sütun adlarını okur;
+  istekteki adlarla sırasıyla birebir aynı değilse (eksik, fazla, farklı)
+  hiçbir şey yapmadan ``SutunlarUyusmuyor`` verir.
+* **Emniyet kuralı (kısıt ve seçenekler):** tablo düzeyi kısıtlar ve tablo
+  seçenekleri ``CREATE TABLE`` metninin içindedir; ayrı nesne değildir ve
+  metin ayrıştırılmadan geri yazılamaz. Bu yüzden istek onları da taşır ve
+  sessiz kayıp iki denetimle önlenir: mevcut tablodaki tablo düzeyi kısıt
+  **sayısı** istekteki kısıt sayısına eşit olmalıdır (kısıt eklemek ve
+  silmek bu işin dışındadır; bir kısıtın içeriği sütun özelliği gibi
+  değişebilir) ve mevcut tablo seçenekleri istektekilerle (boşluk ve
+  büyük/küçük harf dışında) aynı olmalıdır (seçenek değiştirmek bu işin
+  dışındadır). Uymuyorsa hiçbir şey yapmadan ``KisitlarUyusmuyor``. Sayım
+  ayrıştırma değildir: metnin en dış parantezindeki üst düzey parça sayısı
+  eksi sütun sayısı; kuyruk ise kapanış parantezinden sonrası.
+* **Üretilen sütunlar:** değeri hesaplanan sütuna satır yazılamaz. Motor
+  geçici tabloyu kurduktan sonra iki tablonun ``PRAGMA table_xinfo``'sunu
+  okur ve yalnız iki tarafta da üretilmeyen sütunları kopyalar; hangi
+  sütunun üretildiğini SQLite söyler, motor anahtar kelime bilmez. Sıradan
+  sütunu üretilen sütuna çevirmek (ya da tersi) bu yüzden mümkündür.
 * **Bağlı nesneler taşınır:** tablonun indeksleri ve trigger'ları tabloyla
   birlikte silinir; tabloya değinen görünümler ve başka tabloların
   trigger'ları ise yeniden adlandırmayı düşürür (SQLite şemayı yeniden
@@ -69,33 +99,26 @@ Sütun özelliği değiştirme (karar 2026-09-24):
   kaydı da silinir, yeni tablonun sayacı taşınan en büyük kimlikten başlar
   ve silinmiş kimlikler yeniden dağıtılırdı. Motor sayacı işten önce okur,
   yeniden kurmadan sonra aynı değere geri yazar.
-* **Sessiz kayıp yok:** tablo düzeyi kısıtlar (``PRIMARY KEY (a, b)``,
-  ``UNIQUE (...)``, ``CHECK (...)``, ``FOREIGN KEY ...``, ``CONSTRAINT ...``)
-  ve tablo seçenekleri (``WITHOUT ROWID``, ``STRICT``) ``CREATE TABLE``
-  metninin içindedir; motor bu metni ayrıştırmadığı ve istek onları
-  taşımadığı için yeniden kurmada kaybolurlardı. Bunlar henüz desteklenmez;
-  motor DDL'den önce tespit eder ve ``DesteklenmeyenYapi`` ile reddeder.
-  Tespit ayrıştırma değildir: metnin en dış parantezindeki üst düzey parça
-  sayısı sütun sayısından fazlaysa sütun olmayan bir parça vardır.
-  Üretilen/gizli sütunlar da desteklenmez. Motorun kendi açtığı tablolarda
-  bunlar olmaz (``tablo_olustur`` yalnız sütun yazar).
-* Bu okumalar yalnız bu işe özeldir ve yalnız reddetmek içindir; motor
-  okuduğunu tanıma dönüştürmez, karar vermez, göstermez.
+* Bu okumalar yalnız bu işe özeldir; motor okuduğunu tanıma dönüştürmez,
+  karar vermez, göstermez.
 
 Bir iş = bir transaction (``Veritabani.islem``): düşen istek bütünüyle geri
 alınır. DDL metni ``exec_driver_sql`` ile sürücüye olduğu gibi verilir;
-özellik parçalarının içindeki ``:`` bağlama parametresi sanılmaz. Sürücü tek
-seferde tek ifade çalıştırır.
+parçaların içindeki ``:`` bağlama parametresi sanılmaz. Sürücü tek seferde
+tek ifade çalıştırır.
 
-``tablo_olusturma_sql``, ``sutun_ekleme_sql`` ve
-``sutun_ozelligi_degistirme_sql`` veritabanına dokunmaz; uygulama onay
-penceresinde ne yapılacağını göstermek için kullanabilir.
+``tablo_olusturma_sql``, ``sutun_ekleme_sql``, ``sutun_ozelligi_degistirme_sql``,
+``indeks_olusturma_sql`` ve ``indeks_silme_sql`` veritabanına dokunmaz;
+uygulama onay penceresinde ne yapılacağını göstermek için kullanabilir.
+Yeniden kurmanın kopyalama adımı önizlemede bütün sütunları gösterir;
+üretilen sütunlar iş anında SQLite'ın bildirdiğine göre dışarıda kalır.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from itertools import pairwise
 
 from sqlalchemy import Connection
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
@@ -103,7 +126,10 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from defteruc.cekirdek.veritabani import Veritabani, YabanciAnahtarIhlali
 
 AD_BICIMI = re.compile(r"^[a-z][a-z0-9_]*$")
-"""Tablo ve sütun adı: küçük ASCII harfle başlar; harf, rakam, alt çizgi."""
+"""Tablo, sütun ve indeks adı: küçük ASCII harfle başlar; harf, rakam, alt çizgi."""
+
+GECICI_AD_EKI = "__yeniden_kurma"
+"""Yeniden kurma sırasında yeni tablonun geçici adı: ``<tablo>__yeniden_kurma``."""
 
 
 class MotorHatasi(Exception):
@@ -111,13 +137,13 @@ class MotorHatasi(Exception):
 
 
 class GecersizAd(MotorHatasi, ValueError):
-    """Tablo ya da sütun adı ``AD_BICIMI``'ne uymuyor."""
+    """Tablo, sütun ya da indeks adı ``AD_BICIMI``'ne uymuyor."""
 
 
-class GecersizOzellik(MotorHatasi, ValueError):
-    """Özellik parçası tek sütunun tanımında kalmıyor (üst düzeyde virgül ya da
-    noktalı virgül, dengesiz parantez, kapanmayan tırnak/yorum) ya da boş.
-    Veritabanına dokunulmadı."""
+class GecersizParca(MotorHatasi, ValueError):
+    """Parça (özellik, kısıt, seçenek, indeks sütunu, koşul) kendi yerinde
+    kalmıyor: üst düzeyde virgül ya da noktalı virgül, dengesiz parantez,
+    kapanmayan tırnak/yorum ya da boş. Veritabanına dokunulmadı."""
 
 
 class SutunlarUyusmuyor(MotorHatasi):
@@ -125,10 +151,10 @@ class SutunlarUyusmuyor(MotorHatasi):
     sırasıyla birebir aynı değil; veritabanına dokunulmadı."""
 
 
-class DesteklenmeyenYapi(MotorHatasi):
-    """Sütun özelliği değiştirme: tabloda yeniden kurmanın taşıyamayacağı bir
-    yapı var (tablo düzeyi kısıt, tablo seçeneği, gizli sütun); sessizce
-    kaybetmemek için reddedildi, veritabanına dokunulmadı."""
+class KisitlarUyusmuyor(MotorHatasi):
+    """Sütun özelliği değiştirme: istekteki tablo düzeyi kısıt sayısı ya da tablo
+    seçenekleri mevcut tablonunkilerle aynı değil; sessiz kayıp olmasın diye
+    reddedildi, veritabanına dokunulmadı."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,8 +172,13 @@ class Sutun:
 
 @dataclass(frozen=True, slots=True)
 class TabloOlusturmaIstegi:
+    """``kisitlar``: sütunlardan sonra yazılan tablo düzeyi kısıt parçaları.
+    ``secenekler``: kapanış parantezinden sonra yazılan tablo seçenekleri."""
+
     tablo: str
     sutunlar: tuple[Sutun, ...]
+    kisitlar: tuple[str, ...] = ()
+    secenekler: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,15 +189,34 @@ class SutunEklemeIstegi:
 
 @dataclass(frozen=True, slots=True)
 class SutunOzelligiDegistirmeIstegi:
-    """Tablonun yeni hâli: bütün sütunlar, mevcutla aynı ad ve sırada, yeni
-    özellikleriyle."""
+    """Tablonun yeni hâli: bütün sütunlar (mevcutla aynı ad ve sırada, yeni
+    özellikleriyle), tablo düzeyi kısıtlar (mevcutla aynı sayıda) ve tablo
+    seçenekleri (mevcutla aynı)."""
 
     tablo: str
     sutunlar: tuple[Sutun, ...]
+    kisitlar: tuple[str, ...] = ()
+    secenekler: tuple[str, ...] = ()
 
 
-GECICI_AD_EKI = "__yeniden_kurma"
-"""Yeniden kurma sırasında yeni tablonun geçici adı: ``<tablo>__yeniden_kurma``."""
+@dataclass(frozen=True, slots=True)
+class IndeksOlusturmaIstegi:
+    """``sutunlar``: sütun adı ya da ifade parçaları, olduğu gibi yazılır.
+    ``benzersiz``: ``UNIQUE``. ``kosul``: kısmi indeks ``WHERE`` ifadesi, boşsa yok."""
+
+    indeks: str
+    tablo: str
+    sutunlar: tuple[str, ...]
+    benzersiz: bool = False
+    kosul: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class IndeksSilmeIstegi:
+    indeks: str
+
+
+# --- ad ve parça sınırı: SQL'e güvenle yazılabilmek için ---------------------------
 
 
 def adi_dogrula(ad: str, ne: str) -> str:
@@ -179,64 +229,120 @@ def adi_dogrula(ad: str, ne: str) -> str:
     return ad
 
 
-def ozelligi_dogrula(parca: str) -> str:
-    """Özellik parçasının tek sütunun tanımında kaldığını denetler; kalmıyorsa
-    ``GecersizOzellik``. Parçanın anlamına bakılmaz (onu SQLite belirler);
-    yalnız sınırı aşıp aşmadığına bakılır: üst düzeyde ``,`` ya da ``;`` yok,
-    parantezler dengeli, tırnak ve yorumlar kapalı, boş değil."""
+def parcayi_dogrula(parca: str, ne: str = "parça") -> str:
+    """Parçanın kendi yerinde kaldığını denetler; kalmıyorsa ``GecersizParca``.
+    Parçanın anlamına bakılmaz (onu SQLite belirler); yalnız sınırı aşıp
+    aşmadığına bakılır: üst düzeyde ``,`` ya da ``;`` yok, parantezler dengeli,
+    tırnak ve yorumlar kapalı, boş değil."""
     if not parca.strip():
-        raise GecersizOzellik("özellik parçası boş olamaz")
+        raise GecersizParca(f"{ne} boş olamaz")
     try:
         karakterler, son_derinlik = _acik_karakterler(parca)
     except ValueError as hata:
-        raise GecersizOzellik(f"özellik parçası: {hata}: {parca!r}") from None
+        raise GecersizParca(f"{ne}: {hata}: {parca!r}") from None
     for _, c, derinlik in karakterler:
         if derinlik == 0 and c in ",;":
-            raise GecersizOzellik(
-                f"özellik parçası tek sütunun tanımında kalmalı; üst düzeyde "
-                f"{c!r} olamaz: {parca!r}"
+            raise GecersizParca(
+                f"{ne} kendi yerinde kalmalı; üst düzeyde {c!r} olamaz: {parca!r}"
             )
         if c == ")" and derinlik == 0:
-            raise GecersizOzellik(f"özellik parçasında parantez dengesiz: {parca!r}")
+            raise GecersizParca(f"{ne}: parantez dengesiz: {parca!r}")
     if son_derinlik != 0:
-        raise GecersizOzellik(f"özellik parçasında parantez dengesiz: {parca!r}")
+        raise GecersizParca(f"{ne}: parantez dengesiz: {parca!r}")
     return parca
+
+
+def _tirnakla(ad: str) -> str:
+    return f'"{ad}"'
+
+
+# --- SQL üretimi: veritabanına dokunmaz -------------------------------------------
 
 
 def _sutun_tanimi(sutun: Sutun) -> str:
     parcalar = [
-        f'"{adi_dogrula(sutun.ad, "sütun")}"',
-        *(ozelligi_dogrula(p) for p in sutun.ozellikler),
+        _tirnakla(adi_dogrula(sutun.ad, "sütun")),
+        *(parcayi_dogrula(p, "özellik parçası") for p in sutun.ozellikler),
     ]
     return " ".join(parcalar)
+
+
+def _tablo_tanimi(
+    tablo: str,
+    sutunlar: tuple[Sutun, ...],
+    kisitlar: tuple[str, ...],
+    secenekler: tuple[str, ...],
+) -> str:
+    govde = ", ".join(
+        (
+            *(_sutun_tanimi(s) for s in sutunlar),
+            *(parcayi_dogrula(k, "tablo kısıtı") for k in kisitlar),
+        )
+    )
+    kuyruk = ", ".join(parcayi_dogrula(s, "tablo seçeneği") for s in secenekler)
+    return f"CREATE TABLE {_tirnakla(tablo)} ({govde})" + (
+        f" {kuyruk}" if kuyruk else ""
+    )
 
 
 def tablo_olusturma_sql(istek: TabloOlusturmaIstegi) -> str:
     """İsteğin ``CREATE TABLE`` metni; veritabanına dokunmaz."""
     tablo = adi_dogrula(istek.tablo, "tablo")
-    govde = ", ".join(_sutun_tanimi(s) for s in istek.sutunlar)
-    return f'CREATE TABLE "{tablo}" ({govde})'
+    return _tablo_tanimi(tablo, istek.sutunlar, istek.kisitlar, istek.secenekler)
 
 
 def sutun_ekleme_sql(istek: SutunEklemeIstegi) -> str:
     """İsteğin ``ALTER TABLE ... ADD COLUMN`` metni; veritabanına dokunmaz."""
     tablo = adi_dogrula(istek.tablo, "tablo")
-    return f'ALTER TABLE "{tablo}" ADD COLUMN {_sutun_tanimi(istek.sutun)}'
+    return f"ALTER TABLE {_tirnakla(tablo)} ADD COLUMN {_sutun_tanimi(istek.sutun)}"
+
+
+def _kopyalama_sql(gecici: str, tablo: str, adlar: tuple[str, ...]) -> str:
+    liste = ", ".join(_tirnakla(a) for a in adlar)
+    hedef, kaynak = _tirnakla(gecici), _tirnakla(tablo)
+    return f"INSERT INTO {hedef} ({liste}) SELECT {liste} FROM {kaynak}"
 
 
 def sutun_ozelligi_degistirme_sql(
     istek: SutunOzelligiDegistirmeIstegi,
 ) -> tuple[str, ...]:
-    """Yeniden kurma adımlarının DDL metinleri, sırayla; veritabanına dokunmaz."""
+    """Yeniden kurma adımlarının DDL metinleri, sırayla; veritabanına dokunmaz.
+    Kopyalama adımı bütün sütunları gösterir; iş anında üretilen sütunlar
+    (SQLite'ın bildirdiği) dışarıda kalır."""
     tablo = adi_dogrula(istek.tablo, "tablo")
     gecici = tablo + GECICI_AD_EKI
-    adlar = ", ".join(f'"{adi_dogrula(s.ad, "sütun")}"' for s in istek.sutunlar)
+    adlar = tuple(adi_dogrula(s.ad, "sütun") for s in istek.sutunlar)
     return (
-        tablo_olusturma_sql(TabloOlusturmaIstegi(gecici, istek.sutunlar)),
-        f'INSERT INTO "{gecici}" ({adlar}) SELECT {adlar} FROM "{tablo}"',
-        f'DROP TABLE "{tablo}"',
-        f'ALTER TABLE "{gecici}" RENAME TO "{tablo}"',
+        _tablo_tanimi(gecici, istek.sutunlar, istek.kisitlar, istek.secenekler),
+        _kopyalama_sql(gecici, tablo, adlar),
+        f"DROP TABLE {_tirnakla(tablo)}",
+        f"ALTER TABLE {_tirnakla(gecici)} RENAME TO {_tirnakla(tablo)}",
     )
+
+
+def indeks_olusturma_sql(istek: IndeksOlusturmaIstegi) -> str:
+    """İsteğin ``CREATE [UNIQUE] INDEX`` metni; veritabanına dokunmaz."""
+    indeks = adi_dogrula(istek.indeks, "indeks")
+    tablo = adi_dogrula(istek.tablo, "tablo")
+    if not istek.sutunlar:
+        raise GecersizParca("indeksin en az bir sütunu ya da ifadesi olmalı")
+    sutunlar = ", ".join(parcayi_dogrula(s, "indeks sütunu") for s in istek.sutunlar)
+    benzersiz = "UNIQUE " if istek.benzersiz else ""
+    kosul = (
+        f" WHERE {parcayi_dogrula(istek.kosul, 'indeks koşulu')}" if istek.kosul else ""
+    )
+    return (
+        f"CREATE {benzersiz}INDEX {_tirnakla(indeks)} ON {_tirnakla(tablo)} "
+        f"({sutunlar}){kosul}"
+    )
+
+
+def indeks_silme_sql(istek: IndeksSilmeIstegi) -> str:
+    """İsteğin ``DROP INDEX`` metni; veritabanına dokunmaz."""
+    return f"DROP INDEX {_tirnakla(adi_dogrula(istek.indeks, 'indeks'))}"
+
+
+# --- işler: her biri tek transaction -------------------------------------------------
 
 
 def tablo_olustur(veritabani: Veritabani, istek: TabloOlusturmaIstegi) -> None:
@@ -249,47 +355,81 @@ def sutun_ekle(veritabani: Veritabani, istek: SutunEklemeIstegi) -> None:
     _uygula(veritabani, sutun_ekleme_sql(istek))
 
 
+def indeks_olustur(veritabani: Veritabani, istek: IndeksOlusturmaIstegi) -> None:
+    """İndeks açar; tek transaction."""
+    _uygula(veritabani, indeks_olusturma_sql(istek))
+
+
+def indeks_sil(veritabani: Veritabani, istek: IndeksSilmeIstegi) -> None:
+    """İndeksi siler; tek transaction."""
+    _uygula(veritabani, indeks_silme_sql(istek))
+
+
 def sutun_ozelligi_degistir(
     veritabani: Veritabani, istek: SutunOzelligiDegistirmeIstegi
 ) -> None:
     """Tabloyu isteğin tanımıyla yeniden kurar; tek transaction, ``foreign_keys=OFF``.
 
-    Önce ad biçimi (dokunmadan), sonra transaction içinde ama DDL'den önce
-    emniyet denetimleri: sütun adları birebir aynı mı (``SutunlarUyusmuyor``),
-    taşınamayacak yapı var mı (``DesteklenmeyenYapi``). Denetimler geçmezse
-    hiçbir DDL çalışmaz. Sonra tabloya bağlı görünüm ve trigger'lar silinir,
-    tablo yeniden kurulur, indeks/trigger/görünümler saklı oluşturma
-    cümleleriyle geri açılır. Düşen iş bütünüyle geri alınır; eski tablo kalır.
+    Önce ad ve parça sınırı (dokunmadan), sonra transaction içinde ama DDL'den
+    önce emniyet denetimleri: sütun adları birebir aynı mı
+    (``SutunlarUyusmuyor``), kısıt sayısı ve seçenekler aynı mı
+    (``KisitlarUyusmuyor``). Denetimler geçmezse hiçbir DDL çalışmaz. Sonra
+    görünüm ve trigger'lar silinir, geçici tablo kurulur, üretilmeyen sütunlar
+    kopyalanır, eski tablo silinir, geçici tablo eski adı alır,
+    indeks/trigger/görünümler saklı cümleleriyle geri açılır, sayaç geri
+    yazılır. Düşen iş bütünüyle geri alınır; eski tablo eksiksiz kalır.
     """
-    adimlar = sutun_ozelligi_degistirme_sql(istek)
+    kurma, _, silme, adlandirma = sutun_ozelligi_degistirme_sql(istek)
+    tablo, gecici = istek.tablo, istek.tablo + GECICI_AD_EKI
     try:
         with veritabani.islem_yabanci_anahtar_denetimsiz() as oturum:
             baglanti = oturum.connection()
-            _yeniden_kurma_on_denetimi(baglanti, istek)
-            bagli = _bagli_nesneler(baglanti, istek.tablo)
-            sayac = _sayaci_oku(baglanti, istek.tablo)
-            for ddl in (*bagli.once_silinecek, *adimlar, *bagli.sonra_kurulacak):
+            eski_sutunlar = _yeniden_kurma_on_denetimi(baglanti, istek)
+            bagli = _bagli_nesneler(baglanti, tablo)
+            sayac = _sayaci_oku(baglanti, tablo)
+
+            for ddl in bagli.once_silinecek:
+                baglanti.exec_driver_sql(ddl)
+            baglanti.exec_driver_sql(kurma)
+            yeni_sutunlar = _sutun_bilgisi(baglanti, gecici)
+            kopyalanacak = tuple(
+                ad
+                for ad, uretilen in eski_sutunlar.items()
+                if not uretilen and not yeni_sutunlar.get(ad, False)
+            )
+            baglanti.exec_driver_sql(_kopyalama_sql(gecici, tablo, kopyalanacak))
+            baglanti.exec_driver_sql(silme)
+            baglanti.exec_driver_sql(adlandirma)
+            for ddl in bagli.sonra_kurulacak:
                 baglanti.exec_driver_sql(ddl)
             if sayac is not None:
-                _sayaci_yaz(baglanti, istek.tablo, sayac)
+                _sayaci_yaz(baglanti, tablo, sayac)
     except YabanciAnahtarIhlali as hata:
         raise MotorHatasi(f"istek uygulanamadı, geri alındı: {hata}") from hata
     except SQLAlchemyError as hata:
         raise _motor_hatasi(hata) from hata
 
 
+# --- yeniden kurmanın okumaları: yalnız bu işe özel ---------------------------------
+
+
+def _sutun_bilgisi(baglanti: Connection, tablo: str) -> dict[str, bool]:
+    """``PRAGMA table_xinfo``: sütun adı -> üretilen mi (``hidden != 0``),
+    tablo sırasıyla. Tablo yoksa boş."""
+    satirlar = baglanti.exec_driver_sql(f"PRAGMA table_xinfo({_tirnakla(tablo)})").all()
+    return {str(s[1]): int(s[6]) != 0 for s in satirlar}
+
+
 def _yeniden_kurma_on_denetimi(
     baglanti: Connection, istek: SutunOzelligiDegistirmeIstegi
-) -> None:
+) -> dict[str, bool]:
+    """Emniyet denetimleri; geçerse mevcut sütun bilgisini döner."""
     tablo = istek.tablo
-    xinfo = baglanti.exec_driver_sql(f'PRAGMA table_xinfo("{tablo}")').all()
-    if not xinfo:
+    mevcut_sutunlar = _sutun_bilgisi(baglanti, tablo)
+    if not mevcut_sutunlar:
         raise MotorHatasi(f"tablo yok: {tablo}")
-    gizli = [str(s[1]) for s in xinfo if int(s[6]) != 0]
-    if gizli:
-        raise DesteklenmeyenYapi(f"{tablo}: üretilen/gizli sütun: {gizli}")
 
-    mevcut = tuple(str(s[1]) for s in xinfo)
+    mevcut = tuple(mevcut_sutunlar)
     istenen = tuple(s.ad for s in istek.sutunlar)
     if mevcut != istenen:
         eksik = [a for a in mevcut if a not in istenen]
@@ -301,20 +441,34 @@ def _yeniden_kurma_on_denetimi(
             "silme ve yeniden adlandırma bu işin dışındadır."
         )
 
-    tanim = baglanti.exec_driver_sql(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (tablo,)
-    ).scalar_one()
+    tanim = str(
+        baglanti.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (tablo,)
+        ).scalar_one()
+    )
     try:
-        parca_sayisi, kuyruk = _ust_duzey_parca_sayisi(str(tanim))
+        parca_sayisi, kuyruk = _ust_duzey_parca_sayisi(tanim)
     except ValueError as hata:
-        raise DesteklenmeyenYapi(f"{tablo}: tanım metni okunamadı: {hata}") from None
-    if parca_sayisi != len(mevcut):
-        raise DesteklenmeyenYapi(
-            f"{tablo}: tablo düzeyi kısıt var (sütun olmayan "
-            f"{parca_sayisi - len(mevcut)} parça); yeniden kurma taşımaz"
+        raise MotorHatasi(f"{tablo}: tanım metni okunamadı: {hata}") from None
+    mevcut_kisit = parca_sayisi - len(mevcut)
+    if mevcut_kisit != len(istek.kisitlar):
+        raise KisitlarUyusmuyor(
+            f"{tablo}: tablo düzeyi kısıt sayısı aynı olmalı; mevcut "
+            f"{mevcut_kisit}, istenen {len(istek.kisitlar)}. Kısıt ekleme ve "
+            "silme bu işin dışındadır."
         )
-    if kuyruk:
-        raise DesteklenmeyenYapi(f"{tablo}: tablo seçeneği var: {kuyruk!r}")
+    mevcut_secenek = sorted(_sadelestir(s) for s in _ust_duzey_parcalar(kuyruk))
+    istenen_secenek = sorted(_sadelestir(s) for s in istek.secenekler)
+    if mevcut_secenek != istenen_secenek:
+        raise KisitlarUyusmuyor(
+            f"{tablo}: tablo seçenekleri aynı olmalı; mevcut {mevcut_secenek}, "
+            f"istenen {istenen_secenek}. Seçenek değiştirme bu işin dışındadır."
+        )
+    return mevcut_sutunlar
+
+
+def _sadelestir(parca: str) -> str:
+    return " ".join(parca.split()).casefold()
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,6 +534,9 @@ def _sayaci_yaz(baglanti: Connection, tablo: str, sayac: int) -> None:
         )
 
 
+# --- tarayıcı: ayrıştırma değil, tırnak/yorum/parantez izleme -----------------------
+
+
 def _acik_karakterler(sql: str) -> tuple[list[tuple[int, str, int]], int]:
     """Tırnak ve yorum dışındaki karakterler ``(konum, karakter, derinlik)``
     olarak, ve bitişteki parantez derinliği. Tırnaklı bölüm tek bir ``"``
@@ -443,6 +600,19 @@ def _ust_duzey_parca_sayisi(sql: str) -> tuple[int, str]:
         elif not c.isspace():
             govde_dolu = True
     return 0, ""
+
+
+def _ust_duzey_parcalar(metin: str) -> list[str]:
+    """Metni üst düzey virgüllerden böler (tırnak ve parantez içi hariç); boş
+    parçalar atılır. Tablo seçenekleri kuyruğu için."""
+    karakterler, _ = _acik_karakterler(metin)
+    kesimler = [k for k, c, d in karakterler if d == 0 and c == ","]
+    sinirlar = [-1, *kesimler, len(metin)]
+    parcalar = [metin[a + 1 : b] for a, b in pairwise(sinirlar)]
+    return [p.strip() for p in parcalar if p.strip()]
+
+
+# --- ortak uygulama ----------------------------------------------------------------
 
 
 def _uygula(veritabani: Veritabani, ddl: str) -> None:

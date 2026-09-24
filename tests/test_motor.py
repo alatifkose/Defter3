@@ -434,6 +434,7 @@ def test_olmayan_tablo_reddedilir(veritabani: vt.Veritabani) -> None:
 BAGLI_NESNELER = (
     "CREATE INDEX ix_kisiler_ad ON kisiler (ad_soyad)",
     "CREATE UNIQUE INDEX ux_kisiler_id_ad ON kisiler (id, ad_soyad)",
+    "CREATE INDEX ix_kisiler_ifade ON kisiler (lower(ad_soyad)) WHERE id > 0",
     "CREATE TRIGGER tr_kisiler AFTER INSERT ON kisiler BEGIN "
     "UPDATE kisiler SET not_metni = 'yeni' WHERE id = NEW.id; END",
     "CREATE TABLE diger (id INTEGER)",
@@ -471,6 +472,7 @@ def test_indeks_trigger_ve_gorunumler_ayni_cumleyle_geri_acilir(
     assert {n[1] for n in oncesi} == {
         "ix_kisiler_ad",
         "ux_kisiler_id_ad",
+        "ix_kisiler_ifade",
         "tr_kisiler",
         "tr_diger",
         "gorunum",
@@ -532,67 +534,237 @@ def test_baska_tablonun_nesneleri_oldugu_gibi_kalir(veritabani: vt.Veritabani) -
     assert _nesneler(veritabani) == oncesi
 
 
-# --- sessiz kayıp yok: taşınamayan yapı tespit edilince reddedilir ------------------
+# --- tablo düzeyi kısıt, tablo seçeneği, üretilen sütun: istek taşır, motor yazar
+
+
+HESAPLAR = m.TabloOlusturmaIstegi(
+    tablo="hesaplar",
+    sutunlar=(
+        m.Sutun("banka_id", ("INTEGER", "NOT NULL")),
+        m.Sutun("hesap_no", ("TEXT", "NOT NULL")),
+        m.Sutun("adet", ("INTEGER", "NOT NULL", "DEFAULT 1")),
+        m.Sutun("fiyat", ("REAL",)),
+        m.Sutun("tutar", ("REAL", "GENERATED ALWAYS AS (adet * fiyat) VIRTUAL")),
+    ),
+    kisitlar=("PRIMARY KEY (banka_id, hesap_no)", "CHECK (adet > 0)"),
+    secenekler=("WITHOUT ROWID", "STRICT"),
+)
+
+HESAPLAR_SQL = (
+    'CREATE TABLE "hesaplar" ("banka_id" INTEGER NOT NULL, "hesap_no" TEXT NOT NULL, '
+    '"adet" INTEGER NOT NULL DEFAULT 1, "fiyat" REAL, '
+    '"tutar" REAL GENERATED ALWAYS AS (adet * fiyat) VIRTUAL, '
+    "PRIMARY KEY (banka_id, hesap_no), CHECK (adet > 0)) WITHOUT ROWID, STRICT"
+)
+
+
+def _hesaplari_doldur(v: vt.Veritabani) -> None:
+    m.tablo_olustur(v, HESAPLAR)
+    with v.islem() as oturum:
+        oturum.execute(
+            text(
+                "INSERT INTO hesaplar (banka_id, hesap_no, adet, fiyat) VALUES "
+                "(1, 'A', 2, 10.0), (1, 'B', 3, NULL)"
+            )
+        )
+
+
+def _tanim(v: vt.Veritabani, tablo: str) -> str:
+    with v.islem() as oturum:
+        return str(
+            oturum.execute(
+                text("SELECT sql FROM sqlite_master WHERE name = :ad"), {"ad": tablo}
+            ).scalar_one()
+        )
+
+
+def test_tablo_olusturma_sql_kisit_ve_secenekleri_oldugu_gibi_yazar() -> None:
+    assert m.tablo_olusturma_sql(HESAPLAR) == HESAPLAR_SQL
+
+
+def test_kisit_secenek_ve_uretilen_sutunlu_tablo_kurulur(
+    veritabani: vt.Veritabani,
+) -> None:
+    _hesaplari_doldur(veritabani)
+
+    assert _tanim(veritabani, "hesaplar") == HESAPLAR_SQL
+    assert _satirlar(veritabani, "SELECT hesap_no, tutar FROM hesaplar ORDER BY 1") == [
+        ("A", 20.0),
+        ("B", None),
+    ]
+    with pytest.raises(IntegrityError, match="CHECK"):  # kısıt gerçekten uygulanıyor
+        with veritabani.islem() as oturum:
+            oturum.execute(
+                text(
+                    "INSERT INTO hesaplar (banka_id, hesap_no, adet) VALUES (2, 'C', 0)"
+                )
+            )
+
+
+def test_kisit_secenek_ve_uretilen_sutun_yeniden_kurmada_korunur(
+    veritabani: vt.Veritabani,
+) -> None:
+    """İstek kısıt ve seçenekleri yeniden taşır; üretilen sütun kopyalanmaz,
+    yeniden hesaplanır. fiyat artık NOT NULL DEFAULT 0 (satırlar uyumlu değil:
+    NULL var) yerine tutar'ın formülü değişiyor."""
+    _hesaplari_doldur(veritabani)
+
+    m.sutun_ozelligi_degistir(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "hesaplar",
+            (
+                m.Sutun("banka_id", ("INTEGER", "NOT NULL")),
+                m.Sutun("hesap_no", ("TEXT", "NOT NULL", "COLLATE NOCASE")),
+                m.Sutun("adet", ("INTEGER", "NOT NULL", "DEFAULT 1")),
+                m.Sutun("fiyat", ("REAL", "DEFAULT 0.0")),
+                m.Sutun(
+                    "tutar", ("REAL", "GENERATED ALWAYS AS (adet * fiyat * 2) STORED")
+                ),
+            ),
+            kisitlar=HESAPLAR.kisitlar,
+            secenekler=HESAPLAR.secenekler,
+        ),
+    )
+
+    assert _tanim(veritabani, "hesaplar") == (
+        'CREATE TABLE "hesaplar" ("banka_id" INTEGER NOT NULL, '
+        '"hesap_no" TEXT NOT NULL COLLATE NOCASE, "adet" INTEGER NOT NULL DEFAULT 1, '
+        '"fiyat" REAL DEFAULT 0.0, '
+        '"tutar" REAL GENERATED ALWAYS AS (adet * fiyat * 2) STORED, '
+        "PRIMARY KEY (banka_id, hesap_no), CHECK (adet > 0)) WITHOUT ROWID, STRICT"
+    )
+    assert _satirlar(
+        veritabani, "SELECT hesap_no, adet, fiyat, tutar FROM hesaplar ORDER BY 1"
+    ) == [("A", 2, 10.0, 40.0), ("B", 3, None, None)]
+
+
+def test_kisit_icerigi_degisebilir_sayisi_degisemez(veritabani: vt.Veritabani) -> None:
+    _hesaplari_doldur(veritabani)
+    sutunlar = HESAPLAR.sutunlar
+
+    # içerik değişikliği: CHECK (adet > 0) -> CHECK (adet >= 1)
+    m.sutun_ozelligi_degistir(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "hesaplar",
+            sutunlar,
+            kisitlar=("PRIMARY KEY (banka_id, hesap_no)", "CHECK (adet >= 1)"),
+            secenekler=HESAPLAR.secenekler,
+        ),
+    )
+    assert "CHECK (adet >= 1)" in _tanim(veritabani, "hesaplar")
+    tanim = _tanim(veritabani, "hesaplar")
+
+    # sayı değişikliği: bir kısıt eksik ya da fazla -> dokunmadan ret
+    for kisitlar in (
+        ("PRIMARY KEY (banka_id, hesap_no)",),
+        ("PRIMARY KEY (banka_id, hesap_no)", "CHECK (adet >= 1)", "UNIQUE (hesap_no)"),
+    ):
+        with pytest.raises(m.KisitlarUyusmuyor, match="kısıt sayısı"):
+            m.sutun_ozelligi_degistir(
+                veritabani,
+                m.SutunOzelligiDegistirmeIstegi(
+                    "hesaplar", sutunlar, kisitlar, HESAPLAR.secenekler
+                ),
+            )
+        assert _tanim(veritabani, "hesaplar") == tanim
 
 
 @pytest.mark.parametrize(
-    ("tanim", "sutunlar", "neden"),
-    [
-        (
-            "CREATE TABLE t (a INTEGER, b TEXT, UNIQUE (a, b))",
-            (m.Sutun("a"), m.Sutun("b")),
-            "tablo düzeyi kısıt",
-        ),
-        (
-            "CREATE TABLE t (a INTEGER, b TEXT, CHECK (a > 0 AND b IN ('x', 'y')))",
-            (m.Sutun("a"), m.Sutun("b")),
-            "tablo düzeyi kısıt",
-        ),
-        (
-            "CREATE TABLE t (a INTEGER, b TEXT, PRIMARY KEY (a, b))",
-            (m.Sutun("a"), m.Sutun("b")),
-            "tablo düzeyi kısıt",
-        ),
-        (
-            "CREATE TABLE t (a INTEGER, b TEXT, "
-            "CONSTRAINT fk FOREIGN KEY (a) REFERENCES kisiler (id))",
-            (m.Sutun("a"), m.Sutun("b")),
-            "tablo düzeyi kısıt",
-        ),
-        (
-            "CREATE TABLE t (a INTEGER PRIMARY KEY, b TEXT) WITHOUT ROWID",
-            (m.Sutun("a"), m.Sutun("b")),
-            "tablo seçeneği",
-        ),
-        (
-            "CREATE TABLE t (a INTEGER, b TEXT) STRICT",
-            (m.Sutun("a"), m.Sutun("b")),
-            "tablo seçeneği",
-        ),
-        (
-            "CREATE TABLE t (a INTEGER, b INTEGER GENERATED ALWAYS AS (a * 2) VIRTUAL)",
-            (m.Sutun("a"), m.Sutun("b")),
-            "gizli sütun",
-        ),
-    ],
+    "secenekler",
+    [(), ("STRICT",), ("WITHOUT ROWID",), ("WITHOUT ROWID", "STRICT", "STRICT")],
 )
-def test_tablo_duzeyi_kisit_secenek_ve_gizli_sutun_reddedilir(
-    veritabani: vt.Veritabani, tanim: str, sutunlar: tuple[m.Sutun, ...], neden: str
+def test_secenekler_ayni_degilse_dokunmadan_reddeder(
+    veritabani: vt.Veritabani, secenekler: tuple[str, ...]
 ) -> None:
-    _kisileri_doldur(veritabani)
-    with veritabani.islem() as oturum:
-        oturum.execute(text(tanim))
+    _hesaplari_doldur(veritabani)
 
-    with pytest.raises(m.DesteklenmeyenYapi, match=neden):
+    with pytest.raises(m.KisitlarUyusmuyor, match="seçenekleri"):
         m.sutun_ozelligi_degistir(
-            veritabani, m.SutunOzelligiDegistirmeIstegi("t", sutunlar)
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "hesaplar", HESAPLAR.sutunlar, HESAPLAR.kisitlar, secenekler
+            ),
         )
 
+    assert _tanim(veritabani, "hesaplar") == HESAPLAR_SQL
+
+
+def test_secenek_sirasi_bosluk_ve_harf_boyutu_onemsiz(
+    veritabani: vt.Veritabani,
+) -> None:
+    _hesaplari_doldur(veritabani)
+
+    m.sutun_ozelligi_degistir(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "hesaplar",
+            HESAPLAR.sutunlar,
+            HESAPLAR.kisitlar,
+            ("strict", "without  rowid"),
+        ),
+    )
+
+    assert _tanim(veritabani, "hesaplar").endswith(") strict, without  rowid")
+
+
+def test_siradan_sutun_uretilen_sutuna_cevrilebilir(veritabani: vt.Veritabani) -> None:
+    """Kopyalama listesini SQLite belirler: iki tarafta da üretilmeyen sütunlar."""
+    _kisileri_doldur(veritabani)
+
+    m.sutun_ozelligi_degistir(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "kisiler",
+            (
+                m.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+                m.Sutun("ad_soyad", ("TEXT", "NOT NULL")),
+                m.Sutun("dogum_tarihi", ("TEXT",)),
+                m.Sutun("not_metni", ("TEXT", "GENERATED ALWAYS AS ('kisi ' || id)")),
+            ),
+        ),
+    )
+
+    assert _satirlar(veritabani, "SELECT id, not_metni FROM kisiler ORDER BY id") == [
+        (1, "kisi 1"),
+        (2, "kisi 2"),
+    ]
+
+
+def test_elle_acilmis_tablonun_kisitlari_da_sayilir(veritabani: vt.Veritabani) -> None:
+    """Motor dışı, tırnaksız, yorumlu tanım: sayım yine doğru."""
     with veritabani.islem() as oturum:
-        kalan = oturum.execute(
-            text("SELECT sql FROM sqlite_master WHERE name = 't'")
-        ).scalar_one()
-    assert kalan == tanim
+        oturum.execute(
+            text(
+                "CREATE TABLE t (a INTEGER PRIMARY KEY, -- yorum, virgüllü\n"
+                " b TEXT CHECK (b IN ('x,y', 'z')), UNIQUE (a, b), "
+                "CONSTRAINT c CHECK (a > 0)) WITHOUT ROWID, STRICT"
+            )
+        )
+    sutunlar = (m.Sutun("a", ("INTEGER", "PRIMARY KEY")), m.Sutun("b", ("TEXT",)))
+
+    with pytest.raises(m.KisitlarUyusmuyor, match="mevcut 2, istenen 1"):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "t", sutunlar, ("UNIQUE (a, b)",), ("WITHOUT ROWID", "STRICT")
+            ),
+        )
+
+    m.sutun_ozelligi_degistir(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "t",
+            sutunlar,
+            ("UNIQUE (a, b)", "CONSTRAINT c CHECK (a > 0)"),
+            ("STRICT", "WITHOUT ROWID"),
+        ),
+    )
+    assert _tanim(veritabani, "t") == (
+        'CREATE TABLE "t" ("a" INTEGER PRIMARY KEY, "b" TEXT, UNIQUE (a, b), '
+        "CONSTRAINT c CHECK (a > 0)) STRICT, WITHOUT ROWID"
+    )
 
 
 @pytest.mark.parametrize(
@@ -622,7 +794,135 @@ def test_ust_duzey_parca_sayisi(sql: str, beklenen: tuple[int, str]) -> None:
     assert m._ust_duzey_parca_sayisi(sql) == beklenen  # pyright: ignore[reportPrivateUsage]
 
 
-# --- inceleme bulguları (2026-09-24): INSTEAD OF trigger, AUTOINCREMENT, özellik sınırı
+@pytest.mark.parametrize(
+    ("metin", "beklenen"),
+    [
+        ("", []),
+        ("WITHOUT ROWID", ["WITHOUT ROWID"]),
+        ("WITHOUT ROWID, STRICT", ["WITHOUT ROWID", "STRICT"]),
+        (" strict ,, without rowid ", ["strict", "without rowid"]),
+        ("a(1, 2), 'x,y'", ["a(1, 2)", "'x,y'"]),
+    ],
+)
+def test_ust_duzey_parcalar(metin: str, beklenen: list[str]) -> None:
+    assert m._ust_duzey_parcalar(metin) == beklenen  # pyright: ignore[reportPrivateUsage]
+
+
+# --- indeks oluşturma ve silme -------------------------------------------------------
+
+
+def test_indeks_sql_istenileni_oldugu_gibi_yazar() -> None:
+    assert (
+        m.indeks_olusturma_sql(
+            m.IndeksOlusturmaIstegi("ix_kisiler_ad", "kisiler", ("ad_soyad",))
+        )
+        == 'CREATE INDEX "ix_kisiler_ad" ON "kisiler" (ad_soyad)'
+    )
+    assert m.indeks_olusturma_sql(
+        m.IndeksOlusturmaIstegi(
+            "ux_kisiler",
+            "kisiler",
+            ("lower(ad_soyad)", "dogum_tarihi DESC"),
+            benzersiz=True,
+            kosul="dogum_tarihi IS NOT NULL",
+        )
+    ) == (
+        'CREATE UNIQUE INDEX "ux_kisiler" ON "kisiler" '
+        "(lower(ad_soyad), dogum_tarihi DESC) WHERE dogum_tarihi IS NOT NULL"
+    )
+    assert m.indeks_silme_sql(m.IndeksSilmeIstegi("ix_kisiler_ad")) == (
+        'DROP INDEX "ix_kisiler_ad"'
+    )
+
+
+def _indeksler(v: vt.Veritabani, tablo: str) -> list[tuple[str, int]]:
+    with v.islem() as oturum:
+        satirlar = oturum.execute(text(f'PRAGMA index_list("{tablo}")')).all()
+    return sorted((str(s[1]), int(s[2])) for s in satirlar if s[3] == "c")
+
+
+def test_indeks_acar_ve_siler(veritabani: vt.Veritabani) -> None:
+    _kisileri_doldur(veritabani)
+
+    m.indeks_olustur(
+        veritabani, m.IndeksOlusturmaIstegi("ix_kisiler_ad", "kisiler", ("ad_soyad",))
+    )
+    m.indeks_olustur(
+        veritabani,
+        m.IndeksOlusturmaIstegi(
+            "ux_kisiler_dogum",
+            "kisiler",
+            ("lower(ad_soyad)", "dogum_tarihi"),
+            benzersiz=True,
+            kosul="dogum_tarihi IS NOT NULL",
+        ),
+    )
+    assert _indeksler(veritabani, "kisiler") == [
+        ("ix_kisiler_ad", 0),
+        ("ux_kisiler_dogum", 1),
+    ]
+    with pytest.raises(
+        IntegrityError, match="UNIQUE"
+    ):  # benzersizlik gerçekten uygulanıyor
+        with veritabani.islem() as oturum:
+            oturum.execute(
+                text(
+                    "INSERT INTO kisiler (ad_soyad, dogum_tarihi) "
+                    "VALUES ('ALI', '1980-01-01')"
+                )
+            )
+    with veritabani.islem() as oturum:  # kısmi indeks: NULL tarih serbest
+        oturum.execute(text("INSERT INTO kisiler (ad_soyad) VALUES ('Ali')"))
+
+    m.indeks_sil(veritabani, m.IndeksSilmeIstegi("ix_kisiler_ad"))
+
+    assert _indeksler(veritabani, "kisiler") == [("ux_kisiler_dogum", 1)]
+
+
+def test_indeks_yeniden_kurmadan_sonra_da_calisir(veritabani: vt.Veritabani) -> None:
+    _kisileri_doldur(veritabani)
+    m.indeks_olustur(
+        veritabani,
+        m.IndeksOlusturmaIstegi("ux_ad", "kisiler", ("ad_soyad",), benzersiz=True),
+    )
+
+    m.sutun_ozelligi_degistir(veritabani, KISILER_YENI)
+
+    assert _indeksler(veritabani, "kisiler") == [("ux_ad", 1)]
+    with pytest.raises(IntegrityError, match="UNIQUE"):
+        with veritabani.islem() as oturum:
+            oturum.execute(text("INSERT INTO kisiler (ad_soyad) VALUES ('Ali')"))
+
+
+def test_uymayan_indeks_istegi_veritabaninda_duser(veritabani: vt.Veritabani) -> None:
+    _kisileri_doldur(veritabani)
+
+    with pytest.raises(m.MotorHatasi, match="no such column"):
+        m.indeks_olustur(veritabani, m.IndeksOlusturmaIstegi("ix", "kisiler", ("yok",)))
+    with pytest.raises(m.MotorHatasi, match="no such index"):
+        m.indeks_sil(veritabani, m.IndeksSilmeIstegi("yok"))
+
+    assert _indeksler(veritabani, "kisiler") == []
+
+
+def test_indeks_ad_ve_parca_siniri_dokunmadan(veritabani: vt.Veritabani) -> None:
+    with pytest.raises(m.GecersizAd):
+        m.indeks_olustur(veritabani, m.IndeksOlusturmaIstegi("İx", "t", ("a",)))
+    with pytest.raises(m.GecersizAd):
+        m.indeks_sil(veritabani, m.IndeksSilmeIstegi("ix; drop"))
+    with pytest.raises(m.GecersizParca):
+        m.indeks_olustur(veritabani, m.IndeksOlusturmaIstegi("ix", "t", ()))
+    with pytest.raises(m.GecersizParca):
+        m.indeks_olustur(veritabani, m.IndeksOlusturmaIstegi("ix", "t", ("a) ; --",)))
+    with pytest.raises(m.GecersizParca):
+        m.indeks_olustur(
+            veritabani, m.IndeksOlusturmaIstegi("ix", "t", ("a",), kosul="a > 0; --")
+        )
+
+    assert not veritabani.yol.exists()
+
+
+# --- inceleme bulguları (2026-09-24): INSTEAD OF trigger, AUTOINCREMENT, parça sınırı
 
 
 def test_gorunumun_instead_of_triggeri_silme_sirasini_bozmaz(
@@ -705,16 +1005,25 @@ def test_autoincrement_olmayan_tabloda_sayac_islemi_yok(
         "   ",
     ],
 )
-def test_sutun_tanimindan_cikan_ozellik_dokunmadan_reddedilir(
+def test_yerinden_cikan_parca_dokunmadan_reddedilir(
     veritabani: vt.Veritabani, parca: str
 ) -> None:
-    with pytest.raises(m.GecersizOzellik):
+    with pytest.raises(m.GecersizParca):
         m.tablo_olustur(
             veritabani, m.TabloOlusturmaIstegi("t", (m.Sutun("a", (parca,)),))
         )
-    with pytest.raises(m.GecersizOzellik):
+    with pytest.raises(m.GecersizParca):  # kısıt parçası
+        m.tablo_olustur(
+            veritabani, m.TabloOlusturmaIstegi("t", (m.Sutun("a"),), kisitlar=(parca,))
+        )
+    with pytest.raises(m.GecersizParca):  # seçenek parçası
+        m.tablo_olustur(
+            veritabani,
+            m.TabloOlusturmaIstegi("t", (m.Sutun("a"),), secenekler=(parca,)),
+        )
+    with pytest.raises(m.GecersizParca):
         m.sutun_ekle(veritabani, m.SutunEklemeIstegi("t", m.Sutun("a", (parca,))))
-    with pytest.raises(m.GecersizOzellik):
+    with pytest.raises(m.GecersizParca):
         m.sutun_ozelligi_degistirme_sql(
             m.SutunOzelligiDegistirmeIstegi("t", (m.Sutun("a", (parca,)),))
         )
@@ -735,40 +1044,8 @@ def test_sutun_tanimindan_cikan_ozellik_dokunmadan_reddedilir(
     ],
 )
 def test_parantez_ve_tirnak_icindeki_virgul_noktali_virgul_serbest(parca: str) -> None:
-    assert m.ozelligi_dogrula(parca) == parca
+    assert m.parcayi_dogrula(parca) == parca
     assert (
         m.tablo_olusturma_sql(m.TabloOlusturmaIstegi("t", (m.Sutun("a", (parca,)),)))
         == f'CREATE TABLE "t" ("a" {parca})'
     )
-
-
-def test_motorun_actigi_tabloda_tablo_duzeyi_kisit_olamaz(
-    veritabani: vt.Veritabani,
-) -> None:
-    """README iddiası: özellik parçası sınırı sayesinde motor tablo düzeyi kısıt
-    yazamaz; dolayısıyla kendi açtığı tabloda yeniden kurma hiç reddedilmez."""
-    m.tablo_olustur(
-        veritabani,
-        m.TabloOlusturmaIstegi(
-            "t",
-            (
-                m.Sutun("a", ("INTEGER", "PRIMARY KEY")),
-                m.Sutun("b", ("TEXT", "UNIQUE", "CHECK (b IN ('x', 'y'))")),
-                m.Sutun("c", ("INTEGER", "REFERENCES t(a)")),
-            ),
-        ),
-    )
-
-    m.sutun_ozelligi_degistir(
-        veritabani,
-        m.SutunOzelligiDegistirmeIstegi(
-            "t",
-            (
-                m.Sutun("a", ("INTEGER", "PRIMARY KEY")),
-                m.Sutun("b", ("TEXT", "NOT NULL")),
-                m.Sutun("c", ("INTEGER",)),
-            ),
-        ),
-    )
-
-    assert _sutunlar(veritabani, "t")[1] == ("b", "TEXT", 1, None)
