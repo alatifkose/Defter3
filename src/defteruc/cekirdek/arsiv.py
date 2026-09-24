@@ -41,6 +41,15 @@ sonuç "zaten vardı" olur. Windows'ta ``os.rename`` var olan hedefi reddeder
 POSIX'te ``rename`` var olan hedefin üstüne yazar; aynı baytlar aynı ada
 yazıldığından ve açık okuyucular eski inode'u tuttuğundan bu zararsızdır.
 Windows'ta hedef o an açıkken taşıma reddedilirse hedef yine özetle doğrulanır.
+
+**Not (2026-09-24, Abdüllatif):** "yoksa oluştur" garantisi yalnız Windows'ta
+vardır; Linux/macOS'ta ``os.rename`` mevcut hedefin üstüne yazar, ikinci
+taşıyan da "yeni yazdı" der. Proje bugün yalnız Windows uygulamasıdır, bu
+yüzden sorun değildir. Bir gün Linux/macOS desteği düşünülürse platformlar
+arası atomik bir "üstüne yazmadan taşı" yöntemi gerekir; adaylar: sabit
+bağlantı (``os.link`` hedef varsa ``FileExistsError`` verir; FAT/exFAT'ta yok)
+ya da Linux'ta ``renameat2(RENAME_NOREPLACE)`` (Python ``os`` modülü
+sunmaz). ``os.replace``'e dönülmez.
 Arşiv yolu dizin taramasıyla ya da "SHA ile başlayan dosya" aramasıyla değil,
 doğrudan özetten hesaplanır.
 
