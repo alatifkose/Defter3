@@ -6,6 +6,7 @@ ve işlem sınırı gerçek dosya üzerinde sınanır. Tablolar testin kendi ham
 tablolarıdır; uygulama tablosu yoktur.
 """
 
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -281,3 +282,37 @@ def test_denetimsiz_islemde_hata_geri_alir_ve_denetimi_acar(
     with veritabani.islem() as oturum:
         assert oturum.execute(text("SELECT count(*) FROM ust")).scalar_one() == 0
         assert oturum.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+
+
+def test_denetimsiz_islem_baglantiyi_denetim_acilana_kadar_havuza_vermez(
+    veritabani: vt.Veritabani,
+) -> None:
+    """İnceleme 2 bulgusu: Session.commit bağlantıyı denetim yeniden açılmadan
+    havuza bırakıyordu; başka bir oturum foreign_keys=0 bağlantı alabiliyordu.
+    Şimdi bağlantı iş boyunca sahiplenilir; havuza her dönüşte denetim açık."""
+    from sqlalchemy import event
+
+    _tablolari_kur(veritabani)
+    donusler: list[int] = []
+
+    def kaydet(dbapi_baglantisi: sqlite3.Connection, _kayit: object) -> None:
+        satir = dbapi_baglantisi.execute("PRAGMA foreign_keys").fetchone()
+        assert satir is not None
+        donusler.append(int(satir[0]))
+
+    event.listen(veritabani.motor, "checkin", kaydet)
+    try:
+        with veritabani.islem_yabanci_anahtar_denetimsiz() as baglanti:
+            baglanti.execute(text("INSERT INTO ust (id) VALUES (1)"))
+            with veritabani.islem() as diger:  # aynı anda başka oturum: denetimli
+                assert diger.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+        with pytest.raises(vt.YabanciAnahtarIhlali):
+            with veritabani.islem_yabanci_anahtar_denetimsiz() as baglanti:
+                baglanti.execute(text("INSERT INTO alt (ust_id) VALUES (99)"))
+        with pytest.raises(RuntimeError):
+            with veritabani.islem_yabanci_anahtar_denetimsiz():
+                raise RuntimeError("kasıtlı")
+    finally:
+        event.remove(veritabani.motor, "checkin", kaydet)
+
+    assert len(donusler) >= 4 and all(d == 1 for d in donusler), donusler

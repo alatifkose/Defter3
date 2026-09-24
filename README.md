@@ -84,13 +84,20 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   değiştiremez (DDL'den önce `PRAGMA table_xinfo` ile adlar okunur, birebir
   aynı değilse `SutunlarUyusmuyor`). Tablo düzeyi kısıtlar ve seçenekler
   `CREATE TABLE` metninin içindedir, ayrıştırılmadan geri yazılamaz; bu yüzden
-  istek onları da taşır ve sessiz kayıp iki denetimle önlenir: mevcut kısıt
-  sayısı istektekine eşit olmalı (kısıt ekleme/silme bu işin dışındadır,
-  içeriği değişebilir), seçenekler aynı olmalı (`KisitlarUyusmuyor`). Sayım
-  ayrıştırma değildir: en dış parantezdeki üst düzey parça sayısı eksi sütun
-  sayısı. **Üretilen sütunlar** kopyalanmaz, yeniden hesaplanır; hangi sütunun
-  üretildiğini geçici tablonun `table_xinfo`'su söyler, motor anahtar kelime
-  bilmez; sıradan sütun üretilen sütuna çevrilebilir. **Bağlı nesneler
+  istek onları da taşır ve motor aynen korunduklarını denetler: mevcut
+  kısıtlar ve seçenekler istektekilerle birebir aynı olmalı (sıra, boşluk,
+  harf boyutu hariç); kısıt ekleme, silme, değiştirme ve seçenek değiştirme
+  bu işin dışındadır (`KisitlarUyusmuyor`). Karşılaştırma ayrıştırma
+  değildir: en dış parantezdeki üst düzey parçaların ilk N'i sütun, kalanı
+  kısıttır. Geçici tablo kurulunca SQLite'ın gerçekten açtığı sütun listesi
+  istekle karşılaştırılır (`"ekstra TEXT"` gibi bir "kısıt" sütun açamaz).
+  **Kopyalama kayıpsızdır:** `INSERT OR ABORT` (yeni tanımdaki `ON CONFLICT
+  IGNORE/REPLACE` düz INSERT'i sessizce eksiltirdi), ardından satır sayısı
+  karşılaştırması; rowid tablolarında örtük `rowid` de taşınır (`PRAGMA
+  table_list` söyler). **Üretilen sütunlar:** yeni tarafta yazılabilir olan
+  sütunlar kopyalanır; hangi sütunun üretildiğini geçici tablonun
+  `table_xinfo`'su söyler, motor anahtar kelime bilmez. Üretilenden sıradana
+  geçişte hesaplanmış değer korunur, tersinde yeniden hesaplanır. **Bağlı nesneler
   taşınır:** tablonun indeksleri ile veritabanındaki bütün görünüm ve
   trigger'lar (hangisinin tabloya değindiği ayrıştırmadan bilinemez)
   `sqlite_master`'daki saklı oluşturma cümleleriyle işten önce silinir (önce
@@ -135,10 +142,11 @@ kısa ömürlü oturum = bir transaction. Normal çıkışta `commit`, istisnada
 da ileride gelecek depo kodu kendi başına `commit` etmez; sahip bu bağlam
 yöneticisidir. `kapat()` havuzu boşaltır (Windows'ta dosya kilidi için).
 `islem_yabanci_anahtar_denetimsiz()` aynı sınırın `foreign_keys=OFF`
-biçimidir (tabloyu yeniden kurma için): denetim yalnız o bağlantıda ve yalnız
-iş süresince kapanır, `commit` öncesi `PRAGMA foreign_key_check` çalışır,
-ihlalde `YabanciAnahtarIhlali` ile geri alınır; her çıkışta denetim aynı
-bağlantıda yeniden açılır, havuza denetimsiz bağlantı dönmez.
+biçimidir (tabloyu yeniden kurma için) ve `Connection` verir: bağlantı iş
+boyunca sahiplenilir, denetim yalnız o bağlantıda kapanır, `commit` öncesi
+`PRAGMA foreign_key_check` çalışır, ihlalde `YabanciAnahtarIhlali` ile geri
+alınır; denetim aynı bağlantıda yeniden açılmadan bağlantı havuza dönmez
+(başarı, hata ve ihlal yollarında; havuza dönüşte denetim testle izlenir).
 
 **Testler** (`tests/test_cekirdek_veritabani.py`): gerçek SQLite dosyalarıyla,
 `test` ortamı ve `tmp_path` altında kök; `:memory:` yok. Kanıtlananlar: import

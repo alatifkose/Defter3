@@ -26,10 +26,11 @@ Bu modül hiçbir domain'i bilmez ve hiçbir tablo tanımlamaz. Sağladıkları:
   depo kodu kendi başına ``commit`` etmez; sahip bu bağlam yöneticisidir.
 * ``Veritabani.islem_yabanci_anahtar_denetimsiz``: tabloyu yeniden kurma
   gibi, SQLite'ın resmî tarifi gereği ``foreign_keys=OFF`` ile yürümesi
-  gereken işler için işlem sınırı. Denetim yalnız bu bağlantıda ve yalnız iş
-  süresince kapanır; ``commit`` öncesi ``PRAGMA foreign_key_check`` çalışır,
-  bir ihlal varsa iş geri alınır. Çıkışta (başarı, hata ya da ihlal) denetim
-  aynı bağlantıda yeniden açılır; havuza denetimsiz bağlantı dönmez.
+  gereken işler için işlem sınırı; ``Connection`` verir (ham DDL için).
+  Bağlantı iş boyunca sahiplenilir: denetim yalnız o bağlantıda kapanır,
+  ``commit`` öncesi ``PRAGMA foreign_key_check`` çalışır (ihlalde iş geri
+  alınır) ve denetim aynı bağlantıda yeniden açılmadan bağlantı havuza
+  dönmez (başarı, hata ve ihlal yollarının üçünde de).
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import Engine, MetaData, create_engine, event, text
+from sqlalchemy import Connection, Engine, MetaData, create_engine, event, text
 from sqlalchemy.engine import URL
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -144,34 +145,32 @@ class Veritabani:
             oturum.close()
 
     @contextmanager
-    def islem_yabanci_anahtar_denetimsiz(self) -> Generator[Session, None, None]:
+    def islem_yabanci_anahtar_denetimsiz(self) -> Generator[Connection, None, None]:
         """``foreign_keys=OFF`` ile bir iş = bir transaction (SQLite'ın tablo
-        yeniden kurma tarifi). Denetim yalnız bu bağlantıda, yalnız iş
-        süresince kapalıdır; ``commit`` öncesi ``PRAGMA foreign_key_check``
-        çalışır, ihlal varsa ``YabanciAnahtarIhlali`` ile geri alınır. Her
-        çıkışta denetim aynı bağlantıda yeniden açılır."""
-        oturum = self._oturum_ac()
-        try:
-            ham = oturum.connection().connection.dbapi_connection
+        yeniden kurma tarifi). Bağlantı iş boyunca **sahiplenilir**: denetim
+        yalnız o bağlantıda kapanır, ``commit`` öncesi ``PRAGMA
+        foreign_key_check`` çalışır (ihlalde ``YabanciAnahtarIhlali`` ile geri
+        alınır) ve denetim aynı bağlantıda yeniden açılmadan bağlantı havuza
+        dönmez. (Oturum tabanlı ilk sürümde ``Session.commit`` bağlantıyı
+        denetim açılmadan havuza bırakıyordu; inceleme 2, 2026-09-24.)"""
+        with self.motor.connect() as baglanti:
+            ham = baglanti.connection.dbapi_connection
             if ham is None:  # pragma: no cover - havuz her zaman bağlantı verir
                 raise RuntimeError("DBAPI bağlantısı alınamadı")
             _pragmalari_transaction_disinda_uygula(ham, (("foreign_keys", "OFF"),))
             try:
-                yield oturum
-                ihlaller = oturum.execute(text("PRAGMA foreign_key_check")).all()
-                if ihlaller:
-                    raise YabanciAnahtarIhlali(
-                        f"{len(ihlaller)} yabancı anahtar ihlali: "
-                        + ", ".join(f"{i[0]}(rowid {i[1]}) -> {i[2]}" for i in ihlaller)
-                    )
-                oturum.commit()
-            except BaseException:
-                oturum.rollback()
-                raise
+                with baglanti.begin():
+                    yield baglanti
+                    ihlaller = baglanti.execute(text("PRAGMA foreign_key_check")).all()
+                    if ihlaller:
+                        raise YabanciAnahtarIhlali(
+                            f"{len(ihlaller)} yabancı anahtar ihlali: "
+                            + ", ".join(
+                                f"{i[0]}(rowid {i[1]}) -> {i[2]}" for i in ihlaller
+                            )
+                        )
             finally:
                 _pragmalari_transaction_disinda_uygula(ham, (("foreign_keys", "ON"),))
-        finally:
-            oturum.close()
 
     def kapat(self) -> None:
         """Bağlantı havuzunu boşaltır; dosya kilidi bırakılır (Windows'ta gerekli)."""
