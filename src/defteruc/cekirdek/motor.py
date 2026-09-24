@@ -12,28 +12,25 @@ Motorun yaptıkları:
   adından sonra yazılacak parçalardır (ör. ``("TEXT", "NOT NULL")``,
   ``("INTEGER", "REFERENCES kisiler(id)")``). **Özellik listesi koda gömülü
   değildir;** istekte ne geldiyse o yazılır. Geçerliliğini SQLite belirler.
-* Görünen ad, sütun tanımının motor tarafından yönetilen özelliğidir. Motor
-  bunu tek bir sütun tanımları tablosunda (``sutun_tanimlari``: tablo_adi,
-  sutun_adi, gorunen_ad) kalıcı saklar; arayüz oradan okur. Görünen ad
-  verilmemişse arayüz geçici olarak teknik adı gösterebilir.
 
 Motorun yapmadıkları:
 
-* Hafızası yoktur: işlemler arası durum tutmaz, katalog taşımaz. (Kalıcı
-  bilgi veritabanına yazılır; bu hafıza değildir.)
+* Hazır tablo taşımaz ve hiçbir özelliği ismen bilmez. Sütunların görünen
+  adı gibi tanım bilgileri de sıradan bir tablodur: Cowork o tabloyu da bu
+  motorla açar, eşleşmeleri satır olarak yazar (kayıt). Motor bunu bilmez.
+* Hafızası yoktur: işlemler arası durum tutmaz, katalog taşımaz.
 * Mevcut yapıyı okumaz: tablonun var olup olmadığına, sütunun daha önce
   eklenip eklenmediğine bakmaz. Uygun düşmeyen istek SQLite'ta düşer ve
   ``MotorHatasi`` olarak yükselir.
 * Bir şey göstermez ve karar vermez: dönüş değeri yoktur.
 * Kural koymaz. Tek teknik sınır ad biçimidir (``AD_BICIMI``): tablo ve sütun
-  adları sade yazılır, Türkçe karakter yoktur (karar 2026-09-24); görünen ad
-  serbest metindir. Bu sınır SQL'e adın güvenle yazılabilmesi içindir.
+  adları sade yazılır, Türkçe karakter yoktur (karar 2026-09-24). Bu sınır
+  SQL'e adın güvenle yazılabilmesi içindir.
 
-Bir iş = bir transaction (``Veritabani.islem``): yapı değişikliği ve sütun
-tanımı satırları birlikte kalır ya da birlikte geri alınır. DDL metni
-``exec_driver_sql`` ile sürücüye olduğu gibi verilir; özellik parçalarının
-içindeki ``:`` bağlama parametresi sanılmaz. Sürücü tek seferde tek ifade
-çalıştırır.
+Bir iş = bir transaction (``Veritabani.islem``): düşen istek bütünüyle geri
+alınır. DDL metni ``exec_driver_sql`` ile sürücüye olduğu gibi verilir;
+özellik parçalarının içindeki ``:`` bağlama parametresi sanılmaz. Sürücü tek
+seferde tek ifade çalıştırır.
 
 ``tablo_olusturma_sql`` ve ``sutun_ekleme_sql`` veritabanına dokunmaz;
 uygulama onay penceresinde ne yapılacağını göstermek için kullanabilir.
@@ -44,28 +41,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from defteruc.cekirdek.veritabani import Veritabani
 
-TANIM_TABLOSU = "sutun_tanimlari"
-"""Motorun yönettiği tek sütun tanımları tablosu."""
-
 AD_BICIMI = re.compile(r"^[a-z][a-z0-9_]*$")
 """Tablo ve sütun adı: küçük ASCII harfle başlar; harf, rakam, alt çizgi."""
-
-_TANIM_TABLOSU_SQL = (
-    f'CREATE TABLE IF NOT EXISTS "{TANIM_TABLOSU}" ('
-    '"tablo_adi" TEXT NOT NULL, '
-    '"sutun_adi" TEXT NOT NULL, '
-    '"gorunen_ad" TEXT, '
-    'PRIMARY KEY ("tablo_adi", "sutun_adi"))'
-)
-_TANIM_EKLE_SQL = text(
-    f'INSERT INTO "{TANIM_TABLOSU}" ("tablo_adi", "sutun_adi", "gorunen_ad") '
-    "VALUES (:tablo_adi, :sutun_adi, :gorunen_ad)"
-)
 
 
 class MotorHatasi(Exception):
@@ -83,12 +64,10 @@ class Sutun:
     ``ad``: teknik ad (sade, Türkçe karaktersiz).
     ``ozellikler``: sütun adından sonra sırayla yazılacak parçalar; istekte ne
     geldiyse o. Boş olabilir (SQLite türsüz sütuna izin verir).
-    ``gorunen_ad``: arayüzde gösterilecek ad; serbest metin, verilmeyebilir.
     """
 
     ad: str
     ozellikler: tuple[str, ...] = ()
-    gorunen_ad: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,34 +111,19 @@ def sutun_ekleme_sql(istek: SutunEklemeIstegi) -> str:
 
 
 def tablo_olustur(veritabani: Veritabani, istek: TabloOlusturmaIstegi) -> None:
-    """Tabloyu açar ve sütun tanımlarını yazar; tek transaction."""
-    sql = tablo_olusturma_sql(istek)
-    _uygula(veritabani, sql, istek.tablo, istek.sutunlar)
+    """Tabloyu açar; tek transaction."""
+    _uygula(veritabani, tablo_olusturma_sql(istek))
 
 
 def sutun_ekle(veritabani: Veritabani, istek: SutunEklemeIstegi) -> None:
-    """Tabloya sütun ekler ve sütun tanımını yazar; tek transaction."""
-    sql = sutun_ekleme_sql(istek)
-    _uygula(veritabani, sql, istek.tablo, (istek.sutun,))
+    """Tabloya sütun ekler; tek transaction."""
+    _uygula(veritabani, sutun_ekleme_sql(istek))
 
 
-def _uygula(
-    veritabani: Veritabani, ddl: str, tablo: str, sutunlar: tuple[Sutun, ...]
-) -> None:
+def _uygula(veritabani: Veritabani, ddl: str) -> None:
     try:
         with veritabani.islem() as oturum:
-            baglanti = oturum.connection()
-            baglanti.exec_driver_sql(_TANIM_TABLOSU_SQL)
-            baglanti.exec_driver_sql(ddl)
-            for sutun in sutunlar:
-                oturum.execute(
-                    _TANIM_EKLE_SQL,
-                    {
-                        "tablo_adi": tablo,
-                        "sutun_adi": sutun.ad,
-                        "gorunen_ad": sutun.gorunen_ad,
-                    },
-                )
+            oturum.connection().exec_driver_sql(ddl)
     except SQLAlchemyError as hata:
         neden = hata.orig if isinstance(hata, DBAPIError) else hata
         raise MotorHatasi(f"istek uygulanamadı, geri alındı: {neden}") from hata

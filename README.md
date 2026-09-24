@@ -54,10 +54,10 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
 * **Birinci motor** (`cekirdek/motor.py`, 2026-09-24): tablo oluşturur, sütun
   ekler. Sütun özelliği ekleme isteğinin içinde gider ve **koda gömülü
   değildir**: istekte ne geldiyse (`Sutun.ozellikler`) sütun adından sonra
-  olduğu gibi yazılır, geçerliliğini SQLite belirler. Görünen ad, sütun
-  tanımının motor tarafından yönetilen özelliğidir; motor onu tek bir sütun
-  tanımları tablosunda (`sutun_tanimlari`: tablo_adi, sutun_adi, gorunen_ad)
-  kalıcı saklar, arayüz oradan okur. Tablo/sütun adları sade ve Türkçe
+  olduğu gibi yazılır, geçerliliğini SQLite belirler. Motor hazır tablo
+  taşımaz ve hiçbir özelliği ismen bilmez: sütunların görünen adı gibi tanım
+  bilgileri de sıradan bir tablodur, Cowork o tabloyu da motorla açar ve
+  eşleşmeleri satır olarak yazar (kayıt). Tablo/sütun adları sade ve Türkçe
   karaktersizdir (`AD_BICIMI`). Motor yapıyı okumaz, onay almaz (onayı
   uygulama alır, motoru onaydan sonra çağırır); bir iş = bir transaction.
 

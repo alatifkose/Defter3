@@ -60,26 +60,12 @@ def _tablolar(v: vt.Veritabani) -> set[str]:
     return {str(s[0]) for s in satirlar}
 
 
-def _tanimlar(v: vt.Veritabani) -> list[tuple[str, str, str | None]]:
-    """Tanım tablosu henüz açılmamışsa (ilk iş geri alındıysa) boş liste."""
-    if m.TANIM_TABLOSU not in _tablolar(v):
-        return []
-    with v.islem() as oturum:
-        satirlar = oturum.execute(
-            text(
-                f'SELECT tablo_adi, sutun_adi, gorunen_ad FROM "{m.TANIM_TABLOSU}" '
-                "ORDER BY rowid"
-            )
-        ).all()
-    return [(str(s[0]), str(s[1]), s[2]) for s in satirlar]
-
-
 KISILER = m.TabloOlusturmaIstegi(
     tablo="kisiler",
     sutunlar=(
-        m.Sutun("id", ("INTEGER", "PRIMARY KEY"), "Kimlik"),
-        m.Sutun("ad_soyad", ("TEXT", "NOT NULL"), "Ad Soyad"),
-        m.Sutun("dogum_tarihi", ("TEXT",), "Doğum Tarihi"),
+        m.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+        m.Sutun("ad_soyad", ("TEXT", "NOT NULL")),
+        m.Sutun("dogum_tarihi", ("TEXT",)),
         m.Sutun("not_metni"),
     ),
 )
@@ -97,7 +83,7 @@ def test_tablo_olusturma_sql_istenileni_oldugu_gibi_yazar() -> None:
 
 def test_sutun_ekleme_sql_istenileni_oldugu_gibi_yazar() -> None:
     istek = m.SutunEklemeIstegi(
-        "kisiler", m.Sutun("sehir", ("TEXT", "DEFAULT 'Edirne'"), "Şehir")
+        "kisiler", m.Sutun("sehir", ("TEXT", "DEFAULT 'Edirne'"))
     )
     assert m.sutun_ekleme_sql(istek) == (
         'ALTER TABLE "kisiler" ADD COLUMN "sehir" TEXT DEFAULT \'Edirne\''
@@ -112,22 +98,12 @@ def test_tablo_olusturur_ve_ozellikleri_oldugu_gibi_yazar(
 ) -> None:
     m.tablo_olustur(veritabani, KISILER)
 
+    assert _tablolar(veritabani) == {"kisiler"}  # motor başka tablo açmaz
     assert _sutunlar(veritabani, "kisiler") == [
         ("id", "INTEGER", 0, None),
         ("ad_soyad", "TEXT", 1, None),
         ("dogum_tarihi", "TEXT", 0, None),
         ("not_metni", "", 0, None),
-    ]
-
-
-def test_gorunen_adlar_tanim_tablosuna_yazilir(veritabani: vt.Veritabani) -> None:
-    m.tablo_olustur(veritabani, KISILER)
-
-    assert _tanimlar(veritabani) == [
-        ("kisiler", "id", "Kimlik"),
-        ("kisiler", "ad_soyad", "Ad Soyad"),
-        ("kisiler", "dogum_tarihi", "Doğum Tarihi"),
-        ("kisiler", "not_metni", None),
     ]
 
 
@@ -168,19 +144,49 @@ def test_ozellikteki_iki_nokta_bag_parametresi_sanilmaz(
     assert _sutunlar(veritabani, "ayarlar_tablosu") == [("saat", "TEXT", 0, "'09:30'")]
 
 
+def test_sutun_tanimlari_da_siradan_bir_tablodur(veritabani: vt.Veritabani) -> None:
+    """Görünen ad gibi tanım bilgileri motorda değil, Cowork'un motorla açtığı
+    sıradan bir tabloda durur; eşleşme o tabloya satır eklemektir (kayıt)."""
+    m.tablo_olustur(veritabani, KISILER)
+    m.tablo_olustur(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "sutun_tanimlari",
+            (
+                m.Sutun("tablo_adi", ("TEXT", "NOT NULL")),
+                m.Sutun("sutun_adi", ("TEXT", "NOT NULL")),
+                m.Sutun("gorunen_ad", ("TEXT",)),
+            ),
+        ),
+    )
+    with veritabani.islem() as oturum:  # kayıt: onaysız, motorsuz
+        oturum.execute(
+            text(
+                "INSERT INTO sutun_tanimlari (tablo_adi, sutun_adi, gorunen_ad) "
+                "VALUES ('kisiler', 'dogum_tarihi', 'Doğum Tarihi')"
+            )
+        )
+
+    with veritabani.islem() as oturum:
+        satir = oturum.execute(
+            text(
+                "SELECT gorunen_ad FROM sutun_tanimlari WHERE sutun_adi='dogum_tarihi'"
+            )
+        ).scalar_one()
+    assert satir == "Doğum Tarihi"
+
+
 # --- sütun ekleme --------------------------------------------------------------------
 
 
-def test_sutun_ekler_ve_tanimini_yazar(veritabani: vt.Veritabani) -> None:
+def test_sutun_ekler(veritabani: vt.Veritabani) -> None:
     m.tablo_olustur(veritabani, KISILER)
 
     m.sutun_ekle(
-        veritabani,
-        m.SutunEklemeIstegi("kisiler", m.Sutun("sehir", ("TEXT",), "Şehir")),
+        veritabani, m.SutunEklemeIstegi("kisiler", m.Sutun("sehir", ("TEXT",)))
     )
 
     assert _sutunlar(veritabani, "kisiler")[-1] == ("sehir", "TEXT", 0, None)
-    assert _tanimlar(veritabani)[-1] == ("kisiler", "sehir", "Şehir")
 
 
 # --- motor okumaz, reddetmez; uymayan istek veritabanında düşer ve geri alınır -----
@@ -194,19 +200,21 @@ def test_var_olan_tabloyu_yeniden_acma_istegi_veritabaninda_duser(
     with pytest.raises(m.MotorHatasi, match="already exists"):
         m.tablo_olustur(veritabani, KISILER)
 
-    assert len(_tanimlar(veritabani)) == 4  # ikinci istek hiçbir tanım bırakmadı
+    assert _sutunlar(veritabani, "kisiler")[0] == ("id", "INTEGER", 0, None)
 
 
-def test_olmayan_tabloya_sutun_ekleme_geri_alinir(veritabani: vt.Veritabani) -> None:
+def test_olmayan_tabloya_sutun_ekleme_veritabaninda_duser(
+    veritabani: vt.Veritabani,
+) -> None:
     with pytest.raises(m.MotorHatasi, match="no such table"):
         m.sutun_ekle(veritabani, m.SutunEklemeIstegi("yok", m.Sutun("a", ("TEXT",))))
 
-    assert _tanimlar(veritabani) == []
+    assert _tablolar(veritabani) == set()
 
 
-def test_dusen_istek_tabloyu_da_geri_alir(veritabani: vt.Veritabani) -> None:
-    """Sütun tanımı yazımı düşerse (aynı sütun iki kez) tablo da kalmaz."""
-    with pytest.raises(m.MotorHatasi):
+def test_dusen_istek_tablo_birakmaz(veritabani: vt.Veritabani) -> None:
+    """Aynı sütun iki kez: SQLite reddeder, tablo kalmaz."""
+    with pytest.raises(m.MotorHatasi, match="duplicate column"):
         m.tablo_olustur(
             veritabani,
             m.TabloOlusturmaIstegi(
@@ -214,8 +222,7 @@ def test_dusen_istek_tabloyu_da_geri_alir(veritabani: vt.Veritabani) -> None:
             ),
         )
 
-    assert "tekrar" not in _tablolar(veritabani)
-    assert _tanimlar(veritabani) == []
+    assert _tablolar(veritabani) == set()
 
 
 # --- ad biçimi: sade, Türkçe karaktersiz ---------------------------------------------
@@ -233,17 +240,3 @@ def test_sade_olmayan_ad_veritabanina_dokunmadan_reddedilir(
         m.tablo_olustur(veritabani, m.TabloOlusturmaIstegi("t", (m.Sutun(ad),)))
 
     assert not veritabani.yol.exists()
-
-
-def test_gorunen_ad_serbest_metindir(veritabani: vt.Veritabani) -> None:
-    m.tablo_olustur(
-        veritabani,
-        m.TabloOlusturmaIstegi(
-            "odemeler",
-            (m.Sutun("odeme_tarihi", ("TEXT",), "Ödeme Tarihi (gün/ay)"),),
-        ),
-    )
-
-    assert _tanimlar(veritabani) == [
-        ("odemeler", "odeme_tarihi", "Ödeme Tarihi (gün/ay)")
-    ]

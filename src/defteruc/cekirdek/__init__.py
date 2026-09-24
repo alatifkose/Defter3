@@ -7,7 +7,7 @@ Sınır ``tests/test_mimari_sinir.py`` ile korunur (karar 2026-09-18, README
 
 Modüller: ``veritabani`` (bağlantı, işlem sınırı), ``arsiv`` (gelen dizini
 sınırı, akışla SHA-256, içerik adresli atomik arşiv, bütünlük doğrulama) ve
-``motor`` (birinci motor: tablo oluşturma, sütun ekleme, sütun tanımları).
+``motor`` (birinci motor: tablo oluşturma, sütun ekleme).
 
 2026-09-24: çekirdek yeniden tasarlanıyor. Veritabanında hazır tablo yoktur;
 tabloları Cowork, motoru kullanarak ve kullanıcı onayıyla oluşturur (README
