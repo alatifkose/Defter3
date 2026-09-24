@@ -1766,3 +1766,61 @@ def test_genis_tablo_yeniden_kurulur_ve_son_sutun_da_denetlenir(
             ),
         )
     assert _satirlar(veritabani, "SELECT c599, typeof(c599) FROM t") == [("7", "text")]
+
+
+# --- yedinci inceleme (2026-09-24): çok geniş bileşik anahtar ------------------------
+
+
+@pytest.mark.parametrize("genislik", [4, 600])
+def test_cok_genis_bilesik_anahtarla_yeniden_kurma(
+    veritabani: vt.Veritabani, genislik: int
+) -> None:
+    """Anahtar koşulu düz AND zinciriydi; 600 sütunluk birincil anahtarda SQLite
+    ifade derinliği sınırına takılıyordu. Koşullar dengeli ağaç hâlinde
+    parantezlenir (derinlik logaritmik)."""
+    sutunlar = tuple(m.Sutun(f"c{i}", ("TEXT",)) for i in range(genislik))
+    kisitlar = ("PRIMARY KEY (" + ", ".join(s.ad for s in sutunlar) + ")",)
+    m.tablo_olustur(
+        veritabani, m.TabloOlusturmaIstegi("t", sutunlar, kisitlar, ("WITHOUT ROWID",))
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(
+            text(
+                "INSERT INTO t VALUES ("
+                + ", ".join(f"'{i}'" for i in range(genislik))
+                + ")"
+            )
+        )
+
+    m.sutun_ozelligi_degistir(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi("t", sutunlar, kisitlar, ("WITHOUT ROWID",)),
+    )
+
+    assert _satirlar(veritabani, "SELECT count(*), min(c0) FROM t") == [(1, "0")]
+    son = f"c{genislik - 1}"
+    with pytest.raises(
+        m.KopyaDegerDegisti
+    ):  # anahtar sütununda tür değişimi yine yakalanır
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "t",
+                (*sutunlar[:-1], m.Sutun(son, ("INTEGER",))),
+                kisitlar,
+                ("WITHOUT ROWID",),
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    ("kosullar", "beklenen"),
+    [
+        (["a"], "a"),
+        (["a", "b"], "(a AND b)"),
+        (["a", "b", "c"], "(a AND (b AND c))"),
+        (["a", "b", "c", "d"], "((a AND b) AND (c AND d))"),
+    ],
+)
+def test_dengeli_baglac(kosullar: list[str], beklenen: str) -> None:
+    assert m._dengeli_baglac(kosullar, "AND") == beklenen  # pyright: ignore[reportPrivateUsage]

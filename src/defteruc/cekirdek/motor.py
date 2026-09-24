@@ -116,8 +116,9 @@ Sütun özelliği değiştirme (karar 2026-09-24):
   kimlik sütunlarına (rowid takma adı, birincil anahtar sütunları)
   dönüşüm izni verilemez, satır eşleştirmesi ``typeof`` ve ``COLLATE
   BINARY`` ile yapılır (``'001'`` ile ``1`` aynı kimlik sayılmaz). Değer
-  denetimi sütun gruplarıyla yürür; geniş tablolarda tek düz ``OR``
-  zinciri SQLite ifade derinliği sınırına takılırdı.
+  denetimi sütun gruplarıyla yürür ve koşullar dengeli ağaç hâlinde
+  birleştirilir; geniş tabloda ya da çok geniş bileşik anahtarda düz
+  ``OR``/``AND`` zinciri SQLite ifade derinliği sınırına takılırdı.
 * **TEMP nesneler desteklenmez:** ``sqlite_temp_master``'daki trigger ve
   görünümler bağlı nesne taramasında görünmez, tabloyla birlikte silinir ve
   geri kurulamazdı. Bağlantıda TEMP trigger ya da görünüm varsa iş
@@ -597,9 +598,12 @@ def _kopyayi_dogrula(
         raise MotorHatasi(f"{tablo}: satırları eşleştirecek anahtar yok; iş reddedildi")
     e, y = _tirnakla(tablo), _tirnakla(gecici)
     anahtar_adlari = [a if a == rowid_takma else _tirnakla(a) for a in anahtarlar]
-    anahtar_kosulu = " AND ".join(
-        f"typeof(e.{a}) IS typeof(y.{a}) AND e.{a} IS y.{a} COLLATE BINARY"
-        for a in anahtar_adlari
+    anahtar_kosulu = _dengeli_baglac(
+        [
+            f"(typeof(e.{a}) IS typeof(y.{a}) AND e.{a} IS y.{a} COLLATE BINARY)"
+            for a in anahtar_adlari
+        ],
+        "AND",
     )
     kaynak = f"FROM {e} AS e JOIN {y} AS y ON {anahtar_kosulu}"
     eslesen = int(baglanti.exec_driver_sql(f"SELECT count(*) {kaynak}").scalar_one())
@@ -611,10 +615,13 @@ def _kopyayi_dogrula(
     korunacak = [a for a in kopyalanan if a not in donusum_izinli]
     for i in range(0, len(korunacak), DEGER_DENETIMI_GRUP_BOYUTU):
         grup = korunacak[i : i + DEGER_DENETIMI_GRUP_BOYUTU]
-        farklar = " OR ".join(
-            f"typeof(e.{_tirnakla(a)}) IS NOT typeof(y.{_tirnakla(a)}) "
-            f"OR e.{_tirnakla(a)} IS NOT y.{_tirnakla(a)} COLLATE BINARY"
-            for a in grup
+        farklar = _dengeli_baglac(
+            [
+                f"(typeof(e.{_tirnakla(a)}) IS NOT typeof(y.{_tirnakla(a)}) "
+                f"OR e.{_tirnakla(a)} IS NOT y.{_tirnakla(a)} COLLATE BINARY)"
+                for a in grup
+            ],
+            "OR",
         )
         degisen = int(
             baglanti.exec_driver_sql(
@@ -627,6 +634,18 @@ def _kopyayi_dogrula(
                 f"değişti (sütunlar {grup}); bilerek dönüştürme için "
                 "deger_donusumu_izinli kullanılır. İş geri alındı"
             )
+
+
+def _dengeli_baglac(kosullar: list[str], baglac: str) -> str:
+    """Koşulları ``baglac`` ile dengeli ikili ağaç hâlinde birleştirir; ifade
+    derinliği düz zincirdeki ``n`` yerine ``log2(n)`` olur (SQLite'ın ifade
+    derinliği sınırı 1000; çok geniş bileşik anahtar, inceleme 7)."""
+    if len(kosullar) == 1:
+        return kosullar[0]
+    orta = len(kosullar) // 2
+    sol = _dengeli_baglac(kosullar[:orta], baglac)
+    sag = _dengeli_baglac(kosullar[orta:], baglac)
+    return f"({sol} {baglac} {sag})"
 
 
 def _rowidsiz(baglanti: Connection, tablo: str) -> bool:
