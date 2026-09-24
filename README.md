@@ -75,14 +75,18 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   özelliğini değiştirir; sütun ekleyemez, silemez, adını ve sırasını
   değiştiremez. Motor DDL'den önce `PRAGMA table_xinfo` ile mevcut sütun
   adlarını okur, istekle sırasıyla birebir aynı değilse hiçbir şey yapmadan
-  `SutunlarUyusmuyor` verir. **Sessiz kayıp yok:** yeniden kurma indeksleri,
-  trigger'ları, tabloya değinen görünümleri, tablo düzeyi kısıtları
-  (`UNIQUE (a, b)`, `CHECK (...)`, `FOREIGN KEY ...`, `CONSTRAINT ...`),
-  tablo seçeneklerini (`WITHOUT ROWID`, `STRICT`) ve üretilen sütunları
-  taşımaz; bunlar henüz desteklenmez, motor DDL'den önce tespit edip
-  `DesteklenmeyenYapi` ile reddeder. Tablo düzeyi kısıt tespiti tanım metnini
-  ayrıştırmaz: en dış parantezdeki üst düzey parça sayısı sütun sayısından
-  fazlaysa sütun olmayan parça vardır. Bu okumalar yalnız reddetmek içindir.
+  `SutunlarUyusmuyor` verir. **Bağlı nesneler taşınır:** tablonun
+  indeksleri ile veritabanındaki bütün görünüm ve trigger'lar (hangisinin
+  tabloya değindiği ayrıştırmadan bilinemez) `sqlite_master`'daki saklı
+  oluşturma cümleleriyle işten önce silinir, tablo kurulduktan sonra aynı
+  sırayla aynı cümleyle geri açılır; kayıpsızdır. **Sessiz kayıp yok:** tablo düzeyi kısıtlar (`UNIQUE (a, b)`,
+  `CHECK (...)`, `FOREIGN KEY ...`, `CONSTRAINT ...`), tablo seçenekleri
+  (`WITHOUT ROWID`, `STRICT`) ve üretilen sütunlar `CREATE TABLE` metninin
+  içindedir ve istek onları taşımaz; henüz desteklenmez, motor DDL'den önce
+  tespit edip `DesteklenmeyenYapi` ile reddeder. Tespit metni ayrıştırmaz:
+  en dış parantezdeki üst düzey parça sayısı sütun sayısından fazlaysa sütun
+  olmayan parça vardır. Motorun kendi açtığı tablolarda bunlar olmaz. Bu
+  okumalar yalnız taşımak ve reddetmek içindir.
 
 Henüz yok: uygulamanın onay penceresi, motoru Cowork'e açan MCP araçları,
 yeni mükerrerlik tasarımı.

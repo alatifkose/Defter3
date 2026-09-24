@@ -47,17 +47,28 @@ Sütun özelliği değiştirme (karar 2026-09-24):
   önce ``PRAGMA table_xinfo`` ile mevcut sütun adlarını okur; istekteki
   adlarla sırasıyla birebir aynı değilse (eksik, fazla, farklı) hiçbir şey
   yapmadan ``SutunlarUyusmuyor`` verir.
-* **Sessiz kayıp yok:** yeniden kurma, tabloya bağlı indeksleri, trigger'ları
-  ve tablo düzeyi kısıtları (``PRIMARY KEY (a, b)``, ``UNIQUE (...)``,
-  ``CHECK (...)``, ``FOREIGN KEY ...``, ``CONSTRAINT ...``) ve tablo
-  seçeneklerini (``WITHOUT ROWID``, ``STRICT``) taşımaz; bunlar henüz
-  desteklenmez. Motor DDL'den önce bunları tespit eder (``PRAGMA
-  index_list``, ``sqlite_master``) ve bulursa ``DesteklenmeyenYapi`` ile
-  reddeder. Tablo düzeyi kısıt tespiti ``sqlite_master`` metnini
-  **ayrıştırmaz**: metnin en dış parantezindeki üst düzey parça sayısı sütun
-  sayısından fazlaysa sütun olmayan bir parça vardır. Tabloya adıyla değinen
-  görünüm ve trigger'lar da reddedilir (yeniden adlandırma onları bozar).
-  Üretilen/gizli sütunlar da desteklenmez.
+* **Bağlı nesneler taşınır:** tablonun indeksleri ve trigger'ları tabloyla
+  birlikte silinir; tabloya değinen görünümler ve başka tabloların
+  trigger'ları ise yeniden adlandırmayı düşürür (SQLite şemayı yeniden
+  ayrıştırır, tablo o an yoktur). Hangi görünümün tabloya değindiği
+  ayrıştırmadan bilinemez (görünümün görünümü). Bu yüzden motor tablonun
+  indekslerini ve veritabanındaki **bütün** görünüm ve trigger'ları
+  ``sqlite_master``'dan **oluşturma cümleleriyle** alır (SQLite cümleyi
+  olduğu gibi saklar; ayrıştırma yoktur), görünüm ve trigger'ları işten
+  önce siler, tabloyu kurar, sonra hepsini oluşturma sırasıyla aynı
+  cümleyle geri açar. Aynı transaction'da aynı cümleyle geri açılan nesne
+  kayıpsızdır. Bir cümle yeni tanıma uymuyorsa SQLite düşürür, iş geri
+  alınır.
+* **Sessiz kayıp yok:** tablo düzeyi kısıtlar (``PRIMARY KEY (a, b)``,
+  ``UNIQUE (...)``, ``CHECK (...)``, ``FOREIGN KEY ...``, ``CONSTRAINT ...``)
+  ve tablo seçenekleri (``WITHOUT ROWID``, ``STRICT``) ``CREATE TABLE``
+  metninin içindedir; motor bu metni ayrıştırmadığı ve istek onları
+  taşımadığı için yeniden kurmada kaybolurlardı. Bunlar henüz desteklenmez;
+  motor DDL'den önce tespit eder ve ``DesteklenmeyenYapi`` ile reddeder.
+  Tespit ayrıştırma değildir: metnin en dış parantezindeki üst düzey parça
+  sayısı sütun sayısından fazlaysa sütun olmayan bir parça vardır.
+  Üretilen/gizli sütunlar da desteklenmez. Motorun kendi açtığı tablolarda
+  bunlar olmaz (``tablo_olustur`` yalnız sütun yazar).
 * Bu okumalar yalnız bu işe özeldir ve yalnız reddetmek içindir; motor
   okuduğunu tanıma dönüştürmez, karar vermez, göstermez.
 
@@ -100,9 +111,8 @@ class SutunlarUyusmuyor(MotorHatasi):
 
 class DesteklenmeyenYapi(MotorHatasi):
     """Sütun özelliği değiştirme: tabloda yeniden kurmanın taşıyamayacağı bir
-    yapı var (indeks, trigger, görünüm, tablo düzeyi kısıt, tablo seçeneği,
-    gizli sütun); sessizce kaybetmemek için reddedildi, veritabanına
-    dokunulmadı."""
+    yapı var (tablo düzeyi kısıt, tablo seçeneği, gizli sütun); sessizce
+    kaybetmemek için reddedildi, veritabanına dokunulmadı."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,14 +214,17 @@ def sutun_ozelligi_degistir(
     Önce ad biçimi (dokunmadan), sonra transaction içinde ama DDL'den önce
     emniyet denetimleri: sütun adları birebir aynı mı (``SutunlarUyusmuyor``),
     taşınamayacak yapı var mı (``DesteklenmeyenYapi``). Denetimler geçmezse
-    hiçbir DDL çalışmaz. Düşen iş bütünüyle geri alınır; eski tablo kalır.
+    hiçbir DDL çalışmaz. Sonra tabloya bağlı görünüm ve trigger'lar silinir,
+    tablo yeniden kurulur, indeks/trigger/görünümler saklı oluşturma
+    cümleleriyle geri açılır. Düşen iş bütünüyle geri alınır; eski tablo kalır.
     """
     adimlar = sutun_ozelligi_degistirme_sql(istek)
     try:
         with veritabani.islem_yabanci_anahtar_denetimsiz() as oturum:
             baglanti = oturum.connection()
             _yeniden_kurma_on_denetimi(baglanti, istek)
-            for ddl in adimlar:
+            bagli = _bagli_nesneler(baglanti, istek.tablo)
+            for ddl in (*bagli.once_silinecek, *adimlar, *bagli.sonra_kurulacak):
                 baglanti.exec_driver_sql(ddl)
     except YabanciAnahtarIhlali as hata:
         raise MotorHatasi(f"istek uygulanamadı, geri alındı: {hata}") from hata
@@ -242,20 +255,6 @@ def _yeniden_kurma_on_denetimi(
             "silme ve yeniden adlandırma bu işin dışındadır."
         )
 
-    indeksler = baglanti.exec_driver_sql(f'PRAGMA index_list("{tablo}")').all()
-    acik_indeksler = [str(i[1]) for i in indeksler if i[3] == "c"]
-    if acik_indeksler:
-        raise DesteklenmeyenYapi(f"{tablo}: indeks var: {acik_indeksler}")
-
-    deginen = re.compile(rf"\b{re.escape(tablo)}\b", re.IGNORECASE)
-    bagimlilar = baglanti.exec_driver_sql(
-        "SELECT type, name, sql FROM sqlite_master "
-        "WHERE type IN ('trigger', 'view') AND sql IS NOT NULL"
-    ).all()
-    ilgili = [f"{b[0]} {b[1]}" for b in bagimlilar if deginen.search(str(b[2]))]
-    if ilgili:
-        raise DesteklenmeyenYapi(f"{tablo}: tabloya değinen trigger/görünüm: {ilgili}")
-
     tanim = baglanti.exec_driver_sql(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (tablo,)
     ).scalar_one()
@@ -267,6 +266,39 @@ def _yeniden_kurma_on_denetimi(
         )
     if kuyruk:
         raise DesteklenmeyenYapi(f"{tablo}: tablo seçeneği var: {kuyruk!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class _BagliNesneler:
+    """Yeniden kurmada taşınacak nesneler: önce silinecek ``DROP`` cümleleri ve
+    sonra oluşturma sırasıyla geri açılacak saklı ``CREATE`` cümleleri."""
+
+    once_silinecek: tuple[str, ...]
+    sonra_kurulacak: tuple[str, ...]
+
+
+def _bagli_nesneler(baglanti: Connection, tablo: str) -> _BagliNesneler:
+    """Tablonun indeksleri (tabloyla silinir) ve veritabanındaki bütün görünüm
+    ve trigger'lar (tabloya değinenler yeniden adlandırmayı düşürür; hangisi
+    değiniyor ayrıştırmadan bilinemez). Otomatik indekslerin (``sql`` boş;
+    kısıtlardan gelir) cümlesi yoktur, yeni ``CREATE TABLE`` ile oluşur."""
+    satirlar = baglanti.exec_driver_sql(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master "
+        "WHERE type IN ('index', 'trigger', 'view') AND sql IS NOT NULL "
+        "ORDER BY rowid"
+    ).all()
+    silinecek: list[str] = []
+    kurulacak: list[str] = []
+    for tur, ad, tbl, sql in (
+        (str(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in satirlar
+    ):
+        if tur == "index":
+            if tbl == tablo:
+                kurulacak.append(sql)
+        else:
+            silinecek.append(f'DROP {tur.upper()} "{ad.replace(chr(34), chr(34) * 2)}"')
+            kurulacak.append(sql)
+    return _BagliNesneler(tuple(silinecek), tuple(kurulacak))
 
 
 def _ust_duzey_parca_sayisi(sql: str) -> tuple[int, str]:

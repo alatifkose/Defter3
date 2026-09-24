@@ -428,52 +428,111 @@ def test_olmayan_tablo_reddedilir(veritabani: vt.Veritabani) -> None:
     assert _tablolar(veritabani) == set()
 
 
-# --- sessiz kayıp yok: taşınamayacak yapı tespit edilince reddedilir ---------------
+# --- bağlı nesneler taşınır: indeks, trigger, görünüm ---------------------------
 
 
-@pytest.mark.parametrize(
-    ("ek_sql", "neden"),
-    [
-        ("CREATE INDEX ix_kisiler_ad ON kisiler (ad_soyad)", "indeks var"),
-        ("CREATE UNIQUE INDEX ux ON kisiler (ad_soyad)", "indeks var"),
-        (
-            "CREATE TRIGGER tr AFTER INSERT ON kisiler BEGIN "
-            "UPDATE kisiler SET not_metni = 'yeni' WHERE id = NEW.id; END",
-            "trigger tr",
-        ),
-        (
-            "CREATE TABLE diger (id INTEGER); CREATE TRIGGER tr2 AFTER INSERT ON diger "
-            "BEGIN DELETE FROM kisiler WHERE id = NEW.id; END",
-            "trigger tr2",
-        ),
-        ("CREATE VIEW gorunum AS SELECT ad_soyad FROM kisiler", "view gorunum"),
-    ],
+BAGLI_NESNELER = (
+    "CREATE INDEX ix_kisiler_ad ON kisiler (ad_soyad)",
+    "CREATE UNIQUE INDEX ux_kisiler_id_ad ON kisiler (id, ad_soyad)",
+    "CREATE TRIGGER tr_kisiler AFTER INSERT ON kisiler BEGIN "
+    "UPDATE kisiler SET not_metni = 'yeni' WHERE id = NEW.id; END",
+    "CREATE TABLE diger (id INTEGER)",
+    "CREATE TRIGGER tr_diger AFTER INSERT ON diger BEGIN "
+    "DELETE FROM kisiler WHERE id = NEW.id; END",
+    "CREATE VIEW gorunum AS SELECT id, ad_soyad FROM kisiler",
+    "CREATE VIEW gorunum_ust AS SELECT ad_soyad FROM gorunum",
 )
-def test_indeks_trigger_gorunum_varsa_reddeder(
-    veritabani: vt.Veritabani, ek_sql: str, neden: str
-) -> None:
-    _kisileri_doldur(veritabani)
-    with veritabani.islem() as oturum:
-        for ifade in ek_sql.split("; CREATE"):
-            oturum.execute(
-                text(ifade if ifade.startswith("CREATE") else "CREATE" + ifade)
+
+
+def _nesneler(v: vt.Veritabani) -> list[tuple[str, str, str]]:
+    """(tür, ad, cümle), oluşturma sırasıyla; tablolar hariç."""
+    with v.islem() as oturum:
+        satirlar = oturum.execute(
+            text(
+                "SELECT type, name, sql FROM sqlite_master "
+                "WHERE type != 'table' AND sql IS NOT NULL ORDER BY rowid"
             )
-
-    with pytest.raises(m.DesteklenmeyenYapi, match=neden):
-        m.sutun_ozelligi_degistir(veritabani, KISILER_YENI)
-
-    _eski_kisiler_eksiksiz(veritabani)
+        ).all()
+    return [(str(r[0]), str(r[1]), str(r[2])) for r in satirlar]
 
 
-def test_baska_tabloya_deginen_gorunum_engellemez(veritabani: vt.Veritabani) -> None:
-    _kisileri_doldur(veritabani)
-    with veritabani.islem() as oturum:
-        oturum.execute(text("CREATE TABLE kisiler_arsiv (id INTEGER)"))
-        oturum.execute(text("CREATE VIEW g AS SELECT id FROM kisiler_arsiv"))
+def _bagli_nesneleri_kur(v: vt.Veritabani) -> list[tuple[str, str, str]]:
+    _kisileri_doldur(v)
+    with v.islem() as oturum:
+        for cumle in BAGLI_NESNELER:
+            oturum.execute(text(cumle))
+    return _nesneler(v)
+
+
+def test_indeks_trigger_ve_gorunumler_ayni_cumleyle_geri_acilir(
+    veritabani: vt.Veritabani,
+) -> None:
+    oncesi = _bagli_nesneleri_kur(veritabani)
+    assert {n[1] for n in oncesi} == {
+        "ix_kisiler_ad",
+        "ux_kisiler_id_ad",
+        "tr_kisiler",
+        "tr_diger",
+        "gorunum",
+        "gorunum_ust",
+    }
 
     m.sutun_ozelligi_degistir(veritabani, KISILER_YENI)
 
+    assert _nesneler(veritabani) == oncesi  # aynı cümle, aynı sıra
     assert _sutunlar(veritabani, "kisiler")[1] == ("ad_soyad", "TEXT", 1, None)
+    # hepsi çalışıyor: indeks tabloya bağlı, trigger'lar ateşleniyor, görünüm okunuyor
+    with veritabani.islem() as oturum:
+        indeksler = oturum.execute(text('PRAGMA index_list("kisiler")')).all()
+        assert {str(i[1]) for i in indeksler} >= {"ix_kisiler_ad", "ux_kisiler_id_ad"}
+        oturum.execute(text("INSERT INTO kisiler (id, ad_soyad) VALUES (3, 'Can')"))
+        oturum.execute(text("INSERT INTO diger (id) VALUES (2)"))
+    assert _satirlar(veritabani, "SELECT id, not_metni FROM kisiler ORDER BY id") == [
+        (1, None),
+        (3, "yeni"),
+    ]
+    assert _satirlar(veritabani, "SELECT * FROM gorunum_ust ORDER BY 1") == [
+        ("Ali",),
+        ("Can",),
+    ]
+
+
+def test_dusen_iste_bagli_nesneler_de_eksiksiz_kalir(
+    veritabani: vt.Veritabani,
+) -> None:
+    oncesi = _bagli_nesneleri_kur(veritabani)
+    istek = m.SutunOzelligiDegistirmeIstegi(
+        "kisiler",
+        (
+            m.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+            m.Sutun("ad_soyad", ("TEXT", "NOT NULL")),
+            m.Sutun("dogum_tarihi", ("TEXT", "NOT NULL")),  # Veli'de NULL: düşer
+            m.Sutun("not_metni"),
+        ),
+    )
+
+    with pytest.raises(m.MotorHatasi, match="NOT NULL"):
+        m.sutun_ozelligi_degistir(veritabani, istek)
+
+    _eski_kisiler_eksiksiz(veritabani)
+    assert _nesneler(veritabani) == oncesi
+
+
+def test_baska_tablonun_nesneleri_oldugu_gibi_kalir(veritabani: vt.Veritabani) -> None:
+    """Başka tablonun indeksine dokunulmaz; görünümü aynı cümleyle geri açılır."""
+    _kisileri_doldur(veritabani)
+    with veritabani.islem() as oturum:
+        oturum.execute(text("CREATE TABLE kisiler_arsiv (id INTEGER, ad TEXT)"))
+        oturum.execute(text("CREATE INDEX ix_arsiv ON kisiler_arsiv (ad)"))
+        oturum.execute(text("CREATE VIEW g AS SELECT id FROM kisiler_arsiv"))
+    oncesi = _nesneler(veritabani)
+
+    m.sutun_ozelligi_degistir(veritabani, KISILER_YENI)
+
+    assert _nesneler(veritabani) == oncesi
+
+
+# --- sessiz kayıp yok: taşınamayan yapı tespit edilince reddedilir ------------------
 
 
 @pytest.mark.parametrize(
