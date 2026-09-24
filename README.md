@@ -51,8 +51,21 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
 * Mimari sınır: `cekirdek/` ve `finans/` paketleri, bağımlılık yönünü ve
   çekirdekte finansal ad yasağını koruyan AST testi
 
-Henüz yok: motor (tablo oluşturma, sütun ekleme, sütun özelliği), uygulamanın
-onay penceresi, motoru Cowork'e açan MCP araçları, yeni mükerrerlik tasarımı.
+* **Birinci motor** (`cekirdek/motor.py`, 2026-09-24): tablo oluşturur, sütun
+  ekler. Sütun özelliği ekleme isteğinin içinde gider ve **koda gömülü
+  değildir**: istekte ne geldiyse (`Sutun.ozellikler`) sütun adından sonra
+  olduğu gibi yazılır, geçerliliğini SQLite belirler. Görünen ad, sütun
+  tanımının motor tarafından yönetilen özelliğidir; motor onu tek bir sütun
+  tanımları tablosunda (`sutun_tanimlari`: tablo_adi, sutun_adi, gorunen_ad)
+  kalıcı saklar, arayüz oradan okur. Tablo/sütun adları sade ve Türkçe
+  karaktersizdir (`AD_BICIMI`). Motor yapıyı okumaz, onay almaz (onayı
+  uygulama alır, motoru onaydan sonra çağırır); bir iş = bir transaction.
+
+İkinci motor (mevcut sütunun özelliğini değiştirme; SQLite kısıtı gereği
+tabloyu yedek alıp yalnız iş anında okuyarak baştan kurar) henüz yok.
+
+Henüz yok: ikinci motor, uygulamanın onay penceresi, motoru Cowork'e açan MCP
+araçları, yeni mükerrerlik tasarımı.
 
 ## Veritabanı
 
