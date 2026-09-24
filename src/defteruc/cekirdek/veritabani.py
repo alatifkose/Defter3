@@ -24,6 +24,12 @@ Bu modül hiçbir domain'i bilmez ve hiçbir tablo tanımlamaz. Sağladıkları:
   transaction. Normal çıkışta ``commit``, istisnada ``rollback`` ve istisna
   yeniden yükselir, her durumda oturum kapanır. Model ya da ileride gelecek
   depo kodu kendi başına ``commit`` etmez; sahip bu bağlam yöneticisidir.
+* ``Veritabani.islem_yabanci_anahtar_denetimsiz``: tabloyu yeniden kurma
+  gibi, SQLite'ın resmî tarifi gereği ``foreign_keys=OFF`` ile yürümesi
+  gereken işler için işlem sınırı. Denetim yalnız bu bağlantıda ve yalnız iş
+  süresince kapanır; ``commit`` öncesi ``PRAGMA foreign_key_check`` çalışır,
+  bir ihlal varsa iş geri alınır. Çıkışta (başarı, hata ya da ihlal) denetim
+  aynı bağlantıda yeniden açılır; havuza denetimsiz bağlantı dönmez.
 """
 
 from __future__ import annotations
@@ -32,7 +38,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import Engine, MetaData, create_engine, event
+from sqlalchemy import Engine, MetaData, create_engine, event, text
 from sqlalchemy.engine import URL
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -83,23 +89,36 @@ def motor_olustur(yol: Path) -> Engine:
 def _baglantiyi_ayarla(
     dbapi_baglantisi: DBAPIConnection, _kayit: ConnectionPoolEntry
 ) -> None:
-    """Yeni DBAPI bağlantısında PRAGMA'ları transaction dışında uygular.
+    """Yeni DBAPI bağlantısında bağlantı politikasını uygular."""
+    _pragmalari_transaction_disinda_uygula(dbapi_baglantisi, BAGLANTI_PRAGMALARI)
+
+
+def _pragmalari_transaction_disinda_uygula(
+    dbapi_baglantisi: DBAPIConnection, pragmalar: tuple[tuple[str, str], ...]
+) -> None:
+    """PRAGMA'ları transaction dışında uygular.
 
     ``autocommit=False`` kipinde bağlantı açık bir (ertelenmiş) transaction ile
     gelir; PRAGMA'lar orada etkisiz kalır. ``autocommit`` geçici olarak açılır
     (boş transaction biter), PRAGMA'lar çalışır, sonra kapatılır (yeni
-    ertelenmiş transaction başlar).
+    ertelenmiş transaction başlar). Yalnız henüz hiçbir şey yazılmamış bir
+    bağlantıda çağrılmalıdır; bekleyen bir transaction varsa commit edilirdi.
     """
     dbapi_baglantisi.autocommit = True
     try:
         imlec = dbapi_baglantisi.cursor()
         try:
-            for ad, deger in BAGLANTI_PRAGMALARI:
+            for ad, deger in pragmalar:
                 imlec.execute(f"PRAGMA {ad}={deger}")
         finally:
             imlec.close()
     finally:
         dbapi_baglantisi.autocommit = False
+
+
+class YabanciAnahtarIhlali(Exception):
+    """Denetimsiz iş sonunda ``PRAGMA foreign_key_check`` ihlal buldu; iş geri
+    alındı."""
 
 
 class Veritabani:
@@ -121,6 +140,36 @@ class Veritabani:
         except BaseException:
             oturum.rollback()
             raise
+        finally:
+            oturum.close()
+
+    @contextmanager
+    def islem_yabanci_anahtar_denetimsiz(self) -> Generator[Session, None, None]:
+        """``foreign_keys=OFF`` ile bir iş = bir transaction (SQLite'ın tablo
+        yeniden kurma tarifi). Denetim yalnız bu bağlantıda, yalnız iş
+        süresince kapalıdır; ``commit`` öncesi ``PRAGMA foreign_key_check``
+        çalışır, ihlal varsa ``YabanciAnahtarIhlali`` ile geri alınır. Her
+        çıkışta denetim aynı bağlantıda yeniden açılır."""
+        oturum = self._oturum_ac()
+        try:
+            ham = oturum.connection().connection.dbapi_connection
+            if ham is None:  # pragma: no cover - havuz her zaman bağlantı verir
+                raise RuntimeError("DBAPI bağlantısı alınamadı")
+            _pragmalari_transaction_disinda_uygula(ham, (("foreign_keys", "OFF"),))
+            try:
+                yield oturum
+                ihlaller = oturum.execute(text("PRAGMA foreign_key_check")).all()
+                if ihlaller:
+                    raise YabanciAnahtarIhlali(
+                        f"{len(ihlaller)} yabancı anahtar ihlali: "
+                        + ", ".join(f"{i[0]}(rowid {i[1]}) -> {i[2]}" for i in ihlaller)
+                    )
+                oturum.commit()
+            except BaseException:
+                oturum.rollback()
+                raise
+            finally:
+                _pragmalari_transaction_disinda_uygula(ham, (("foreign_keys", "ON"),))
         finally:
             oturum.close()
 

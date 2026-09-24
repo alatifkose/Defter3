@@ -235,3 +235,49 @@ def test_test_veritabani_yalniz_test_kokunde_olusur(
     assert ayarlar.veritabani_yolu.with_name(
         ayarlar.veritabani_yolu.name + "-wal"
     ).exists()  # WAL gerçekten dosyada
+
+
+# --- yabancı anahtar denetimsiz işlem sınırı ------------------------------------------
+
+
+def test_denetimsiz_islemde_denetim_kapali_sonra_yeniden_acik(
+    veritabani: vt.Veritabani,
+) -> None:
+    _tablolari_kur(veritabani)
+    with veritabani.islem_yabanci_anahtar_denetimsiz() as oturum:
+        assert oturum.execute(text("PRAGMA foreign_keys")).scalar_one() == 0
+        oturum.execute(text("INSERT INTO ust (id) VALUES (1)"))
+        oturum.execute(text("INSERT INTO alt (ust_id) VALUES (1)"))
+
+    assert _alt_sayisi(veritabani) == 1  # commit oldu
+    with veritabani.islem() as oturum:  # aynı havuz bağlantısı; denetim geri açık
+        assert oturum.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+        with pytest.raises(IntegrityError, match="FOREIGN KEY"):
+            oturum.execute(text("INSERT INTO alt (ust_id) VALUES (99)"))
+
+
+def test_denetimsiz_islem_sonunda_ihlal_varsa_geri_alinir(
+    veritabani: vt.Veritabani,
+) -> None:
+    _tablolari_kur(veritabani)
+    with pytest.raises(vt.YabanciAnahtarIhlali, match=r"1 yabancı anahtar ihlali"):
+        with veritabani.islem_yabanci_anahtar_denetimsiz() as oturum:
+            oturum.execute(text("INSERT INTO alt (ust_id) VALUES (99)"))  # denetim yok
+
+    assert _alt_sayisi(veritabani) == 0
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+
+
+def test_denetimsiz_islemde_hata_geri_alir_ve_denetimi_acar(
+    veritabani: vt.Veritabani,
+) -> None:
+    _tablolari_kur(veritabani)
+    with pytest.raises(RuntimeError, match="kasıtlı"):
+        with veritabani.islem_yabanci_anahtar_denetimsiz() as oturum:
+            oturum.execute(text("INSERT INTO ust (id) VALUES (1)"))
+            raise RuntimeError("kasıtlı")
+
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("SELECT count(*) FROM ust")).scalar_one() == 0
+        assert oturum.execute(text("PRAGMA foreign_keys")).scalar_one() == 1

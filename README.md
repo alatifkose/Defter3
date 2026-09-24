@@ -23,7 +23,7 @@ Roller:
 | Kim | Ne yapar |
 |---|---|
 | Cowork | Belgeyi okur, ne gerektiğine karar verir, motoru kullanır. |
-| Motor | Yalnız araçtır: tablo oluşturur, sütun ekler, sütun özelliği belirler. Hafızası yoktur, bir şey göstermez, mevcut yapıyı okumaz, kural koymaz ve reddetmez; onaylananı yapar. |
+| Motor | Yalnız araçtır: tablo oluşturur, sütun ekler, sütun özelliği belirler ve değiştirir. Hafızası yoktur, bir şey göstermez, mevcut yapıyı okumaz, kural koymaz ve reddetmez; onaylananı yapar. Tek istisna sütun özelliği değiştirmenin emniyet kuralı (aşağıda). |
 | Uygulama | Kullanıcı onayını alır (Cowork değil). |
 
 Onay kuralı: **yapıyı değiştiren her şey kullanıcı onayına bağlıdır** (tablo,
@@ -51,8 +51,9 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
 * Mimari sınır: `cekirdek/` ve `finans/` paketleri, bağımlılık yönünü ve
   çekirdekte finansal ad yasağını koruyan AST testi
 
-* **Birinci motor** (`cekirdek/motor.py`, 2026-09-24): tablo oluşturur, sütun
-  ekler. Sütun özelliği ekleme isteğinin içinde gider ve **koda gömülü
+* **Motor** (`cekirdek/motor.py`, 2026-09-24): tablo oluşturur, sütun
+  ekler, sütun özelliği değiştirir. Tek motor vardır; ikinci motor olmayacak
+  (karar 2026-09-24). Sütun özelliği isteğin içinde gider ve **koda gömülü
   değildir**: istekte ne geldiyse (`Sutun.ozellikler`) sütun adından sonra
   olduğu gibi yazılır, geçerliliğini SQLite belirler. Motor hazır tablo
   taşımaz ve hiçbir özelliği ismen bilmez: sütunların görünen adı gibi tanım
@@ -61,11 +62,30 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   karaktersizdir (`AD_BICIMI`). Motor yapıyı okumaz, onay almaz (onayı
   uygulama alır, motoru onaydan sonra çağırır); bir iş = bir transaction.
 
-İkinci motor (mevcut sütunun özelliğini değiştirme; SQLite kısıtı gereği
-tabloyu yedek alıp yalnız iş anında okuyarak baştan kurar) henüz yok.
+* **Sütun özelliği değiştirme** (`sutun_ozelligi_degistir`, 2026-09-24).
+  SQLite sütunu yerinde değiştiremez; tablo, isteğin taşıdığı **tam yeni
+  tanımla** (bütün sütunlar, yeni özellikleriyle) SQLite'ın resmî tarifiyle
+  yeniden kurulur: geçici adla yeni tablo, satırların aynı adlı sütunlarla
+  taşınması, eskinin silinmesi, geçicinin eski adı alması. Hepsi
+  `foreign_keys=OFF` ile tek transaction'dadır
+  (`Veritabani.islem_yabanci_anahtar_denetimsiz`); `commit` öncesi
+  `PRAGMA foreign_key_check` çalışır, ihlal ya da herhangi bir adımın düşmesi
+  (örn. yeni özelliğe uymayan satır) işi bütünüyle geri alır, eski tablo
+  eksiksiz kalır. **Emniyet kuralı:** bu iş yalnız mevcut sütunların
+  özelliğini değiştirir; sütun ekleyemez, silemez, adını ve sırasını
+  değiştiremez. Motor DDL'den önce `PRAGMA table_xinfo` ile mevcut sütun
+  adlarını okur, istekle sırasıyla birebir aynı değilse hiçbir şey yapmadan
+  `SutunlarUyusmuyor` verir. **Sessiz kayıp yok:** yeniden kurma indeksleri,
+  trigger'ları, tabloya değinen görünümleri, tablo düzeyi kısıtları
+  (`UNIQUE (a, b)`, `CHECK (...)`, `FOREIGN KEY ...`, `CONSTRAINT ...`),
+  tablo seçeneklerini (`WITHOUT ROWID`, `STRICT`) ve üretilen sütunları
+  taşımaz; bunlar henüz desteklenmez, motor DDL'den önce tespit edip
+  `DesteklenmeyenYapi` ile reddeder. Tablo düzeyi kısıt tespiti tanım metnini
+  ayrıştırmaz: en dış parantezdeki üst düzey parça sayısı sütun sayısından
+  fazlaysa sütun olmayan parça vardır. Bu okumalar yalnız reddetmek içindir.
 
-Henüz yok: ikinci motor, uygulamanın onay penceresi, motoru Cowork'e açan MCP
-araçları, yeni mükerrerlik tasarımı.
+Henüz yok: uygulamanın onay penceresi, motoru Cowork'e açan MCP araçları,
+yeni mükerrerlik tasarımı.
 
 ## Veritabanı
 
@@ -98,6 +118,11 @@ kısa ömürlü oturum = bir transaction. Normal çıkışta `commit`, istisnada
 `rollback` ve istisna yeniden yükselir, her durumda oturum kapanır. Model ya
 da ileride gelecek depo kodu kendi başına `commit` etmez; sahip bu bağlam
 yöneticisidir. `kapat()` havuzu boşaltır (Windows'ta dosya kilidi için).
+`islem_yabanci_anahtar_denetimsiz()` aynı sınırın `foreign_keys=OFF`
+biçimidir (tabloyu yeniden kurma için): denetim yalnız o bağlantıda ve yalnız
+iş süresince kapanır, `commit` öncesi `PRAGMA foreign_key_check` çalışır,
+ihlalde `YabanciAnahtarIhlali` ile geri alınır; her çıkışta denetim aynı
+bağlantıda yeniden açılır, havuza denetimsiz bağlantı dönmez.
 
 **Testler** (`tests/test_cekirdek_veritabani.py`): gerçek SQLite dosyalarıyla,
 `test` ortamı ve `tmp_path` altında kök; `:memory:` yok. Kanıtlananlar: import

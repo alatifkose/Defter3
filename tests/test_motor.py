@@ -240,3 +240,324 @@ def test_sade_olmayan_ad_veritabanina_dokunmadan_reddedilir(
         m.tablo_olustur(veritabani, m.TabloOlusturmaIstegi("t", (m.Sutun(ad),)))
 
     assert not veritabani.yol.exists()
+
+
+# --- sütun özelliği değiştirme: tabloyu tam tanımla yeniden kurma ------------------
+
+
+def _satirlar(v: vt.Veritabani, sql: str) -> list[tuple[object, ...]]:
+    with v.islem() as oturum:
+        return [tuple(s) for s in oturum.execute(text(sql)).all()]
+
+
+def _kisileri_doldur(v: vt.Veritabani) -> None:
+    m.tablo_olustur(v, KISILER)
+    with v.islem() as oturum:
+        oturum.execute(
+            text(
+                "INSERT INTO kisiler (id, ad_soyad, dogum_tarihi, not_metni) VALUES "
+                "(1, 'Ali', '1980-01-01', NULL), (2, 'Veli', NULL, 'x')"
+            )
+        )
+
+
+KISILER_YENI = m.SutunOzelligiDegistirmeIstegi(
+    tablo="kisiler",
+    sutunlar=(
+        m.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+        m.Sutun("ad_soyad", ("TEXT", "NOT NULL", "COLLATE NOCASE")),
+        m.Sutun("dogum_tarihi", ("TEXT", "DEFAULT '1900-01-01'")),
+        m.Sutun("not_metni", ("TEXT",)),
+    ),
+)
+
+
+def test_sutun_ozelligi_degistirme_sql_adimlari_dokunmadan_uretir() -> None:
+    assert m.sutun_ozelligi_degistirme_sql(KISILER_YENI) == (
+        'CREATE TABLE "kisiler__yeniden_kurma" ("id" INTEGER PRIMARY KEY, '
+        '"ad_soyad" TEXT NOT NULL COLLATE NOCASE, '
+        '"dogum_tarihi" TEXT DEFAULT \'1900-01-01\', "not_metni" TEXT)',
+        'INSERT INTO "kisiler__yeniden_kurma" '
+        '("id", "ad_soyad", "dogum_tarihi", "not_metni") '
+        'SELECT "id", "ad_soyad", "dogum_tarihi", "not_metni" FROM "kisiler"',
+        'DROP TABLE "kisiler"',
+        'ALTER TABLE "kisiler__yeniden_kurma" RENAME TO "kisiler"',
+    )
+
+
+def test_ozellikleri_degistirir_satirlari_korur(veritabani: vt.Veritabani) -> None:
+    _kisileri_doldur(veritabani)
+
+    m.sutun_ozelligi_degistir(veritabani, KISILER_YENI)
+
+    assert _tablolar(veritabani) == {"kisiler"}  # geçici tablo kalmaz
+    assert _sutunlar(veritabani, "kisiler") == [
+        ("id", "INTEGER", 0, None),
+        ("ad_soyad", "TEXT", 1, None),
+        ("dogum_tarihi", "TEXT", 0, "'1900-01-01'"),
+        ("not_metni", "TEXT", 0, None),
+    ]
+    assert _satirlar(veritabani, "SELECT * FROM kisiler ORDER BY id") == [
+        (1, "Ali", "1980-01-01", None),
+        (2, "Veli", None, "x"),
+    ]
+    # yeni özellik gerçekten uygulanıyor (COLLATE NOCASE)
+    assert _satirlar(
+        veritabani, "SELECT id FROM kisiler WHERE ad_soyad = 'ALİ' OR ad_soyad = 'ALI'"
+    ) == [(1,)]
+
+
+def test_baska_tablonun_bagi_yeniden_kurulan_tabloyu_izler(
+    veritabani: vt.Veritabani,
+) -> None:
+    _kisileri_doldur(veritabani)
+    m.tablo_olustur(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "notlar",
+            (
+                m.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+                m.Sutun("kisi_id", ("INTEGER", "NOT NULL", "REFERENCES kisiler(id)")),
+            ),
+        ),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO notlar (kisi_id) VALUES (1)"))
+
+    m.sutun_ozelligi_degistir(veritabani, KISILER_YENI)
+
+    assert _satirlar(veritabani, "SELECT kisi_id FROM notlar") == [(1,)]
+    with pytest.raises(IntegrityError, match="FOREIGN KEY"):  # denetim yeniden açık
+        with veritabani.islem() as oturum:
+            oturum.execute(text("INSERT INTO notlar (kisi_id) VALUES (9)"))
+
+
+def test_uymayan_satirda_is_duser_eski_tablo_eksiksiz_kalir(
+    veritabani: vt.Veritabani,
+) -> None:
+    """Veli'nin doğum tarihi NULL; NOT NULL isteği SQLite'ta düşer."""
+    _kisileri_doldur(veritabani)
+    istek = m.SutunOzelligiDegistirmeIstegi(
+        "kisiler",
+        (
+            m.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+            m.Sutun("ad_soyad", ("TEXT", "NOT NULL")),
+            m.Sutun("dogum_tarihi", ("TEXT", "NOT NULL")),
+            m.Sutun("not_metni"),
+        ),
+    )
+
+    with pytest.raises(m.MotorHatasi, match="NOT NULL"):
+        m.sutun_ozelligi_degistir(veritabani, istek)
+
+    _eski_kisiler_eksiksiz(veritabani)
+
+
+def _eski_kisiler_eksiksiz(v: vt.Veritabani) -> None:
+    assert _tablolar(v) >= {"kisiler"} and "kisiler__yeniden_kurma" not in _tablolar(v)
+    assert _sutunlar(v, "kisiler") == [
+        ("id", "INTEGER", 0, None),
+        ("ad_soyad", "TEXT", 1, None),
+        ("dogum_tarihi", "TEXT", 0, None),
+        ("not_metni", "", 0, None),
+    ]
+    assert _satirlar(v, "SELECT * FROM kisiler ORDER BY id") == [
+        (1, "Ali", "1980-01-01", None),
+        (2, "Veli", None, "x"),
+    ]
+
+
+# --- emniyet kuralı: yalnız özellik; ekleme, silme, ad ve sıra değişikliği yok ------
+
+
+@pytest.mark.parametrize(
+    ("sutunlar", "neden"),
+    [
+        (  # eksik: not_metni yok (silme)
+            (m.Sutun("id"), m.Sutun("ad_soyad"), m.Sutun("dogum_tarihi")),
+            "eksik \\['not_metni'\\]",
+        ),
+        (  # fazla: sehir (ekleme)
+            (
+                m.Sutun("id"),
+                m.Sutun("ad_soyad"),
+                m.Sutun("dogum_tarihi"),
+                m.Sutun("not_metni"),
+                m.Sutun("sehir"),
+            ),
+            "fazla \\['sehir'\\]",
+        ),
+        (  # farklı ad (yeniden adlandırma)
+            (
+                m.Sutun("id"),
+                m.Sutun("ad"),
+                m.Sutun("dogum_tarihi"),
+                m.Sutun("not_metni"),
+            ),
+            "eksik \\['ad_soyad'\\], fazla \\['ad'\\]",
+        ),
+        (  # sıra farklı
+            (
+                m.Sutun("id"),
+                m.Sutun("dogum_tarihi"),
+                m.Sutun("ad_soyad"),
+                m.Sutun("not_metni"),
+            ),
+            "sıra farklı",
+        ),
+    ],
+)
+def test_sutun_adlari_birebir_ayni_degilse_dokunmadan_reddeder(
+    veritabani: vt.Veritabani, sutunlar: tuple[m.Sutun, ...], neden: str
+) -> None:
+    _kisileri_doldur(veritabani)
+
+    with pytest.raises(m.SutunlarUyusmuyor, match=neden):
+        m.sutun_ozelligi_degistir(
+            veritabani, m.SutunOzelligiDegistirmeIstegi("kisiler", sutunlar)
+        )
+
+    _eski_kisiler_eksiksiz(veritabani)
+
+
+def test_olmayan_tablo_reddedilir(veritabani: vt.Veritabani) -> None:
+    with pytest.raises(m.MotorHatasi, match="tablo yok"):
+        m.sutun_ozelligi_degistir(
+            veritabani, m.SutunOzelligiDegistirmeIstegi("yok", (m.Sutun("a"),))
+        )
+    assert _tablolar(veritabani) == set()
+
+
+# --- sessiz kayıp yok: taşınamayacak yapı tespit edilince reddedilir ---------------
+
+
+@pytest.mark.parametrize(
+    ("ek_sql", "neden"),
+    [
+        ("CREATE INDEX ix_kisiler_ad ON kisiler (ad_soyad)", "indeks var"),
+        ("CREATE UNIQUE INDEX ux ON kisiler (ad_soyad)", "indeks var"),
+        (
+            "CREATE TRIGGER tr AFTER INSERT ON kisiler BEGIN "
+            "UPDATE kisiler SET not_metni = 'yeni' WHERE id = NEW.id; END",
+            "trigger tr",
+        ),
+        (
+            "CREATE TABLE diger (id INTEGER); CREATE TRIGGER tr2 AFTER INSERT ON diger "
+            "BEGIN DELETE FROM kisiler WHERE id = NEW.id; END",
+            "trigger tr2",
+        ),
+        ("CREATE VIEW gorunum AS SELECT ad_soyad FROM kisiler", "view gorunum"),
+    ],
+)
+def test_indeks_trigger_gorunum_varsa_reddeder(
+    veritabani: vt.Veritabani, ek_sql: str, neden: str
+) -> None:
+    _kisileri_doldur(veritabani)
+    with veritabani.islem() as oturum:
+        for ifade in ek_sql.split("; CREATE"):
+            oturum.execute(
+                text(ifade if ifade.startswith("CREATE") else "CREATE" + ifade)
+            )
+
+    with pytest.raises(m.DesteklenmeyenYapi, match=neden):
+        m.sutun_ozelligi_degistir(veritabani, KISILER_YENI)
+
+    _eski_kisiler_eksiksiz(veritabani)
+
+
+def test_baska_tabloya_deginen_gorunum_engellemez(veritabani: vt.Veritabani) -> None:
+    _kisileri_doldur(veritabani)
+    with veritabani.islem() as oturum:
+        oturum.execute(text("CREATE TABLE kisiler_arsiv (id INTEGER)"))
+        oturum.execute(text("CREATE VIEW g AS SELECT id FROM kisiler_arsiv"))
+
+    m.sutun_ozelligi_degistir(veritabani, KISILER_YENI)
+
+    assert _sutunlar(veritabani, "kisiler")[1] == ("ad_soyad", "TEXT", 1, None)
+
+
+@pytest.mark.parametrize(
+    ("tanim", "sutunlar", "neden"),
+    [
+        (
+            "CREATE TABLE t (a INTEGER, b TEXT, UNIQUE (a, b))",
+            (m.Sutun("a"), m.Sutun("b")),
+            "tablo düzeyi kısıt",
+        ),
+        (
+            "CREATE TABLE t (a INTEGER, b TEXT, CHECK (a > 0 AND b IN ('x', 'y')))",
+            (m.Sutun("a"), m.Sutun("b")),
+            "tablo düzeyi kısıt",
+        ),
+        (
+            "CREATE TABLE t (a INTEGER, b TEXT, PRIMARY KEY (a, b))",
+            (m.Sutun("a"), m.Sutun("b")),
+            "tablo düzeyi kısıt",
+        ),
+        (
+            "CREATE TABLE t (a INTEGER, b TEXT, "
+            "CONSTRAINT fk FOREIGN KEY (a) REFERENCES kisiler (id))",
+            (m.Sutun("a"), m.Sutun("b")),
+            "tablo düzeyi kısıt",
+        ),
+        (
+            "CREATE TABLE t (a INTEGER PRIMARY KEY, b TEXT) WITHOUT ROWID",
+            (m.Sutun("a"), m.Sutun("b")),
+            "tablo seçeneği",
+        ),
+        (
+            "CREATE TABLE t (a INTEGER, b TEXT) STRICT",
+            (m.Sutun("a"), m.Sutun("b")),
+            "tablo seçeneği",
+        ),
+        (
+            "CREATE TABLE t (a INTEGER, b INTEGER GENERATED ALWAYS AS (a * 2) VIRTUAL)",
+            (m.Sutun("a"), m.Sutun("b")),
+            "gizli sütun",
+        ),
+    ],
+)
+def test_tablo_duzeyi_kisit_secenek_ve_gizli_sutun_reddedilir(
+    veritabani: vt.Veritabani, tanim: str, sutunlar: tuple[m.Sutun, ...], neden: str
+) -> None:
+    _kisileri_doldur(veritabani)
+    with veritabani.islem() as oturum:
+        oturum.execute(text(tanim))
+
+    with pytest.raises(m.DesteklenmeyenYapi, match=neden):
+        m.sutun_ozelligi_degistir(
+            veritabani, m.SutunOzelligiDegistirmeIstegi("t", sutunlar)
+        )
+
+    with veritabani.islem() as oturum:
+        kalan = oturum.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 't'")
+        ).scalar_one()
+    assert kalan == tanim
+
+
+@pytest.mark.parametrize(
+    ("sql", "beklenen"),
+    [
+        ('CREATE TABLE "t" ("a" INTEGER, "b" TEXT)', (2, "")),
+        ("CREATE TABLE t ()", (0, "")),
+        ("CREATE TABLE t (a)", (1, "")),
+        # sütun düzeyi kısıtların içindeki virgül ve parantez parça saymaz
+        (
+            "CREATE TABLE t (a INTEGER REFERENCES x(p, q), "
+            "b TEXT CHECK (b IN ('1,2', \"3)4\")) DEFAULT '(',  c)",
+            (3, ""),
+        ),
+        # tırnak ve köşeli parantez içindeki virgüller
+        (
+            "CREATE TABLE t (`a,b` TEXT, [c,d] TEXT, 'e' TEXT DEFAULT 'it''s, ok')",
+            (3, ""),
+        ),
+        # yorumlar
+        ("CREATE TABLE t (a, -- b, c\n b /* , d) */)", (2, "")),
+        ("CREATE TABLE t (a, b) WITHOUT ROWID", (2, "WITHOUT ROWID")),
+        ("CREATE TABLE t (a, b, UNIQUE (a, b))", (3, "")),
+    ],
+)
+def test_ust_duzey_parca_sayisi(sql: str, beklenen: tuple[int, str]) -> None:
+    assert m._ust_duzey_parca_sayisi(sql) == beklenen  # pyright: ignore[reportPrivateUsage]
