@@ -93,13 +93,30 @@ Sütun özelliği değiştirme (karar 2026-09-24):
 * **Kopyalama kayıpsızdır:** satırlar ``INSERT OR ABORT`` ile taşınır; yeni
   tanımdaki ``ON CONFLICT IGNORE/REPLACE`` düz ``INSERT``'i sessizce
   eksiltir ya da değer değiştirirdi, ``OR ABORT`` onu ezer ve çatışmada iş
-  düşer. Kopyalamadan sonra iki tablonun satır sayısı karşılaştırılır.
+  düşer. Kopyalamadan sonra satır sayısı, satır eşleşmesi ve değerler
+  karşılaştırılır (aşağıda).
   Örtük satır kimliği de taşınır (iki tablo da rowid tablosuysa):
   ``INTEGER PRIMARY KEY`` olmayan tabloda satır kimliği rowid'dir,
   görünümler ona dayanabilir. ``rowid`` / ``_rowid_`` / ``oid`` adlı gerçek
   bir sütun o takma adı gölgeler; motor gölgelenmemiş takma adı kullanır,
   üçü de gölgeliyse kimlik güvenle okunamaz ve iş ``MotorHatasi`` ile
   reddedilir. Rowid tablosu olup olmadığını ``PRAGMA table_list`` söyler.
+* **Değerler ve kimlikler aynen korunur:** sütun türü değişince SQLite
+  kopyada değeri dönüştürebilir (``TEXT '9007199254740993'`` → ``REAL``
+  hassasiyet kaybeder, ``TEXT '1'`` → ``INTEGER`` saklama sınıfı değişir) ya
+  da kimlik üretebilir (``INT PRIMARY KEY`` → ``INTEGER PRIMARY KEY`` rowid
+  takma adı olur, ``NULL`` anahtar dolar, rowid'ler değişir); satır sayısı
+  aynı kalır. Bu yüzden kopyadan sonra iki tablo satır satır eşleştirilir
+  (rowid tablosunda rowid, yoksa birincil anahtar sütunları) ve kopyalanan
+  her sütunda ``typeof`` ve değer (``COLLATE BINARY``) aynı olmalıdır;
+  eşleşmeyen satır ya da değişen değer varsa ``KopyaDegerDegisti`` ile iş
+  geri alınır. Bilerek dönüştürme ayrı ve açıktır:
+  ``deger_donusumu_izinli`` listesindeki sütunlarda değer denetimi yapılmaz
+  (onay penceresi bunu gösterir); kimlik denetimi her zaman yapılır.
+* **TEMP nesneler desteklenmez:** ``sqlite_temp_master``'daki trigger ve
+  görünümler bağlı nesne taramasında görünmez, tabloyla birlikte silinir ve
+  geri kurulamazdı. Bağlantıda TEMP trigger ya da görünüm varsa iş
+  ``MotorHatasi`` ile reddedilir (motor TEMP nesne açmaz).
 * **Üretilen sütunlar:** değeri hesaplanan sütuna satır yazılamaz ama eski
   değeri okunabilir. Motor geçici tabloyu kurduktan sonra ``PRAGMA
   table_xinfo`` ile yeni tarafta hangi sütunların üretildiğini öğrenir ve
@@ -183,6 +200,12 @@ class SutunlarUyusmuyor(MotorHatasi):
     sırasıyla birebir aynı değil; veritabanına dokunulmadı."""
 
 
+class KopyaDegerDegisti(MotorHatasi):
+    """Sütun özelliği değiştirme: kopyada bir değer ya da satır kimliği aynen
+    korunamadı (tür dönüşümü, rowid takma adı değişimi); iş geri alındı.
+    Bilerek dönüştürme için ``deger_donusumu_izinli`` kullanılır."""
+
+
 class KisitlarUyusmuyor(MotorHatasi):
     """Sütun özelliği değiştirme: istekteki tablo düzeyi kısıtlar ya da tablo
     seçenekleri mevcut tablonunkilerle birebir aynı değil; sessiz kayıp
@@ -223,12 +246,15 @@ class SutunEklemeIstegi:
 class SutunOzelligiDegistirmeIstegi:
     """Tablonun yeni hâli: bütün sütunlar (mevcutla aynı ad ve sırada, yeni
     özellikleriyle), tablo düzeyi kısıtlar ve tablo seçenekleri (ikisi de
-    mevcutla birebir aynı)."""
+    mevcutla birebir aynı). ``deger_donusumu_izinli``: değerinin yeni türe
+    **bilerek** dönüştürülmesine izin verilen sütun adları; diğer sütunlarda
+    değer aynen korunmalıdır."""
 
     tablo: str
     sutunlar: tuple[Sutun, ...]
     kisitlar: tuple[str, ...] = ()
     secenekler: tuple[str, ...] = ()
+    deger_donusumu_izinli: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -465,6 +491,15 @@ def sutun_ozelligi_degistir(
                     f"{tablo}: kopyalama eksik ({eski_sayi} satırdan {yeni_sayi}); "
                     "iş geri alındı"
                 )
+            _kopyayi_dogrula(
+                baglanti,
+                tablo,
+                gecici,
+                eski_sayi,
+                kopyalanacak,
+                rowid_takma,
+                istek.deger_donusumu_izinli,
+            )
             baglanti.exec_driver_sql(silme)
             baglanti.exec_driver_sql(adlandirma)
             for ddl in bagli.sonra_kurulacak:
@@ -517,6 +552,68 @@ def _son_sutunu_dogrula(baglanti: Connection, tablo: str, ad: str) -> None:
         )
 
 
+def _anahtar_sutunlar(baglanti: Connection, tablo: str) -> tuple[str, ...]:
+    """``PRAGMA table_xinfo``: birincil anahtar sütunları, anahtar sırasıyla."""
+    satirlar = baglanti.exec_driver_sql(f"PRAGMA table_xinfo({_tirnakla(tablo)})").all()
+    anahtar = sorted((int(s[5]), str(s[1])) for s in satirlar if int(s[5]) > 0)
+    return tuple(ad for _, ad in anahtar)
+
+
+def _kopyayi_dogrula(
+    baglanti: Connection,
+    tablo: str,
+    gecici: str,
+    satir_sayisi: int,
+    kopyalanan: tuple[str, ...],
+    rowid_takma: str | None,
+    donusum_izinli: tuple[str, ...],
+) -> None:
+    """Kopyada değerler ve kimlikler aynen korundu mu.
+
+    Satırlar rowid (rowid tablosu) ya da birincil anahtar sütunlarıyla
+    eşleştirilir; eşleşen satır sayısı satır sayısına eşit olmalıdır (kimlik
+    değişimi, ör. yeni ``INTEGER PRIMARY KEY`` takma adı). Kopyalanan her
+    sütunda (``donusum_izinli`` hariç) ``typeof`` ve değer (``COLLATE
+    BINARY``) aynı olmalıdır. Aksi hâlde ``KopyaDegerDegisti``.
+    """
+    anahtarlar: tuple[str, ...]
+    if rowid_takma is not None:
+        anahtarlar = (rowid_takma,)
+    else:
+        anahtarlar = _anahtar_sutunlar(baglanti, tablo)
+    if not anahtarlar:  # pragma: no cover - WITHOUT ROWID tablonun anahtarı vardır
+        raise MotorHatasi(f"{tablo}: satırları eşleştirecek anahtar yok; iş reddedildi")
+    e, y = _tirnakla(tablo), _tirnakla(gecici)
+    anahtar_adlari = [a if a == rowid_takma else _tirnakla(a) for a in anahtarlar]
+    anahtar_kosulu = " AND ".join(f"e.{a} IS y.{a}" for a in anahtar_adlari)
+    kaynak = f"FROM {e} AS e JOIN {y} AS y ON {anahtar_kosulu}"
+    eslesen = int(baglanti.exec_driver_sql(f"SELECT count(*) {kaynak}").scalar_one())
+    if eslesen != satir_sayisi:
+        raise KopyaDegerDegisti(
+            f"{tablo}: satır kimlikleri korunamadı ({satir_sayisi} satırdan "
+            f"{eslesen} eşleşti; anahtar {list(anahtarlar)}); iş geri alındı"
+        )
+    korunacak = [a for a in kopyalanan if a not in donusum_izinli]
+    if not korunacak:
+        return
+    farklar = " OR ".join(
+        f"typeof(e.{_tirnakla(a)}) IS NOT typeof(y.{_tirnakla(a)}) "
+        f"OR e.{_tirnakla(a)} IS NOT y.{_tirnakla(a)} COLLATE BINARY"
+        for a in korunacak
+    )
+    degisen = int(
+        baglanti.exec_driver_sql(
+            f"SELECT count(*) {kaynak} WHERE {farklar}"
+        ).scalar_one()
+    )
+    if degisen:
+        raise KopyaDegerDegisti(
+            f"{tablo}: kopyada {degisen} satırın değeri ya da saklama sınıfı değişti "
+            f"(sütunlar {korunacak}); bilerek dönüştürme için deger_donusumu_izinli "
+            "kullanılır. İş geri alındı"
+        )
+
+
 def _rowidsiz(baglanti: Connection, tablo: str) -> bool:
     """``PRAGMA table_list``: tablo ``WITHOUT ROWID`` mi (``wr`` sütunu)."""
     satirlar = baglanti.exec_driver_sql(f"PRAGMA table_list({_tirnakla(tablo)})").all()
@@ -541,6 +638,19 @@ def _yeniden_kurma_on_denetimi(
     mevcut_sutunlar = _sutun_bilgisi(baglanti, tablo)
     if not mevcut_sutunlar:
         raise MotorHatasi(f"tablo yok: {tablo}")
+    izinsiz = [a for a in istek.deger_donusumu_izinli if a not in mevcut_sutunlar]
+    if izinsiz:
+        raise SutunlarUyusmuyor(
+            f"{tablo}: deger_donusumu_izinli tablonun sütunu olmalı: {izinsiz}"
+        )
+    temp = baglanti.exec_driver_sql(
+        "SELECT type, name FROM sqlite_temp_master WHERE type IN ('trigger', 'view')"
+    ).all()
+    if temp:
+        raise MotorHatasi(
+            f"{tablo}: bağlantıda TEMP nesne var ({[f'{t[0]} {t[1]}' for t in temp]}); "
+            "yeniden kurma TEMP trigger/görünümü taşıyamaz, iş reddedildi"
+        )
 
     mevcut = tuple(mevcut_sutunlar)
     istenen = tuple(s.ad for s in istek.sutunlar)

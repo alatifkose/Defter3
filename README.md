@@ -99,7 +99,15 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   listesi istekle karşılaştırılır (`"ekstra TEXT"` gibi bir "kısıt" sütun
   açamaz). **Kopyalama kayıpsızdır:** `INSERT OR ABORT` (yeni tanımdaki `ON
   CONFLICT IGNORE/REPLACE` düz INSERT'i sessizce eksiltirdi), ardından satır
-  sayısı karşılaştırması; rowid tablolarında örtük satır kimliği de taşınır
+  sayısı karşılaştırması, sonra **değer ve kimlik denetimi**: satırlar rowid
+  ya da birincil anahtarla eşleştirilir, kopyalanan her sütunda `typeof` ve
+  değer aynı olmalıdır; tür değişimi değeri dönüştürüyorsa (`TEXT` →
+  `REAL` hassasiyet kaybı, `INT PRIMARY KEY` → `INTEGER PRIMARY KEY` kimlik
+  değişimi) `KopyaDegerDegisti` ile geri alınır. Bilerek dönüştürme açıktır:
+  `deger_donusumu_izinli` listesindeki sütunlarda değer denetimi yapılmaz,
+  kimlik denetimi her zaman yapılır. TEMP trigger/görünüm bağlı nesne
+  taramasında görünmez; bağlantıda varsa iş reddedilir. Rowid tablolarında
+  örtük satır kimliği de taşınır
   (`PRAGMA table_list` söyler; `rowid`/`_rowid_`/`oid` adlı sütun takma adı
   gölgelerse gölgelenmemiş olanı kullanır, üçü de gölgeliyse reddeder).
   **Üretilen sütunlar:** yeni tarafta yazılabilir olan

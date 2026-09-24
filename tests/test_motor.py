@@ -1485,3 +1485,174 @@ def test_olusturma_ve_ekleme_gercek_sutunlari_dogrular(
 )
 def test_sadelestir_tirnak_icine_dokunmaz(metin: str, beklenen: str) -> None:
     assert m._sadelestir(metin) == beklenen  # pyright: ignore[reportPrivateUsage]
+
+
+# --- beşinci inceleme (2026-09-24): kopyalama değer ve kimlik değiştiremez ----------
+
+
+def test_int_pk_integer_pk_olunca_kimlikler_degisir_reddedilir(
+    veritabani: vt.Veritabani,
+) -> None:
+    """INT PRIMARY KEY ayrı rowid taşır; INTEGER PRIMARY KEY rowid'nin takma
+    adıdır. Kopyada NULL id kendiliğinden dolar, rowid'ler değişir; satır
+    sayısı aynı kalır. Kimlik korunamıyorsa iş geri alınır."""
+    eski = (m.Sutun("id", ("INT", "PRIMARY KEY")), m.Sutun("data", ("TEXT",)))
+    m.tablo_olustur(veritabani, m.TabloOlusturmaIstegi("t", eski))
+    with veritabani.islem() as oturum:
+        oturum.execute(
+            text(
+                "INSERT INTO t (rowid, id, data) VALUES (10, NULL, 'a'), (20, 200, 'b')"
+            )
+        )
+
+    with pytest.raises(m.KopyaDegerDegisti):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "t", (m.Sutun("id", ("INTEGER", "PRIMARY KEY")), eski[1])
+            ),
+        )
+
+    assert _satirlar(veritabani, "SELECT rowid, id, data FROM t ORDER BY rowid") == [
+        (10, None, "a"),
+        (20, 200, "b"),
+    ]
+
+
+def test_tur_degisimi_degeri_donusturuyorsa_izinsiz_reddedilir(
+    veritabani: vt.Veritabani,
+) -> None:
+    """TEXT '9007199254740993' REAL olunca 9007199254740992.0 olur; TEXT '1'
+    INTEGER olunca saklama sınıfı değişir. İkisi de izinsiz ret."""
+    m.tablo_olustur(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "t", (m.Sutun("buyuk", ("TEXT",)), m.Sutun("kucuk", ("TEXT",)))
+        ),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(
+            text("INSERT INTO t VALUES ('9007199254740993', '1'), ('abc', 'x')")
+        )
+
+    for sutunlar in (
+        (m.Sutun("buyuk", ("REAL",)), m.Sutun("kucuk", ("TEXT",))),
+        (m.Sutun("buyuk", ("TEXT",)), m.Sutun("kucuk", ("INTEGER",))),
+    ):
+        with pytest.raises(m.KopyaDegerDegisti, match="deger_donusumu_izinli"):
+            m.sutun_ozelligi_degistir(
+                veritabani, m.SutunOzelligiDegistirmeIstegi("t", sutunlar)
+            )
+        assert _satirlar(veritabani, "SELECT buyuk, typeof(buyuk), kucuk FROM t") == [
+            ("9007199254740993", "text", "1"),
+            ("abc", "text", "x"),
+        ]
+
+
+def test_tur_degisimi_izin_verilen_sutunda_bilerek_donusturur(
+    veritabani: vt.Veritabani,
+) -> None:
+    """Dönüşüm açıkça istenirse (deger_donusumu_izinli) o sütun için değer
+    denetimi yapılmaz; diğer sütunlar yine korunur."""
+    m.tablo_olustur(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "t", (m.Sutun("buyuk", ("TEXT",)), m.Sutun("kucuk", ("TEXT",)))
+        ),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO t VALUES ('9007199254740993', '1')"))
+
+    m.sutun_ozelligi_degistir(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "t",
+            (m.Sutun("buyuk", ("REAL",)), m.Sutun("kucuk", ("TEXT",))),
+            deger_donusumu_izinli=("buyuk",),
+        ),
+    )
+    assert _satirlar(
+        veritabani, "SELECT buyuk, typeof(buyuk), kucuk, typeof(kucuk) FROM t"
+    ) == [(9007199254740992.0, "real", "1", "text")]
+
+    with pytest.raises(m.KopyaDegerDegisti):  # izin yalnız adı geçen sütuna
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "t",
+                (m.Sutun("buyuk", ("REAL",)), m.Sutun("kucuk", ("INTEGER",))),
+                deger_donusumu_izinli=("buyuk",),
+            ),
+        )
+
+
+def test_izin_listesindeki_ad_sutun_olmali(veritabani: vt.Veritabani) -> None:
+    _kisileri_doldur(veritabani)
+    with pytest.raises(m.SutunlarUyusmuyor, match="deger_donusumu_izinli"):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "kisiler", KISILER_YENI.sutunlar, deger_donusumu_izinli=("yok",)
+            ),
+        )
+    _eski_kisiler_eksiksiz(veritabani)
+
+
+def test_deger_koruma_without_rowid_tabloda_anahtarla_eslesir(
+    veritabani: vt.Veritabani,
+) -> None:
+    """rowid olmayan tabloda satırlar birincil anahtarla eşleştirilir; değer
+    değişimi orada da yakalanır."""
+    _hesaplari_doldur(veritabani)  # PRIMARY KEY (banka_id, hesap_no), WITHOUT ROWID
+
+    with pytest.raises(m.KopyaDegerDegisti):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "hesaplar",
+                (
+                    m.Sutun("banka_id", ("INTEGER", "NOT NULL")),
+                    m.Sutun("hesap_no", ("TEXT", "NOT NULL")),
+                    m.Sutun("adet", ("INTEGER", "NOT NULL", "DEFAULT 1")),
+                    m.Sutun("fiyat", ("TEXT",)),  # REAL 10.0 -> TEXT '10.0'
+                    m.Sutun(
+                        "tutar", ("REAL", "GENERATED ALWAYS AS (adet * fiyat) VIRTUAL")
+                    ),
+                ),
+                HESAPLAR.kisitlar,
+                HESAPLAR.secenekler,
+            ),
+        )
+
+    assert _tanim(veritabani, "hesaplar") == HESAPLAR_SQL
+
+
+def test_temp_trigger_varsa_sessizce_silmek_yerine_reddedilir(
+    veritabani: vt.Veritabani,
+) -> None:
+    """TEMP trigger sqlite_temp_master'dadır; bağlı nesne taramasında görünmez,
+    eski tabloyla silinir ve geri kurulmazdı. Destek yok: açık ret."""
+    m.tablo_olustur(
+        veritabani,
+        m.TabloOlusturmaIstegi("t", (m.Sutun("id", ("INTEGER", "PRIMARY KEY")),)),
+    )
+    with veritabani.motor.connect() as baglanti:  # aynı bağlantı havuza döner
+        baglanti.exec_driver_sql(
+            "CREATE TEMP TRIGGER koruma BEFORE INSERT ON main.t "
+            "BEGIN SELECT RAISE(ABORT, 'koruma'); END"
+        )
+        baglanti.commit()
+
+    with pytest.raises(m.MotorHatasi, match="TEMP"):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "t", (m.Sutun("id", ("INTEGER", "PRIMARY KEY")),)
+            ),
+        )
+
+    with veritabani.motor.connect() as baglanti:
+        adlar = baglanti.exec_driver_sql(
+            "SELECT name FROM sqlite_temp_master WHERE type = 'trigger'"
+        ).all()
+    assert adlar == [("koruma",)]
