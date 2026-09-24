@@ -23,7 +23,7 @@ açılmadan reddedilir), ``<arşiv>/gecici/<rastgele>.tmp`` adına yazılırken 
 boyut hesaplanır, ``AZAMI_DOSYA_BOYUTU`` aşılırsa dosya kesilmez, tamamı
 reddedilir; ``flush`` + ``fsync``; hedef yol yalnız özetten türer
 (``arsiv_goreli_yolu``: ``<ilk iki hex>/<sha256>``, uzantısız); üst dizin
-oluşturulur; ``os.replace`` ile aynı dosya sistemi üzerinde atomik taşınır.
+oluşturulur; ``os.rename`` ile aynı dosya sistemi üzerinde atomik taşınır.
 Hangi adım düşerse düşsün geçici dosya silinir; yarım arşiv dosyası kalmaz.
 
 **Fiziksel kimlik yalnız SHA-256'dır.** Aynı baytlar hangi adla, hangi
@@ -31,8 +31,15 @@ uzantıyla ya da uzantısız gelirse gelsin tek fiziksel dosyaya karşılık gel
 Hedef zaten varsa yalnız boyuta güvenilmez: mevcut dosya baştan sona
 özetlenir; özet beklenenle aynıysa kopya atılır ve sonuç "diskte zaten vardı"
 olur, değilse ``ArsivButunlukHatasi`` yükselir (bozuk hedef sessizce duplicate
-sayılmaz). İki süreç aynı içeriği aynı anda getirirse ikisi de aynı baytları
-aynı yola bırakır; ``os.replace`` atomiktir, sonuç tek geçerli dosyadır.
+sayılmaz). **Hedef bir kez oluştuktan sonra üstüne yazılmaz:** taşıma "yoksa
+oluştur" anlamındadır. İki süreç aynı içeriği aynı anda getirirse ilk taşıyan
+kazanır; ötekinin taşıması hedef var diye reddedilir, hedef özetle doğrulanır ve
+sonuç "zaten vardı" olur. Windows'ta ``os.rename`` var olan hedefi reddeder
+(``FileExistsError``); ``os.replace`` kullanılsaydı ikinci taşıma hedefin
+üstüne yazar ve o sırada hedefi doğrulamak için açan okuyucu geçici
+``PermissionError`` alırdı (2026-09-24'te kararsız testin kaynağı buydu).
+POSIX'te ``rename`` var olan hedefin üstüne yazar; aynı baytlar aynı ada
+yazıldığından ve açık okuyucular eski inode'u tuttuğundan bu zararsızdır.
 Windows'ta hedef o an açıkken taşıma reddedilirse hedef yine özetle doğrulanır.
 Arşiv yolu dizin taramasıyla ya da "SHA ile başlayan dosya" aramasıyla değil,
 doğrudan özetten hesaplanır.
@@ -239,8 +246,11 @@ def _geciciyi_ac(yol: Path) -> BinaryIO:
 
 
 def _yerine_koy(gecici: Path, hedef: Path) -> None:
-    """Atomik taşıma (testlerde hata enjeksiyonu noktası)."""
-    os.replace(gecici, hedef)
+    """Atomik taşıma; var olan hedefin üstüne yazmaz (testlerde hata enjeksiyonu
+    noktası). Windows'ta hedef varsa ``FileExistsError``; POSIX'te aynı baytların
+    üstüne yazılır, açık okuyucular etkilenmez. ``os.replace`` kullanılmaz:
+    üstüne yazma sırasında hedefi açan okuyucu Windows'ta geçici hata alır."""
+    os.rename(gecici, hedef)
 
 
 def sha256_hesapla(yol: Path) -> tuple[str, int]:
@@ -392,9 +402,11 @@ def _akisla_kopyala(
 def _hedefe_tasi(
     gecici: Path, arsiv_dizini: Path, goreli_yol: str, ozet: str, boyut: int
 ) -> bool:
-    """Geçici dosyayı hedefe atomik taşır. Hedef zaten varsa özetle doğrulanır:
-    aynıysa kopya atılır ve ``True`` (zaten vardı), değilse bütünlük hatası.
-    Taşıma başarılıysa ``False``."""
+    """Geçici dosyayı hedefe atomik taşır; var olan hedefin üstüne yazmaz. Hedef
+    zaten varsa ya da taşıma "hedef var" diye reddedilirse hedef özetle
+    doğrulanır: aynıysa kopya atılır ve ``True`` (zaten vardı), değilse bütünlük
+    hatası. Taşıma başarılıysa ``False``. Hedef oluştuktan sonra hiç
+    değişmediğinden doğrulama sırasında okuma çakışması olmaz."""
     hedef = arsiv_yolu(arsiv_dizini, goreli_yol)
     if hedef.exists() or hedef.is_symlink():
         arsiv_dosyasini_dogrula(arsiv_dizini, goreli_yol, boyut, ozet)
