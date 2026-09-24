@@ -112,7 +112,12 @@ Sütun özelliği değiştirme (karar 2026-09-24):
   eşleşmeyen satır ya da değişen değer varsa ``KopyaDegerDegisti`` ile iş
   geri alınır. Bilerek dönüştürme ayrı ve açıktır:
   ``deger_donusumu_izinli`` listesindeki sütunlarda değer denetimi yapılmaz
-  (onay penceresi bunu gösterir); kimlik denetimi her zaman yapılır.
+  (onay penceresi bunu gösterir); kimlik denetimi her zaman yapılır:
+  kimlik sütunlarına (rowid takma adı, birincil anahtar sütunları)
+  dönüşüm izni verilemez, satır eşleştirmesi ``typeof`` ve ``COLLATE
+  BINARY`` ile yapılır (``'001'`` ile ``1`` aynı kimlik sayılmaz). Değer
+  denetimi sütun gruplarıyla yürür; geniş tablolarda tek düz ``OR``
+  zinciri SQLite ifade derinliği sınırına takılırdı.
 * **TEMP nesneler desteklenmez:** ``sqlite_temp_master``'daki trigger ve
   görünümler bağlı nesne taramasında görünmez, tabloyla birlikte silinir ve
   geri kurulamazdı. Bağlantıda TEMP trigger ya da görünüm varsa iş
@@ -559,6 +564,11 @@ def _anahtar_sutunlar(baglanti: Connection, tablo: str) -> tuple[str, ...]:
     return tuple(ad for _, ad in anahtar)
 
 
+DEGER_DENETIMI_GRUP_BOYUTU = 64
+"""Değer denetiminde bir sorguya giren sütun sayısı; düz ``OR`` zinciri geniş
+tabloda SQLite'ın ifade derinliği sınırına (1000) takılır."""
+
+
 def _kopyayi_dogrula(
     baglanti: Connection,
     tablo: str,
@@ -570,11 +580,13 @@ def _kopyayi_dogrula(
 ) -> None:
     """Kopyada değerler ve kimlikler aynen korundu mu.
 
-    Satırlar rowid (rowid tablosu) ya da birincil anahtar sütunlarıyla
-    eşleştirilir; eşleşen satır sayısı satır sayısına eşit olmalıdır (kimlik
-    değişimi, ör. yeni ``INTEGER PRIMARY KEY`` takma adı). Kopyalanan her
-    sütunda (``donusum_izinli`` hariç) ``typeof`` ve değer (``COLLATE
-    BINARY``) aynı olmalıdır. Aksi hâlde ``KopyaDegerDegisti``.
+    Satırlar rowid (rowid tablosu) ya da birincil anahtar sütunlarıyla,
+    ``typeof`` ve ``COLLATE BINARY`` ile eşleştirilir (tür dönüşümü ya da
+    sıralama kuralı farklı kimlikleri aynı sayamaz); eşleşen satır sayısı
+    satır sayısına eşit olmalıdır. Kopyalanan her sütunda (``donusum_izinli``
+    hariç; kimlik sütunları oraya giremez) ``typeof`` ve değer aynı
+    olmalıdır. Denetim ``DEGER_DENETIMI_GRUP_BOYUTU`` sütunluk gruplarla
+    yürür. Aksi hâlde ``KopyaDegerDegisti``.
     """
     anahtarlar: tuple[str, ...]
     if rowid_takma is not None:
@@ -585,7 +597,10 @@ def _kopyayi_dogrula(
         raise MotorHatasi(f"{tablo}: satırları eşleştirecek anahtar yok; iş reddedildi")
     e, y = _tirnakla(tablo), _tirnakla(gecici)
     anahtar_adlari = [a if a == rowid_takma else _tirnakla(a) for a in anahtarlar]
-    anahtar_kosulu = " AND ".join(f"e.{a} IS y.{a}" for a in anahtar_adlari)
+    anahtar_kosulu = " AND ".join(
+        f"typeof(e.{a}) IS typeof(y.{a}) AND e.{a} IS y.{a} COLLATE BINARY"
+        for a in anahtar_adlari
+    )
     kaynak = f"FROM {e} AS e JOIN {y} AS y ON {anahtar_kosulu}"
     eslesen = int(baglanti.exec_driver_sql(f"SELECT count(*) {kaynak}").scalar_one())
     if eslesen != satir_sayisi:
@@ -594,24 +609,24 @@ def _kopyayi_dogrula(
             f"{eslesen} eşleşti; anahtar {list(anahtarlar)}); iş geri alındı"
         )
     korunacak = [a for a in kopyalanan if a not in donusum_izinli]
-    if not korunacak:
-        return
-    farklar = " OR ".join(
-        f"typeof(e.{_tirnakla(a)}) IS NOT typeof(y.{_tirnakla(a)}) "
-        f"OR e.{_tirnakla(a)} IS NOT y.{_tirnakla(a)} COLLATE BINARY"
-        for a in korunacak
-    )
-    degisen = int(
-        baglanti.exec_driver_sql(
-            f"SELECT count(*) {kaynak} WHERE {farklar}"
-        ).scalar_one()
-    )
-    if degisen:
-        raise KopyaDegerDegisti(
-            f"{tablo}: kopyada {degisen} satırın değeri ya da saklama sınıfı değişti "
-            f"(sütunlar {korunacak}); bilerek dönüştürme için deger_donusumu_izinli "
-            "kullanılır. İş geri alındı"
+    for i in range(0, len(korunacak), DEGER_DENETIMI_GRUP_BOYUTU):
+        grup = korunacak[i : i + DEGER_DENETIMI_GRUP_BOYUTU]
+        farklar = " OR ".join(
+            f"typeof(e.{_tirnakla(a)}) IS NOT typeof(y.{_tirnakla(a)}) "
+            f"OR e.{_tirnakla(a)} IS NOT y.{_tirnakla(a)} COLLATE BINARY"
+            for a in grup
         )
+        degisen = int(
+            baglanti.exec_driver_sql(
+                f"SELECT count(*) {kaynak} WHERE {farklar}"
+            ).scalar_one()
+        )
+        if degisen:
+            raise KopyaDegerDegisti(
+                f"{tablo}: kopyada {degisen} satırın değeri ya da saklama sınıfı "
+                f"değişti (sütunlar {grup}); bilerek dönüştürme için "
+                "deger_donusumu_izinli kullanılır. İş geri alındı"
+            )
 
 
 def _rowidsiz(baglanti: Connection, tablo: str) -> bool:
@@ -642,6 +657,13 @@ def _yeniden_kurma_on_denetimi(
     if izinsiz:
         raise SutunlarUyusmuyor(
             f"{tablo}: deger_donusumu_izinli tablonun sütunu olmalı: {izinsiz}"
+        )
+    kimlik = _anahtar_sutunlar(baglanti, tablo)
+    kimlikte = [a for a in istek.deger_donusumu_izinli if a in kimlik]
+    if kimlikte:
+        raise SutunlarUyusmuyor(
+            f"{tablo}: kimlik sütununa dönüşüm izni verilemez: {kimlikte} "
+            f"(kimlik {list(kimlik)}); kimlik her zaman aynen korunur"
         )
     temp = baglanti.exec_driver_sql(
         "SELECT type, name FROM sqlite_temp_master WHERE type IN ('trigger', 'view')"

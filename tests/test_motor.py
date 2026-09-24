@@ -1656,3 +1656,113 @@ def test_temp_trigger_varsa_sessizce_silmek_yerine_reddedilir(
             "SELECT name FROM sqlite_temp_master WHERE type = 'trigger'"
         ).all()
     assert adlar == [("koruma",)]
+
+
+# --- altıncı inceleme (2026-09-24): kimlik her zaman korunur, geniş tablo -----------
+
+
+def test_kimlik_sutununa_donusum_izni_verilemez(veritabani: vt.Veritabani) -> None:
+    """WITHOUT ROWID tabloda kimlik birincil anahtardır. Anahtar sütunu izin
+    listesine konunca 'e.id IS y.id' TEXT '001' ile INTEGER 1'i eşleştiriyor,
+    değer denetiminden de çıkıyordu; kimlik değişiyordu. Kimlik sütununa izin
+    verilemez, izinsiz hâli zaten reddedilir."""
+    eski = (m.Sutun("id", ("TEXT", "PRIMARY KEY")), m.Sutun("data", ("TEXT",)))
+    m.tablo_olustur(
+        veritabani, m.TabloOlusturmaIstegi("t", eski, secenekler=("WITHOUT ROWID",))
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO t VALUES ('001', 'a')"))
+    yeni = (m.Sutun("id", ("INTEGER", "PRIMARY KEY")), eski[1])
+
+    with pytest.raises(m.KopyaDegerDegisti):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi("t", yeni, secenekler=("WITHOUT ROWID",)),
+        )
+    with pytest.raises(m.MotorHatasi, match="kimlik"):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "t", yeni, secenekler=("WITHOUT ROWID",), deger_donusumu_izinli=("id",)
+            ),
+        )
+
+    assert _satirlar(veritabani, "SELECT id, typeof(id), data FROM t") == [
+        ("001", "text", "a")
+    ]
+
+
+def test_rowid_takma_adi_olan_sutuna_da_donusum_izni_verilemez(
+    veritabani: vt.Veritabani,
+) -> None:
+    """INTEGER PRIMARY KEY rowid'nin takma adıdır; kimliktir."""
+    _kisileri_doldur(veritabani)
+    with pytest.raises(m.MotorHatasi, match="kimlik"):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "kisiler", KISILER_YENI.sutunlar, deger_donusumu_izinli=("id",)
+            ),
+        )
+    _eski_kisiler_eksiksiz(veritabani)
+
+
+def test_bilesik_anahtarda_kimlik_eslestirme_tur_donusumune_kanmaz(
+    veritabani: vt.Veritabani,
+) -> None:
+    """Anahtar eşleştirmesi typeof ile yapılır: TEXT '1' ile INTEGER 1 aynı
+    kimlik sayılmaz; anahtar olmayan sütuna izin verilse bile ret."""
+    eski = (m.Sutun("a", ("TEXT",)), m.Sutun("b", ("TEXT",)), m.Sutun("v", ("TEXT",)))
+    m.tablo_olustur(
+        veritabani,
+        m.TabloOlusturmaIstegi("t", eski, ("PRIMARY KEY (a, b)",), ("WITHOUT ROWID",)),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO t VALUES ('1', 'x', '2')"))
+
+    with pytest.raises(m.KopyaDegerDegisti):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "t",
+                (m.Sutun("a", ("INTEGER",)), eski[1], m.Sutun("v", ("INTEGER",))),
+                ("PRIMARY KEY (a, b)",),
+                ("WITHOUT ROWID",),
+                deger_donusumu_izinli=("v",),
+            ),
+        )
+    assert _satirlar(veritabani, "SELECT a, typeof(a), v FROM t") == [
+        ("1", "text", "2")
+    ]
+
+
+def test_genis_tablo_yeniden_kurulur_ve_son_sutun_da_denetlenir(
+    veritabani: vt.Veritabani,
+) -> None:
+    """600 sütunlu tabloda düz OR zinciri SQLite ifade derinliği sınırına
+    takılıyordu ('Expression tree is too large'). Denetim sütun gruplarıyla
+    yürür; son gruptaki izinsiz dönüşüm yine yakalanır."""
+    sutunlar = tuple(m.Sutun(f"c{i}", ("TEXT",)) for i in range(600))
+    m.tablo_olustur(veritabani, m.TabloOlusturmaIstegi("t", sutunlar))
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO t (c0, c599) VALUES ('koru', '7')"))
+
+    m.sutun_ozelligi_degistir(
+        veritabani, m.SutunOzelligiDegistirmeIstegi("t", sutunlar)
+    )
+    m.sutun_ozelligi_degistir(  # gerçek bir özellik değişikliği
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "t", (*sutunlar[:-1], m.Sutun("c599", ("TEXT", "DEFAULT 'x'")))
+        ),
+    )
+    assert _satirlar(veritabani, "SELECT c0, c599 FROM t") == [("koru", "7")]
+
+    with pytest.raises(m.KopyaDegerDegisti, match="c599"):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "t", (*sutunlar[:-1], m.Sutun("c599", ("INTEGER",)))
+            ),
+        )
+    assert _satirlar(veritabani, "SELECT c599, typeof(c599) FROM t") == [("7", "text")]

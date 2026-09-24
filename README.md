@@ -105,7 +105,10 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   `REAL` hassasiyet kaybı, `INT PRIMARY KEY` → `INTEGER PRIMARY KEY` kimlik
   değişimi) `KopyaDegerDegisti` ile geri alınır. Bilerek dönüştürme açıktır:
   `deger_donusumu_izinli` listesindeki sütunlarda değer denetimi yapılmaz,
-  kimlik denetimi her zaman yapılır. TEMP trigger/görünüm bağlı nesne
+  kimlik denetimi her zaman yapılır: kimlik sütunlarına (rowid takma adı,
+  birincil anahtar) izin verilemez, eşleştirme `typeof` ve `COLLATE
+  BINARY` ile yapılır. Değer denetimi sütun gruplarıyla yürür (geniş
+  tablo, SQLite ifade derinliği sınırı). TEMP trigger/görünüm bağlı nesne
   taramasında görünmez; bağlantıda varsa iş reddedilir. Rowid tablolarında
   örtük satır kimliği de taşınır
   (`PRAGMA table_list` söyler; `rowid`/`_rowid_`/`oid` adlı sütun takma adı
