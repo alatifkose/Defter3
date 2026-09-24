@@ -1060,7 +1060,7 @@ def test_yerinden_cikan_parca_dokunmadan_reddedilir(
         "REFERENCES t(a, b)",
         "DEFAULT ','",
         "DEFAULT ';'",
-        "DEFAULT '(' -- yorum, virgüllü",
+        "DEFAULT '('",
         "CHECK (length(a) > 0 AND a NOT LIKE '%;%')",
         'COLLATE "NO,CASE"',
     ],
@@ -1222,26 +1222,49 @@ def test_ortuk_rowid_korunur(veritabani: vt.Veritabani) -> None:
     ]
 
 
-def test_rowid_adli_sutun_varsa_ortuk_rowid_tasinmaz(veritabani: vt.Veritabani) -> None:
-    """'rowid' adlı gerçek sütun örtük kimliği gölgeler; motor o zaman yalnız
-    sütunları taşır, iş yine kayıpsız biter."""
+def test_rowid_adli_sutun_varsa_ortuk_kimlik_baska_takma_adla_tasinir(
+    veritabani: vt.Veritabani,
+) -> None:
+    """'rowid' adlı gerçek sütun örtük kimliği gölgeler; motor gölgelenmemiş
+    takma adı (_rowid_ ya da oid) kullanır, kimlikler korunur (inceleme 3)."""
     m.tablo_olustur(
         veritabani,
         m.TabloOlusturmaIstegi(
-            "t", (m.Sutun("rowid", ("TEXT",)), m.Sutun("b", ("INTEGER",)))
+            "t", (m.Sutun("rowid", ("TEXT",)), m.Sutun("ad", ("TEXT",)))
         ),
     )
     with veritabani.islem() as oturum:
-        oturum.execute(text("INSERT INTO t VALUES ('x', 1)"))
+        oturum.execute(
+            text(
+                "INSERT INTO t (_rowid_, rowid, ad) "
+                "VALUES (10, 'dis1', 'a'), (20, 'dis2', 'b')"
+            )
+        )
 
     m.sutun_ozelligi_degistir(
         veritabani,
         m.SutunOzelligiDegistirmeIstegi(
-            "t", (m.Sutun("rowid", ("TEXT", "NOT NULL")), m.Sutun("b", ("INTEGER",)))
+            "t", (m.Sutun("rowid", ("TEXT",)), m.Sutun("ad", ("TEXT", "NOT NULL")))
         ),
     )
 
-    assert _satirlar(veritabani, "SELECT rowid, b FROM t") == [("x", 1)]
+    assert _satirlar(
+        veritabani, "SELECT _rowid_, rowid, ad FROM t ORDER BY _rowid_"
+    ) == [
+        (10, "dis1", "a"),
+        (20, "dis2", "b"),
+    ]
+
+
+def test_rowid_takma_adi_secimi() -> None:
+    """Gölgelenmemiş ilk takma ad; üçü de gölgeliyse None (motorun açtığı
+    tabloda olamaz: AD_BICIMI '_rowid_' adına izin vermez; elle açılmış tabloda
+    olursa yeniden kurma MotorHatasi ile reddedilir)."""
+    takma = m._rowid_takma_adi  # pyright: ignore[reportPrivateUsage]
+    assert takma(("id", "ad")) == "rowid"
+    assert takma(("rowid", "ad")) == "_rowid_"
+    assert takma(("ROWID", "_rowid_")) == "oid"
+    assert takma(("rowid", "oid", "_rowid_")) is None
 
 
 def test_without_rowid_tabloda_rowid_aranmaz(veritabani: vt.Veritabani) -> None:
@@ -1293,3 +1316,172 @@ def test_havuza_hicbir_zaman_denetimsiz_baglanti_donmez(
         event.remove(veritabani.motor, "checkin", kaydet)
 
     assert donusler and all(d == 1 for d in donusler), donusler
+
+
+# --- üçüncü inceleme (2026-09-24): tırnak içi sabit, yorum sınırı, gerçek sütunlar ---
+
+
+@pytest.mark.parametrize(("eski", "yeni"), [("A", "a"), ("a  b", "a b")])
+def test_kisitin_tirnak_icindeki_sabiti_degistirilemez(
+    veritabani: vt.Veritabani, eski: str, yeni: str
+) -> None:
+    """Sadeleştirme tırnak içine dokunmaz: CHECK (ad = 'A') ile CHECK (ad = 'a')
+    farklı kurallardır; NULL satırlı tabloda kopyalama bunu yakalayamazdı."""
+    sutunlar = (m.Sutun("id", ("INTEGER", "PRIMARY KEY")), m.Sutun("ad", ("TEXT",)))
+    m.tablo_olustur(
+        veritabani, m.TabloOlusturmaIstegi("t", sutunlar, (f"CHECK (ad = '{eski}')",))
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO t VALUES (1, NULL)"))
+    tanim = _tanim(veritabani, "t")
+
+    with pytest.raises(m.KisitlarUyusmuyor, match="kısıt"):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi("t", sutunlar, (f"CHECK (ad = '{yeni}')",)),
+        )
+
+    assert _tanim(veritabani, "t") == tanim
+    with veritabani.islem() as oturum:  # eski kural yerinde
+        oturum.execute(text("INSERT INTO t VALUES (2, :d)"), {"d": eski})
+    with pytest.raises(IntegrityError, match="CHECK"):
+        with veritabani.islem() as oturum:
+            oturum.execute(text("INSERT INTO t VALUES (3, :d)"), {"d": yeni})
+
+
+@pytest.mark.parametrize(
+    ("kisit", "esdeger"),
+    [
+        ("UNIQUE (a, b)", "UNIQUE(a,b)"),
+        ("UNIQUE (a, b)", "unique ( A , B )"),
+        ("CHECK (a IN ('x', 'Y'))", "check(a in('x','Y'))"),
+    ],
+)
+def test_tirnak_disi_bosluk_ve_harf_boyutu_esdeger(
+    veritabani: vt.Veritabani, kisit: str, esdeger: str
+) -> None:
+    sutunlar = (m.Sutun("a", ("TEXT",)), m.Sutun("b", ("TEXT",)))
+    m.tablo_olustur(veritabani, m.TabloOlusturmaIstegi("t", sutunlar, (kisit,)))
+
+    m.sutun_ozelligi_degistir(
+        veritabani, m.SutunOzelligiDegistirmeIstegi("t", sutunlar, (esdeger,))
+    )
+
+    assert _tanim(veritabani, "t").endswith(f"{esdeger})")
+
+
+@pytest.mark.parametrize(
+    "parca",
+    [
+        "TEXT -- aciklama",
+        "TEXT /* aciklama */",
+        "NOT NULL\n-- son",
+        "TEXT --",
+        "-- yalniz yorum",
+    ],
+)
+def test_yorum_iceren_parca_dokunmadan_reddedilir(
+    veritabani: vt.Veritabani, parca: str
+) -> None:
+    """Parçalar boşlukla birleşir; satır sonu yorumu sonraki parçayı yutardı
+    (NOT NULL kaybı, sütun kaybı). Yorum hiçbir parçada olamaz."""
+    with pytest.raises(m.GecersizParca, match="yorum"):
+        m.tablo_olustur(
+            veritabani, m.TabloOlusturmaIstegi("t", (m.Sutun("a", (parca,)),))
+        )
+    with pytest.raises(m.GecersizParca, match="yorum"):
+        m.tablo_olustur(
+            veritabani, m.TabloOlusturmaIstegi("t", (m.Sutun("a"),), kisitlar=(parca,))
+        )
+    with pytest.raises(m.GecersizParca, match="yorum"):
+        m.tablo_olustur(
+            veritabani,
+            m.TabloOlusturmaIstegi("t", (m.Sutun("a"),), secenekler=(parca,)),
+        )
+    with pytest.raises(m.GecersizParca, match="yorum"):
+        m.sutun_ekle(veritabani, m.SutunEklemeIstegi("t", m.Sutun("a", (parca,))))
+    with pytest.raises(m.GecersizParca, match="yorum"):
+        m.indeks_olustur(veritabani, m.IndeksOlusturmaIstegi("ix", "t", (parca,)))
+    with pytest.raises(m.GecersizParca, match="yorum"):
+        m.indeks_olustur(
+            veritabani, m.IndeksOlusturmaIstegi("ix", "t", ("a",), kosul=parca)
+        )
+
+    assert not veritabani.yol.exists()
+
+
+def test_yorumlu_parca_not_null_yutamaz_ve_sutun_yutamaz(
+    veritabani: vt.Veritabani,
+) -> None:
+    """İncelemenin üç senaryosu: oluşturmada NOT NULL kaybı, sütun kaybı, yeniden
+    kurmada kural kaybı. Üçü de parça sınırında reddedilir."""
+    with pytest.raises(m.GecersizParca):
+        m.tablo_olustur(
+            veritabani,
+            m.TabloOlusturmaIstegi(
+                "t", (m.Sutun("ad", ("TEXT -- aciklama", "NOT NULL\n")),)
+            ),
+        )
+    with pytest.raises(m.GecersizParca):
+        m.tablo_olustur(
+            veritabani,
+            m.TabloOlusturmaIstegi(
+                "t", (m.Sutun("a", ("TEXT -- aciklama",)), m.Sutun("b", ("\nTEXT",)))
+            ),
+        )
+    assert not veritabani.yol.exists()
+
+    m.tablo_olustur(
+        veritabani, m.TabloOlusturmaIstegi("t", (m.Sutun("ad", ("TEXT", "NOT NULL")),))
+    )
+    with pytest.raises(m.GecersizParca):
+        m.sutun_ozelligi_degistir(
+            veritabani,
+            m.SutunOzelligiDegistirmeIstegi(
+                "t", (m.Sutun("ad", ("TEXT -- aciklama", "NOT NULL\n")),)
+            ),
+        )
+    assert _sutunlar(veritabani, "t") == [("ad", "TEXT", 1, None)]
+
+
+def test_tirnak_icindeki_yorum_isareti_serbest() -> None:
+    for parca in ("DEFAULT '--'", "DEFAULT '/* x */'", "CHECK (a NOT LIKE '%--%')"):
+        assert m.parcayi_dogrula(parca) == parca
+
+
+def test_olusturma_ve_ekleme_gercek_sutunlari_dogrular(
+    veritabani: vt.Veritabani,
+) -> None:
+    """Ek savunma: oluşturmadan sonra SQLite'ın açtığı sütunlar istekle, eklemeden
+    sonra son sütun istenen adla karşılaştırılır. Yardımcılar elle kurulmuş
+    tabloda doğrudan sınanır (parça sınırı geçerken uyuşmazlık üretilemez)."""
+    with veritabani.islem() as oturum:
+        oturum.execute(text("CREATE TABLE t (a TEXT, b TEXT)"))
+        baglanti = oturum.connection()
+        m._sutunlari_dogrula(baglanti, "t", ("a", "b"))  # pyright: ignore[reportPrivateUsage]
+        with pytest.raises(m.SutunlarUyusmuyor, match="SQLite"):
+            m._sutunlari_dogrula(baglanti, "t", ("a",))  # pyright: ignore[reportPrivateUsage]
+        m._son_sutunu_dogrula(baglanti, "t", "b")  # pyright: ignore[reportPrivateUsage]
+        with pytest.raises(m.SutunlarUyusmuyor, match="SQLite"):
+            m._son_sutunu_dogrula(baglanti, "t", "c")  # pyright: ignore[reportPrivateUsage]
+
+    # normal yol değişmedi
+    m.tablo_olustur(veritabani, KISILER)
+    m.sutun_ekle(
+        veritabani, m.SutunEklemeIstegi("kisiler", m.Sutun("sehir", ("TEXT",)))
+    )
+    assert [c[0] for c in _sutunlar(veritabani, "kisiler")][-1] == "sehir"
+
+
+@pytest.mark.parametrize(
+    ("metin", "beklenen"),
+    [
+        ("UNIQUE (a, b)", "unique(a,b)"),
+        ("  Check ( AD = 'A' )  ", "check(ad = 'A')"),
+        ("CHECK (ad = 'a  b')", "check(ad = 'a  b')"),
+        ("CHECK (x IN ('it''s', \"Q\"))", "check(x in('it''s',\"Q\"))"),
+        ("a /* yorum */ b -- son", "a b"),
+    ],
+)
+def test_sadelestir_tirnak_icine_dokunmaz(metin: str, beklenen: str) -> None:
+    assert m._sadelestir(metin) == beklenen  # pyright: ignore[reportPrivateUsage]

@@ -316,3 +316,65 @@ def test_denetimsiz_islem_baglantiyi_denetim_acilana_kadar_havuza_vermez(
         event.remove(veritabani.motor, "checkin", kaydet)
 
     assert len(donusler) >= 4 and all(d == 1 for d in donusler), donusler
+
+
+@pytest.mark.parametrize("govde_hatasi", [False, True])
+def test_denetim_yeniden_acilamazsa_baglanti_havuza_donmez(
+    veritabani: vt.Veritabani, govde_hatasi: bool
+) -> None:
+    """İnceleme 3: PRAGMA foreign_keys=ON düşerse bağlantı FK=0 ile havuza
+    dönüyordu. Şimdi bağlantı geçersizleştirilir (havuza dönmez). Gövde
+    başarılıysa DenetimGeriAcilamadi yükselir ve commit geri alınmış sayılmaz;
+    gövde hatalıysa asıl hata yükselir. Hata enjeksiyonu: sqlite3 authorizer."""
+    from sqlalchemy import event
+
+    _tablolari_kur(veritabani)
+    donusler: list[int] = []
+
+    def kaydet(dbapi_baglantisi: sqlite3.Connection | None, _kayit: object) -> None:
+        if dbapi_baglantisi is None:  # geçersizleştirilmiş bağlantı: havuza dönmedi
+            donusler.append(-1)
+            return
+        satir = dbapi_baglantisi.execute("PRAGMA foreign_keys").fetchone()
+        assert satir is not None
+        donusler.append(int(satir[0]))
+
+    def yetkilendirici(
+        eylem: int, a: str | None, b: str | None, _vt: str | None, _k: str | None
+    ) -> int:
+        if eylem == sqlite3.SQLITE_PRAGMA and a == "foreign_keys" and b == "ON":
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    event.listen(veritabani.motor, "checkin", kaydet)
+    hamlar: list[sqlite3.Connection] = []
+    try:
+        beklenen: type[BaseException] = (
+            RuntimeError if govde_hatasi else vt.DenetimGeriAcilamadi
+        )
+        with pytest.raises(beklenen) as bilgi:
+            with veritabani.islem_yabanci_anahtar_denetimsiz() as baglanti:
+                baglanti.execute(text("INSERT INTO ust (id) VALUES (1)"))
+                ham = baglanti.connection.dbapi_connection
+                assert isinstance(ham, sqlite3.Connection)
+                hamlar.append(ham)
+                ham.set_authorizer(yetkilendirici)
+                if govde_hatasi:
+                    raise RuntimeError("kasıtlı")
+        if govde_hatasi:
+            assert any("yeniden açılamadı" in n for n in bilgi.value.__notes__)
+    finally:
+        event.remove(veritabani.motor, "checkin", kaydet)
+        for ham in hamlar:
+            try:
+                ham.set_authorizer(None)
+            except sqlite3.ProgrammingError:  # geçersizleştirilmiş: zaten kapalı
+                pass
+
+    assert all(d in (1, -1) for d in donusler), donusler  # FK=0 hiç dönmedi
+    with veritabani.islem() as oturum:  # sonraki oturum: yeni, denetimli bağlantı
+        assert oturum.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+        sayi = oturum.execute(text("SELECT count(*) FROM ust")).scalar_one()
+        assert sayi == (0 if govde_hatasi else 1)  # rollback / commit ayrımı korunur
+        with pytest.raises(IntegrityError, match="FOREIGN KEY"):
+            oturum.execute(text("INSERT INTO alt (ust_id) VALUES (99)"))

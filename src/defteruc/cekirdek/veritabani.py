@@ -30,7 +30,9 @@ Bu modül hiçbir domain'i bilmez ve hiçbir tablo tanımlamaz. Sağladıkları:
   Bağlantı iş boyunca sahiplenilir: denetim yalnız o bağlantıda kapanır,
   ``commit`` öncesi ``PRAGMA foreign_key_check`` çalışır (ihlalde iş geri
   alınır) ve denetim aynı bağlantıda yeniden açılmadan bağlantı havuza
-  dönmez (başarı, hata ve ihlal yollarının üçünde de).
+  dönmez (başarı, hata ve ihlal yollarının üçünde de). Denetim kapatılamaz
+  ya da yeniden açılamazsa bağlantı geçersizleştirilir; commit edilmiş işte
+  ``DenetimGeriAcilamadi`` yükselir, hatalı işte asıl hata not eklenerek.
 """
 
 from __future__ import annotations
@@ -122,6 +124,12 @@ class YabanciAnahtarIhlali(Exception):
     alındı."""
 
 
+class DenetimGeriAcilamadi(Exception):
+    """Denetimsiz iş **commit edildi**, ama yabancı anahtar denetimi bağlantıda
+    yeniden açılamadı; bağlantı geçersizleştirildi (havuza dönmedi). İş geri
+    alınmış değildir."""
+
+
 class Veritabani:
     """Bir SQLite dosyasına bağlı engine ve işlem sınırı."""
 
@@ -151,13 +159,21 @@ class Veritabani:
         yalnız o bağlantıda kapanır, ``commit`` öncesi ``PRAGMA
         foreign_key_check`` çalışır (ihlalde ``YabanciAnahtarIhlali`` ile geri
         alınır) ve denetim aynı bağlantıda yeniden açılmadan bağlantı havuza
-        dönmez. (Oturum tabanlı ilk sürümde ``Session.commit`` bağlantıyı
-        denetim açılmadan havuza bırakıyordu; inceleme 2, 2026-09-24.)"""
+        dönmez. Denetim kapatılamaz ya da yeniden açılamazsa bağlantı
+        **geçersizleştirilir** (havuza dönmez, kapatılır): gövde başarılıysa
+        ``DenetimGeriAcilamadi`` yükselir (iş commit edilmiştir, geri alınmış
+        sayılmaz); gövde hatalıysa asıl hata yükselir, temizleme hatası ona
+        not olarak eklenir. (İnceleme 2 ve 3, 2026-09-24.)"""
         with self.motor.connect() as baglanti:
             ham = baglanti.connection.dbapi_connection
             if ham is None:  # pragma: no cover - havuz her zaman bağlantı verir
                 raise RuntimeError("DBAPI bağlantısı alınamadı")
-            _pragmalari_transaction_disinda_uygula(ham, (("foreign_keys", "OFF"),))
+            try:
+                _pragmalari_transaction_disinda_uygula(ham, (("foreign_keys", "OFF"),))
+            except Exception:
+                baglanti.invalidate()
+                raise
+            govde_hatasi: BaseException | None = None
             try:
                 with baglanti.begin():
                     yield baglanti
@@ -169,8 +185,25 @@ class Veritabani:
                                 f"{i[0]}(rowid {i[1]}) -> {i[2]}" for i in ihlaller
                             )
                         )
+            except BaseException as hata:
+                govde_hatasi = hata
+                raise
             finally:
-                _pragmalari_transaction_disinda_uygula(ham, (("foreign_keys", "ON"),))
+                try:
+                    _pragmalari_transaction_disinda_uygula(
+                        ham, (("foreign_keys", "ON"),)
+                    )
+                except Exception as hata:
+                    baglanti.invalidate()
+                    mesaj = (
+                        "yabancı anahtar denetimi bağlantıda yeniden açılamadı "
+                        f"({hata}); bağlantı havuzdan çıkarıldı"
+                    )
+                    if govde_hatasi is None:
+                        raise DenetimGeriAcilamadi(
+                            f"iş commit edildi; {mesaj}"
+                        ) from hata
+                    govde_hatasi.add_note(f"ayrıca: {mesaj}")
 
     def kapat(self) -> None:
         """Bağlantı havuzunu boşaltır; dosya kilidi bırakılır (Windows'ta gerekli)."""

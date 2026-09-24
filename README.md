@@ -65,9 +65,12 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   eşleşmeleri satır olarak yazar (kayıt). İki teknik sınır vardır, ikisi de
   SQL'e güvenle yazılabilmek içindir: adlar sade ve Türkçe karaktersizdir
   (`AD_BICIMI`); her parça kendi yerinde kalır, üst düzeyde virgül ya da
-  noktalı virgül taşıyamaz, parantez ve tırnakları dengelidir
-  (`parcayi_dogrula`, `GecersizParca`), yani `"TEXT, UNIQUE(a)"` gibi bir
-  özellik sütun tanımından çıkamaz. Motor yapıyı okumaz, onay almaz (onayı
+  noktalı virgül taşıyamaz, parantez ve tırnakları dengelidir, SQL yorumu
+  içeremez (`parcayi_dogrula`, `GecersizParca`): `"TEXT, UNIQUE(a)"` gibi bir
+  özellik sütun tanımından çıkamaz, `"TEXT -- açıklama"` gibi bir satır sonu
+  yorumu birleşik SQL'de sonraki parçayı yutamaz. Ek savunma: tablo
+  oluşturma ve sütun eklemeden sonra SQLite'ın gerçekten açtığı sütunlar
+  istekle karşılaştırılır, uymuyorsa iş geri alınır. Motor onay almaz (onayı
   uygulama alır, motoru onaydan sonra çağırır); bir iş = bir transaction.
 
 * **Sütun özelliği değiştirme** (`sutun_ozelligi_degistir`). SQLite sütunu
@@ -89,12 +92,17 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   harf boyutu hariç); kısıt ekleme, silme, değiştirme ve seçenek değiştirme
   bu işin dışındadır (`KisitlarUyusmuyor`). Karşılaştırma ayrıştırma
   değildir: en dış parantezdeki üst düzey parçaların ilk N'i sütun, kalanı
-  kısıttır. Geçici tablo kurulunca SQLite'ın gerçekten açtığı sütun listesi
-  istekle karşılaştırılır (`"ekstra TEXT"` gibi bir "kısıt" sütun açamaz).
-  **Kopyalama kayıpsızdır:** `INSERT OR ABORT` (yeni tanımdaki `ON CONFLICT
-  IGNORE/REPLACE` düz INSERT'i sessizce eksiltirdi), ardından satır sayısı
-  karşılaştırması; rowid tablolarında örtük `rowid` de taşınır (`PRAGMA
-  table_list` söyler). **Üretilen sütunlar:** yeni tarafta yazılabilir olan
+  kısıttır. Sadeleştirme tırnak içine dokunmaz (`'A'` ile `'a'` farklı
+  kurallardır); tırnak dışında harf boyutu, çoklu boşluk ve parantez/virgül
+  çevresindeki boşluklar eşitlenir, daha ince eşdeğerlik tanınmaz (ret
+  güvenli yöndür). Geçici tablo kurulunca SQLite'ın gerçekten açtığı sütun
+  listesi istekle karşılaştırılır (`"ekstra TEXT"` gibi bir "kısıt" sütun
+  açamaz). **Kopyalama kayıpsızdır:** `INSERT OR ABORT` (yeni tanımdaki `ON
+  CONFLICT IGNORE/REPLACE` düz INSERT'i sessizce eksiltirdi), ardından satır
+  sayısı karşılaştırması; rowid tablolarında örtük satır kimliği de taşınır
+  (`PRAGMA table_list` söyler; `rowid`/`_rowid_`/`oid` adlı sütun takma adı
+  gölgelerse gölgelenmemiş olanı kullanır, üçü de gölgeliyse reddeder).
+  **Üretilen sütunlar:** yeni tarafta yazılabilir olan
   sütunlar kopyalanır; hangi sütunun üretildiğini geçici tablonun
   `table_xinfo`'su söyler, motor anahtar kelime bilmez. Üretilenden sıradana
   geçişte hesaplanmış değer korunur, tersinde yeniden hesaplanır. **Bağlı nesneler
@@ -147,6 +155,9 @@ boyunca sahiplenilir, denetim yalnız o bağlantıda kapanır, `commit` öncesi
 `PRAGMA foreign_key_check` çalışır, ihlalde `YabanciAnahtarIhlali` ile geri
 alınır; denetim aynı bağlantıda yeniden açılmadan bağlantı havuza dönmez
 (başarı, hata ve ihlal yollarında; havuza dönüşte denetim testle izlenir).
+Denetim kapatılamaz ya da yeniden açılamazsa bağlantı geçersizleştirilir
+(havuza dönmez): commit edilmiş işte `DenetimGeriAcilamadi` yükselir (iş
+geri alınmış sayılmaz), hatalı işte asıl hata not eklenerek yükselir.
 
 **Testler** (`tests/test_cekirdek_veritabani.py`): gerçek SQLite dosyalarıyla,
 `test` ortamı ve `tmp_path` altında kök; `:memory:` yok. Kanıtlananlar: import
