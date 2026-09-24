@@ -2,8 +2,8 @@
 
 Cowork dosyayı izinli **gelen dizinine** bırakır ve yolunu verir; bu modül
 dosyayı denetler, akışla kopyalar, SHA-256 ve boyutu gerçek baytlardan
-hesaplar, içerik adresli kalıcı yola atomik taşır. Veritabanına dokunmaz
-(``belge_islemleri`` yazar), ``defteruc.ayarlar`` okumaz: gelen dizini ve
+hesaplar, içerik adresli kalıcı yola atomik taşır. Veritabanına dokunmaz,
+``defteruc.ayarlar`` okumaz: gelen dizini ve
 arşiv dizini çağırandan ``Path`` olarak gelir. Import edildiğinde dizin ya da
 dosya oluşturmaz, ortam değişkeni okumaz. Bu modül belgenin ne olduğunu
 bilmez; bir PDF ile bir metin dosyası burada aynı muameleyi görür.
@@ -110,7 +110,7 @@ class ArsivButunlukHatasi(ArsivHatasi):
 @dataclass(frozen=True, slots=True)
 class ArsivlenenDosya:
     """Arşive giren dosyanın kimliği ve metadata'sı; veritabanına henüz
-    yazılmamıştır (``belge_islemleri.belge_tanimla`` yazar)."""
+    yazılmamıştır."""
 
     sha256: str
     boyut: int

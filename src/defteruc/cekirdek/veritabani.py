@@ -3,7 +3,7 @@
 Bu modül hiçbir domain'i bilmez ve hiçbir tablo tanımlamaz. Sağladıkları:
 
 * ``TabloTabani``: bütün tabloların türeyeceği ortak taban ve tek ``metadata``
-  (isimli kısıt kalıbıyla; SQLite'ta Alembic ``batch`` kipi için gerekir).
+  (isimli kısıt kalıbıyla).
 * ``veritabani_url``: SQLite bağlantı adresi. Yol yalnız çağıranın verdiği
   **mutlak** yoldur (uygulamada ``Ayarlar.veritabani_yolu``); çalışma
   dizininden türetilmez, metin birleştirilmez, SQLAlchemy ``URL`` ile üretilir.
@@ -16,7 +16,7 @@ Bu modül hiçbir domain'i bilmez ve hiçbir tablo tanımlamaz. Sağladıkları:
   açar, DDL (``CREATE TABLE``) transaction dışında kalır ve geri alınamaz;
   yeni kipte bağlantı açılır açılmaz ve her ``commit``/``rollback`` sonrası
   ertelenmiş bir transaction başlar, DDL dahil her şey içinde kalır. Bu
-  yüzden göç adımı düşerse DDL de geri alınır (``gocler.semayi_yukselt``).
+  yüzden yarıda düşen bir yapı değişikliği (DDL) de geri alınır.
   PRAGMA'lar transaction içinde çalışmaz (``journal_mode`` değiştirilemez,
   ``foreign_keys`` sessizce yok sayılır); bağlantı olayında ``autocommit``
   geçici olarak açılıp PRAGMA'lar uygulanır, sonra kapatılır.

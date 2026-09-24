@@ -19,12 +19,9 @@ from typing import Any
 
 import anyio
 import pytest
-from sqlalchemy import text
 
 from defteruc import ayarlar as ay
 from defteruc import gunluk, mcp_kapisi
-from defteruc.cekirdek import gocler
-from defteruc.cekirdek.veritabani import Veritabani
 
 DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
@@ -83,7 +80,6 @@ def test_sistem_durumu_beklenen_alanlari_tasir(test_koku: Path) -> None:
     durum = mcp_kapisi.sistem_durumu(ay.ayarlari_yukle())
 
     assert durum.ortam == "test"
-    assert durum.sema_surumu == mcp_kapisi.SEMA_SURUMU_YOK  # veritabanı dosyası yok
     assert durum.yetenekler == [mcp_kapisi.ARAC_SISTEM_DURUMU]
     assert durum.uygulama_surumu not in ("", mcp_kapisi.SURUM_BILINMIYOR)
 
@@ -92,47 +88,10 @@ def test_sistem_durumu_veritabani_yokken_dosya_olusturmaz(test_koku: Path) -> No
     ayarlar = ay.ayarlari_yukle()
     ay.dizinleri_hazirla(ayarlar)
 
-    durum = mcp_kapisi.sistem_durumu(ayarlar)
+    mcp_kapisi.sistem_durumu(ayarlar)
 
-    assert durum.sema_surumu == mcp_kapisi.SEMA_SURUMU_YOK
     assert not ayarlar.veritabani_yolu.exists()
     assert list(ayarlar.veritabani_yolu.parent.glob("*.sqlite3*")) == []
-
-
-def _goc_uygulanmis_ayarlar() -> ay.Ayarlar:
-    ayarlar = ay.ayarlari_yukle()
-    ay.dizinleri_hazirla(ayarlar)
-    veritabani = Veritabani(ayarlar.veritabani_yolu)
-    try:
-        gocler.semayi_yukselt(veritabani)
-    finally:
-        veritabani.kapat()
-    return ayarlar
-
-
-def test_sistem_durumu_goc_uygulanmis_veritabaninin_gercek_surumunu_verir(
-    test_koku: Path,
-) -> None:
-    ayarlar = _goc_uygulanmis_ayarlar()
-
-    durum = mcp_kapisi.sistem_durumu(ayarlar)
-
-    assert durum.sema_surumu == gocler.beklenen_sema_surumu()
-    metin = json.dumps(dataclasses.asdict(durum), ensure_ascii=False)
-    assert str(test_koku) not in metin and "DEFTERUC_" not in metin
-
-
-def test_sistem_durumu_goc_uygulanmamis_dosyada_yok_der(test_koku: Path) -> None:
-    ayarlar = ay.ayarlari_yukle()
-    ay.dizinleri_hazirla(ayarlar)
-    veritabani = Veritabani(ayarlar.veritabani_yolu)
-    try:
-        with veritabani.islem() as oturum:
-            oturum.execute(text("SELECT 1"))  # dosya oluştu, göç yok
-    finally:
-        veritabani.kapat()
-
-    assert mcp_kapisi.sistem_durumu(ayarlar).sema_surumu == mcp_kapisi.SEMA_SURUMU_YOK
 
 
 def test_sistem_durumu_yol_ve_ortam_degiskeni_icermez(test_koku: Path) -> None:
@@ -157,7 +116,6 @@ def test_sunucu_yalniz_sistem_durumu_aracini_sunar(test_koku: Path) -> None:
     assert set(arac.output_schema["required"]) == {
         "uygulama_surumu",
         "ortam",
-        "sema_surumu",
         "yetenekler",
     }
 
@@ -286,25 +244,11 @@ def test_stdio_uzerinden_baslatma_arac_listesi_ve_cagri(
     assert cagri["structuredContent"] == {
         "uygulama_surumu": mcp_kapisi.uygulama_surumu(),
         "ortam": "test",
-        "sema_surumu": mcp_kapisi.SEMA_SURUMU_YOK,
         "yetenekler": [mcp_kapisi.ARAC_SISTEM_DURUMU],
     }
     assert all(str(test_koku) not in satir for satir in sonuc.stdout_satirlari)
     assert not any(calisma.iterdir())
     assert not (test_koku / ay.VERITABANI_DOSYA_ADI).exists()  # araç dosya açmadı
-
-
-def test_stdio_sistem_durumu_goc_uygulanmis_veritabaninin_surumunu_verir(
-    tmp_path: Path, test_koku: Path
-) -> None:
-    _goc_uygulanmis_ayarlar()
-
-    sonuc = _sunucuyla_konus(tmp_path, dict(os.environ), ILK_ISTEKLER)
-
-    assert sonuc.cikis_kodu == 0, sonuc.stderr
-    cagri = sonuc.yanitlar[3]["result"]
-    assert cagri["structuredContent"]["sema_surumu"] == gocler.beklenen_sema_surumu()
-    assert all(str(test_koku) not in satir for satir in sonuc.stdout_satirlari)
 
 
 def test_stdio_sunucusu_gunluge_yazar_stdout_a_yazmaz(

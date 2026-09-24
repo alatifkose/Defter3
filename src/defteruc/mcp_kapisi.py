@@ -3,10 +3,8 @@
 Cowork'un DEFTERUC'e ulaştığı tek kapı. ``uv run defteruc-mcp`` bu modülün
 ``main`` fonksiyonunu çalıştırır; sunucu stdio taşımasıyla konuşur.
 
-Kapsam: tek araç ``sistem_durumu``. Ürün verisi yazılmaz; göç çalıştırılmaz.
-``sistem_durumu`` var olan veritabanı dosyasının Alembic şema sürümünü okur
-(``gocler.sema_surumu``); dosya yoksa bağlantı açmaz, dosya oluşturmaz, ``yok``
-döner.
+Kapsam: tek araç ``sistem_durumu``. Ürün verisi yazılmaz; veritabanına
+dokunulmaz.
 
 Kurallar:
 
@@ -26,7 +24,6 @@ import json
 import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
-from pathlib import Path
 from typing import Any
 
 from mcp.server.mcpserver import Context, MCPServer
@@ -39,15 +36,12 @@ from defteruc.baslangic import (
     BaslangicHatasi,
     ortami_hazirla,
 )
-from defteruc.cekirdek import gocler
-from defteruc.cekirdek.veritabani import Veritabani
 
 SUNUCU_ADI = "defteruc"
 PAKET_ADI = "defteruc"
 KUTUPHANE_GUNLUK_ADI = "mcp"
 
 ARAC_SISTEM_DURUMU = "sistem_durumu"
-SEMA_SURUMU_YOK = "yok"
 SURUM_BILINMIYOR = "bilinmiyor"
 
 OLAY_MCP_BASLANGIC = "mcp_baslangic"
@@ -61,8 +55,8 @@ SUNUCU_TALIMATI = (
     "sistem_durumu aracı vardır; finansal kayıt yazılmaz."
 )
 ARAC_SISTEM_DURUMU_ACIKLAMASI = (
-    "DEFTERUC'ün durumunu döndürür: uygulama sürümü, çalışma ortamı, şema "
-    "sürümü ve bu sunucunun yetenek listesi. Yol, anahtar ya da ortam "
+    "DEFTERUC'ün durumunu döndürür: uygulama sürümü, çalışma ortamı ve bu "
+    "sunucunun yetenek listesi. Yol, anahtar ya da ortam "
     "değişkeni içermez."
 )
 
@@ -77,9 +71,6 @@ class SistemDurumu:
 
     uygulama_surumu: str
     ortam: str
-    sema_surumu: str
-    """Veritabanındaki Alembic şema sürümü (``0001`` ...); veritabanı dosyası
-    yoksa ya da göç uygulanmamışsa ``yok``."""
     yetenekler: list[str]
     """Bu sunucunun sunduğu araç adları."""
 
@@ -92,27 +83,11 @@ def uygulama_surumu() -> str:
         return SURUM_BILINMIYOR
 
 
-def sema_surumu_oku(veritabani_yolu: Path) -> str:
-    """Gerçek şema sürümü; dosya yoksa bağlantı açılmaz, dosya oluşmaz.
-
-    Dosya var ama göç uygulanmamışsa da ``yok`` döner. Bağlantı okuma sonrası
-    kapatılır; yanıtta yol yoktur.
-    """
-    if not veritabani_yolu.is_file():
-        return SEMA_SURUMU_YOK
-    veritabani = Veritabani(veritabani_yolu)
-    try:
-        return gocler.sema_surumu(veritabani) or SEMA_SURUMU_YOK
-    finally:
-        veritabani.kapat()
-
-
 def sistem_durumu(ayarlar: Ayarlar) -> SistemDurumu:
     """Uygulamanın durumunu döndürür; yol ya da sır içermez."""
     return SistemDurumu(
         uygulama_surumu=uygulama_surumu(),
         ortam=ayarlar.ortam.value,
-        sema_surumu=sema_surumu_oku(ayarlar.veritabani_yolu),
         yetenekler=[ARAC_SISTEM_DURUMU],
     )
 
