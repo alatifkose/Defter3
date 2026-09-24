@@ -182,8 +182,18 @@ doğrulamayla çakışıyordu). Not: bu garanti yalnız Windows'ta vardır;
 Linux/macOS'ta `os.rename` mevcut hedefin üstüne yazar. Proje bugün yalnız
 Windows'tur; ileride Linux/macOS desteği düşünülürse platformlar arası atomik
 bir "üstüne yazmadan taşı" yöntemi gerekir (ayrıntı modül docstring'inde).
-Veritabanına dokunmaz; ayrıntılı kurallar modülün docstring'indedir, testler
-`tests/test_arsiv.py`.
+Doğrulama ile açılış arasındaki yarış (dış inceleme, 2026-09-24): yol
+denetimi `Path` döndürüp dosya sonra aynı yoldan yeniden açılıyordu; arada
+yol dışarıya giden bağlantıya çevrilirse dışarıdaki baytlar arşivleniyordu.
+Şimdi kaynak POSIX'te `O_NOFOLLOW` ile açılır ve açıldıktan sonra açılan
+nesne **tanıtıcı üzerinden** doğrulanır (`_acilani_dogrula`): `fstat` ile
+`lstat` aynı nesne, ikisi de sıradan dosya, yol reparse point değil, ara
+yollar yeniden denetlenir; uymuyorsa kopyalama başlamadan reddedilir. Kalan
+aralık (denetimler arasına giren iki ardışık değişiklik) Python'da Windows
+için tanıtıcıya göreli açma olmadığından kapatılamaz; gelen dizinine
+eşzamanlı yazan başka süreç yoksa söz konusu değildir. Windows açık dosyanın
+yolunu değiştirmeye zaten izin vermez. Veritabanına dokunmaz; ayrıntılı
+kurallar modülün docstring'indedir, testler `tests/test_arsiv.py`.
 
 ## Mimari sınır: çekirdek ve finans
 
@@ -370,7 +380,11 @@ Kurallar:
   dosyaya bağlanır (olay sütunu `-`), stderr'e düşmez.
 * Modül import edildiğinde sunucu kurulmaz, dosya oluşturulmaz.
 * Her araç çağrısında günlüğe `mcp_el_sikisma` satırı düşer: istemci adı ve
-  sürümü, müzakere edilen protokol sürümü, istemci yetenekleri. Aşama 3'ün
+  sürümü, müzakere edilen protokol sürümü, istemci yeteneklerinin **adları**.
+  İstemciden gelen her metin günlük için süzülür (`gunluk_icin_suz`):
+  yazdırılamayan karakterler `?` olur, uzunluk sınırlanır; yetenek içerikleri
+  (özellikle `experimental`) yazılmaz. İstemci metni günlük satırı yapısını
+  bozamaz, gizli içerik loga geçmez (dış inceleme, 2026-09-24). Aşama 3'ün
   ölçümü bu satırdan okunur.
 
 Test (`tests/test_mcp_kapisi.py`) sunucuyu ayrı süreçte başlatır; ham

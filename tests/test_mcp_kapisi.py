@@ -7,6 +7,7 @@ stdin en sonda kapatılır. Böylece stdout'un protokol dışında hiçbir şey
 taşımadığı da sınanır.
 """
 
+import copy
 import dataclasses
 import json
 import os
@@ -263,7 +264,7 @@ def test_stdio_sunucusu_gunluge_yazar_stdout_a_yazmaz(
     assert f"| INFO | {mcp_kapisi.OLAY_MCP_BASLANGIC} | ortam=test" in icerik
     assert (
         f"| INFO | {mcp_kapisi.OLAY_MCP_EL_SIKISMA} | istemci=defteruc-test 0 "
-        f"protokol={ISTEMCI_PROTOKOL_SURUMU} yetenekler={{}}"
+        f"protokol={ISTEMCI_PROTOKOL_SURUMU} yetenekler=[]"
     ) in icerik
     assert f"| INFO | {mcp_kapisi.OLAY_MCP_KAPANIS} |" in icerik
     for satir in sonuc.stdout_satirlari:
@@ -348,3 +349,48 @@ def test_ayar_hatasinda_stdout_bos_stderr_aciklayici(tmp_path: Path) -> None:
     assert "DEFTERUC MCP kapısı başlatılamadı" in sonuc.stderr
     assert "Ayar hatası" in sonuc.stderr
     assert ay.VERI_KOKU_DEGISKENI in sonuc.stderr
+
+
+# --- dördüncü inceleme (2026-09-24): el sıkışma günlüğü süzülür ----------------------
+
+
+def test_stdio_istemci_metni_ve_yetenek_icerigi_gunluge_suzulerek_gecer(
+    tmp_path: Path, test_koku: Path
+) -> None:
+    """İstemci adındaki satır sonu günlük satırı bozuyordu; deneysel yetenek
+    içeriği aynen loga giriyordu. Gerçek stdio ile: kontrol karakteri '?'
+    olur, uzunluk sınırlanır, yeteneklerin yalnız adları yazılır."""
+    istekler = copy.deepcopy(ILK_ISTEKLER)
+    istekler[0]["params"]["clientInfo"]["name"] = "client\nFORGED_LOG_LINE"
+    istekler[0]["params"]["clientInfo"]["version"] = "1.0 " + "x" * 300
+    istekler[0]["params"]["capabilities"] = {
+        "experimental": {"custom": {"secret_test_marker": "CONFIDENTIAL_TEST_VALUE"}},
+        "roots": {"listChanged": True},
+    }
+
+    sonuc = _sunucuyla_konus(tmp_path, dict(os.environ), istekler)
+
+    assert sonuc.cikis_kodu == 0, sonuc.stderr
+    icerik = (test_koku / ay.LOG_DIZIN_ADI / gunluk.GUNLUK_DOSYA_ADI).read_text(
+        encoding="utf-8"
+    )
+    assert "\nFORGED_LOG_LINE" not in icerik
+    assert "CONFIDENTIAL_TEST_VALUE" not in icerik
+    assert "secret_test_marker" not in icerik
+    satir = next(s for s in icerik.splitlines() if mcp_kapisi.OLAY_MCP_EL_SIKISMA in s)
+    assert "istemci=client?FORGED_LOG_LINE 1.0 xxx" in satir
+    assert "x" * 100 not in satir  # kısaltıldı
+    assert "yetenekler=[experimental, roots]" in satir
+
+
+@pytest.mark.parametrize(
+    ("metin", "beklenen"),
+    [
+        ("defteruc-test", "defteruc-test"),
+        ("a\nb\tc\x00d", "a?b?c?d"),
+        ("x" * 70, "x" * 64 + "…"),
+        ("", ""),
+    ],
+)
+def test_gunluk_icin_suzme(metin: str, beklenen: str) -> None:
+    assert mcp_kapisi.gunluk_icin_suz(metin) == beklenen

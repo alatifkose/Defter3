@@ -323,8 +323,9 @@ def test_akis_sirasinda_buyuyen_dosya_da_reddedilir_gecici_kalmaz(
     """``stat`` küçük gösterse de akış sınırı aşarsa kesilmez, reddedilir."""
     dosya = _yaz(gelen / "a.bin", b"k" * 10)
 
-    def buyuk_akis(_yol: Path) -> BinaryIO:
-        return io.BytesIO(b"k" * 300)
+    def buyuk_akis(yol: Path) -> BinaryIO:
+        yol.write_bytes(b"k" * 300)  # stat 10 gösterdi, akış 300 verecek
+        return yol.open("rb")
 
     monkeypatch.setattr(arsiv, "_kaynagi_ac", buyuk_akis)
 
@@ -649,3 +650,85 @@ def test_arsivi_tara_siniflar(arsiv_dizini: Path, gelen: Path) -> None:
     assert tarama.yarim == ("gecici/yarim.tmp",)
     assert set(tarama.taninmayan) == {"ab/kisa", "notlar.txt"}
     assert arsiv.arsivi_tara(arsiv_dizini / "yok") == arsiv.ArsivTaramasi((), (), ())
+
+
+# --- dördüncü inceleme (2026-09-24): doğrulama ile açılış arasındaki yarış -----------
+
+
+def test_dogrulama_ile_acilis_arasinda_yol_disari_baglantiya_donerse_reddedilir(
+    tmp_path: Path, gelen: Path, arsiv_dizini: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Doğrulama Path döndürüyor, açılış aynı yolu yeniden çözüyordu; arada yol
+    dışarıdaki dosyaya simgesel bağlantıya çevrilince dışarıdaki baytlar
+    arşivleniyordu. Şimdi açılan nesne tanıtıcı üzerinden yolla karşılaştırılır."""
+    kaynak = _yaz(gelen / "belge.pdf", PDF + b"izinli icerik")
+    disari = _yaz(tmp_path / "disari.pdf", PDF + b"disaridaki icerik")
+    orijinal = arsiv._kaynagi_ac  # pyright: ignore[reportPrivateUsage]
+
+    def degistir_sonra_ac(yol: Path) -> BinaryIO:
+        if yol == kaynak:
+            kaynak.unlink()
+            _simgesel_baglanti(kaynak, disari)
+        return orijinal(yol)
+
+    monkeypatch.setattr(arsiv, "_kaynagi_ac", degistir_sonra_ac)
+
+    with pytest.raises((arsiv.GelenDosyaGecersiz, arsiv.DosyaOkunamadi)):
+        _arsivle(kaynak, gelen, arsiv_dizini)
+
+    assert _dosyalar(arsiv_dizini) == set()
+    assert _gecici_yok(arsiv_dizini)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows açık dosyanın yolunu değiştirmeye izin vermez; yarış orada kapalı",
+)
+def test_dogrulama_ile_acilis_arasinda_baska_dosya_gelirse_reddedilir(
+    gelen: Path, arsiv_dizini: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Açılan tanıtıcı ile yoldaki dosya aynı nesne değilse (açılıştan sonra yol
+    başka dosyaya çevrildi) reddedilir; Windows'ta da çalışır (bağlantı yok)."""
+    kaynak = _yaz(gelen / "belge.pdf", PDF + b"ilk")
+    yedek = _yaz(gelen / "yedek.pdf", PDF + b"ikinci")
+    orijinal = arsiv._kaynagi_ac  # pyright: ignore[reportPrivateUsage]
+
+    def ac_sonra_degistir(yol: Path) -> BinaryIO:
+        girdi = orijinal(yol)
+        if yol == kaynak:
+            os.replace(yedek, kaynak)  # açık dosyanın yolu başka dosyaya gider
+        return girdi
+
+    monkeypatch.setattr(arsiv, "_kaynagi_ac", ac_sonra_degistir)
+
+    with pytest.raises(arsiv.GelenDosyaGecersiz, match="değişti"):
+        _arsivle(kaynak, gelen, arsiv_dizini)
+
+    assert _dosyalar(arsiv_dizini) == set()
+
+
+def test_dogrulama_ile_acilis_arasinda_ust_dizin_junction_olursa_reddedilir(
+    tmp_path: Path, gelen: Path, arsiv_dizini: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows karşılığı: doğrulamadan sonra üst dizin dışarıya giden junction'a
+    çevrilir; açılan dosya dışarıdaki dosyadır. Açılıştan sonra ara yollar
+    yeniden denetlenir ve junction yakalanır (yetki gerektirmez)."""
+    alt = gelen / "alt"
+    kaynak = _yaz(alt / "belge.pdf", PDF + b"izinli icerik")
+    disari = tmp_path / "disari"
+    _yaz(disari / "belge.pdf", PDF + b"disaridaki icerik")
+    orijinal = arsiv._kaynagi_ac  # pyright: ignore[reportPrivateUsage]
+
+    def degistir_sonra_ac(yol: Path) -> BinaryIO:
+        if yol == kaynak:
+            alt.rename(gelen / "alt_eski")
+            _junction(alt, disari)
+        return orijinal(yol)
+
+    monkeypatch.setattr(arsiv, "_kaynagi_ac", degistir_sonra_ac)
+
+    with pytest.raises(arsiv.GelenDosyaGecersiz, match="junction"):
+        _arsivle(kaynak, gelen, arsiv_dizini)
+
+    assert _dosyalar(arsiv_dizini) == set()
+    assert _gecici_yok(arsiv_dizini)

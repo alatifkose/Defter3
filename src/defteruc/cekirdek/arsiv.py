@@ -70,6 +70,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import stat
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -183,6 +184,13 @@ def gelen_dosyayi_dogrula(yol: str | Path, gelen_dizini: Path) -> Path:
     except OSError:
         raise DosyaOkunamadi("dosya yoluna erişilemedi.") from None
 
+    _ara_yollari_denetle(sade, gelen_sade)
+    return sade
+
+
+def _ara_yollari_denetle(sade: Path, gelen_sade: Path) -> None:
+    """Gelen dizininden dosyaya inen ara yollarda bağlantı/junction yok, fiziksel
+    yol gelen dizininin içinde ve sıradan bir dosya."""
     for ara in _inen_parcalar(sade, gelen_sade):
         if ara.is_symlink() or os.path.isjunction(ara):
             raise GelenDosyaGecersiz(
@@ -199,7 +207,6 @@ def gelen_dosyayi_dogrula(yol: str | Path, gelen_dizini: Path) -> Path:
         raise GelenDosyaGecersiz("dosyanın fiziksel yolu gelen dizininin dışında.")
     if not fiziksel.is_file():
         raise GelenDosyaGecersiz("yol sıradan bir dosya değil.")
-    return sade
 
 
 def _sozluksel_altinda(yol: Path, dizin: Path) -> bool:
@@ -244,9 +251,53 @@ def gecici_dizin(arsiv_dizini: Path) -> Path:
 # --- özet ve bütünlük -----------------------------------------------------------------
 
 
+KAYNAK_ACMA_BAYRAKLARI = (
+    os.O_RDONLY
+    | getattr(os, "O_BINARY", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
+"""Kaynağı açma bayrakları: POSIX'te son parça simgesel bağlantıysa açılmaz
+(``O_NOFOLLOW``); Windows'ta bu bayrak yoktur, bağlantı ``_acilani_dogrula``
+ile yakalanır."""
+
+
 def _kaynagi_ac(yol: Path) -> BinaryIO:
     """Kaynak dosyayı okumak için açar (testlerde hata enjeksiyonu noktası)."""
-    return yol.open("rb")
+    return os.fdopen(os.open(yol, KAYNAK_ACMA_BAYRAKLARI), "rb")
+
+
+def _acilani_dogrula(girdi: BinaryIO, yol: Path, gelen_sade: Path) -> None:
+    """Açılan nesne, doğrulanan yoldaki sıradan dosya mı; **tanıtıcı üzerinden**.
+
+    ``gelen_dosyayi_dogrula`` ile açılış arasında yol değişmiş olabilir
+    (yerine dışarıya giden simgesel bağlantı, başka bir dosya, junction'a
+    dönen üst dizin). Bu yüzden açılıştan sonra: ``fstat`` (açık tanıtıcı) ile
+    ``lstat`` (yol) aynı nesne olmalı (``st_dev``, ``st_ino``), ikisi de
+    sıradan dosya olmalı, yol reparse point olmamalı ve ara yollar yeniden
+    denetlenir. Doğrulama geçmezse ``GelenDosyaGecersiz``; kopyalama
+    başlamamıştır (inceleme 4, 2026-09-24).
+
+    Kalan aralık: bu denetimlerin arasına giren iki ardışık değişiklik.
+    Python, Windows'ta tanıtıcıya göreli açma (``openat``) sunmadığından
+    aralık tamamen kapatılamaz; gelen dizininde eşzamanlı yazan başka bir
+    süreç olmadığı sürece söz konusu değildir.
+    """
+    try:
+        acilan = os.fstat(girdi.fileno())
+        yoldaki = os.lstat(yol)
+    except OSError:
+        raise DosyaOkunamadi("dosya okunamadı.") from None
+    if not stat.S_ISREG(acilan.st_mode) or not stat.S_ISREG(yoldaki.st_mode):
+        raise GelenDosyaGecersiz("yol sıradan bir dosya değil.")
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if getattr(yoldaki, "st_file_attributes", 0) & reparse:
+        raise GelenDosyaGecersiz(
+            "gelen dizini altında simgesel bağlantı ya da junction kabul edilmez."
+        )
+    if (acilan.st_dev, acilan.st_ino) != (yoldaki.st_dev, yoldaki.st_ino):
+        raise GelenDosyaGecersiz("dosya doğrulama ile açılış arasında değişti.")
+    _ara_yollari_denetle(yol, gelen_sade)
 
 
 def _geciciyi_ac(yol: Path) -> BinaryIO:
@@ -334,8 +385,9 @@ def dosyayi_arsivle(
         raise DosyaOkunamadi("dosya okunamadı.") from None
 
     gecici = _gecici_ad(arsiv_dizini)
+    gelen_sade = Path(os.path.normpath(gelen_dizini))
     try:
-        ozet, boyut, mime = _akisla_kopyala(kaynak, gecici, azami_boyut)
+        ozet, boyut, mime = _akisla_kopyala(kaynak, gecici, azami_boyut, gelen_sade)
         goreli_yol = arsiv_goreli_yolu(ozet)
         hedef = arsiv_yolu(arsiv_dizini, goreli_yol)
         _dizini_hazirla(hedef.parent)
@@ -368,10 +420,11 @@ def _dizini_hazirla(dizin: Path) -> None:
 
 
 def _akisla_kopyala(
-    kaynak: Path, gecici: Path, azami_boyut: int
+    kaynak: Path, gecici: Path, azami_boyut: int, gelen_sade: Path
 ) -> tuple[str, int, str]:
     """Kaynağı geçici dosyaya akışla kopyalar; (sha256, boyut, mime) döndürür.
 
+    Açılan nesne önce tanıtıcı üzerinden doğrulanır (``_acilani_dogrula``).
     İlk parça okunur okunmaz boş dosya reddedilir ve MIME imzadan belirlenir;
     geçici dosya ancak bundan sonra açılır. Sınır aşımında kopya durur ve hata
     yükselir.
@@ -383,6 +436,7 @@ def _akisla_kopyala(
     except OSError:
         raise DosyaOkunamadi("dosya okunamadı.") from None
     with girdi:
+        _acilani_dogrula(girdi, kaynak, gelen_sade)
         try:
             parca = girdi.read(OKUMA_PARCA_BOYUTU)
         except OSError:

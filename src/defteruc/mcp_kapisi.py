@@ -20,7 +20,6 @@ Kurallar:
 
 from __future__ import annotations
 
-import json
 import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
@@ -92,33 +91,52 @@ def sistem_durumu(ayarlar: Ayarlar) -> SistemDurumu:
     )
 
 
+GUNLUK_METIN_AZAMI = 64
+"""İstemciden gelen bir metnin günlükte alabileceği en çok karakter."""
+
+GUNLUK_YETENEK_AZAMI = 8
+"""Günlüğe yazılacak en çok yetenek adı."""
+
+
+def gunluk_icin_suz(metin: str, azami: int = GUNLUK_METIN_AZAMI) -> str:
+    """İstemciden gelen metni günlük için süzer: yazdırılamayan karakterler
+    (satır sonu, sekme, kontrol karakterleri) ``?`` olur, uzunluk ``azami``
+    ile sınırlanır (``…`` eklenir). Günlük satırı yapısı istemci metniyle
+    bozulamaz (inceleme 4, 2026-09-24)."""
+    suzulmus = "".join(c if c.isprintable() else "?" for c in metin)
+    return suzulmus if len(suzulmus) <= azami else suzulmus[:azami] + "…"
+
+
 def el_sikisma_ozeti(baglam: Context[Any, Any]) -> str:
     """Bağlantının el sıkışma bilgisini tek satırda özetler.
 
-    İstemcinin ``initialize`` ile bildirdiği ad ve sürüm, müzakere edilen
-    protokol sürümü ve istemci yetenekleri. Yol, anahtar ya da kişisel veri
-    içermez; günlüğe yazılmak içindir.
+    İstemcinin ``initialize`` ile bildirdiği ad ve sürüm (süzülmüş,
+    sınırlı), müzakere edilen protokol sürümü (süzülmüş) ve istemcinin
+    bildirdiği yeteneklerin yalnız **adları** (süzülmüş, sınırlı sayıda).
+    Yetenek içerikleri (özellikle ``experimental`` altındaki serbest veri)
+    günlüğe yazılmaz: istemcinin gönderdiği metin kişisel veri ya da sır
+    taşıyabilir; günlük satırının yapısını da bozamamalıdır.
     """
     oturum = baglam.session
     parametreler = oturum.client_params
     if parametreler is None:
         istemci = ISTEMCI_BILINMIYOR
     else:
-        istemci = f"{parametreler.client_info.name} {parametreler.client_info.version}"
+        bilgi = parametreler.client_info
+        istemci = f"{gunluk_icin_suz(bilgi.name)} {gunluk_icin_suz(bilgi.version)}"
     yetenekler = oturum.client_capabilities
-    yetenek_metni = (
-        json.dumps(
-            yetenekler.model_dump(mode="json", by_alias=True, exclude_none=True),
-            ensure_ascii=False,
-            sort_keys=True,
+    if yetenekler is None:
+        yetenek_metni = "yok"
+    else:
+        adlar = sorted(
+            yetenekler.model_dump(mode="json", by_alias=True, exclude_none=True)
         )
-        if yetenekler is not None
-        else "yok"
-    )
-    return (
-        f"istemci={istemci} protokol={oturum.protocol_version} "
-        f"yetenekler={yetenek_metni}"
-    )
+        gorunen = [gunluk_icin_suz(ad, 32) for ad in adlar[:GUNLUK_YETENEK_AZAMI]]
+        if len(adlar) > GUNLUK_YETENEK_AZAMI:
+            gorunen.append("…")
+        yetenek_metni = "[" + ", ".join(gorunen) + "]"
+    protokol = gunluk_icin_suz(str(oturum.protocol_version))
+    return f"istemci={istemci} protokol={protokol} yetenekler={yetenek_metni}"
 
 
 def sunucu_kur(ayarlar: Ayarlar) -> MCPServer[None]:
