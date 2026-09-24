@@ -10,13 +10,25 @@ Bu sözlük, DEFTERUC projesinde geçen kavramların tek ve ortak tanımını tu
 
 ### Nesne
 
-Dış dünyadaki bir varlığın yapılandırılarak DEFTERUC'e kaydedilmesiyle nesne olur. Yapılandırmaya uğramayan şeyler nesne değildir; belgenin kendisi (PDF, fotoğraf) nesne değildir. Finansal hareketler nesne değildir; bire bir işlenir ve nesnelere bağlı, kendi işlem kurallarıyla tutulan kayıtlardır.
+Nesne, veritabanında bir tablodur. Yeni bir nesne geldiğinde yeni bir tablo açılır: Cowork belgeyi okur, yeni bir nesne görür ve motoru kullanarak o nesnenin tablosunu oluşturur. Tablo açmak kullanıcı onayına bağlıdır; onayı Cowork değil uygulama alır. Nesne tablo olduğu için ayrıca nesne onayı yoktur. Belgenin kendisi (PDF, fotoğraf) nesne değildir.
 
-Her nesnenin benzersiz kimliği ve Cowork'un belirlediği serbest özellikleri vardır. Nesneler seviyeli bir hiyerarşide durur: seviye 0 hiçbir üst nesneye bağlı değildir; diğer nesneler hemen önceki seviyedeki en az bir nesneye bağlıdır; seviye atlanamaz; bir nesne birden fazla üst nesneye bağlanabilir. Sistem nesnenin banka, hesap ya da fiş olduğunu yorumlamaz; bağlantıları ve seviye kurallarını denetler.
+_(Abdüllatif'in onayıyla eklendi, 2026-09-11; nesne = tablo olarak yeniden tanımlandı, 2026-09-24.)_
 
-_(Abdüllatif'in onayıyla eklendi, 2026-09-11.)_
+### Kayıt
+
+Kayıt, bir tabloya satır eklemektir. Kayıt için kullanıcı onayı gerekmez.
+
+_(Abdüllatif'in onayıyla eklendi, 2026-09-24.)_
+
+### Yapı değişikliği
+
+Veritabanının yapısını değiştiren her şeydir: tablo oluşturmak, tabloya sütun eklemek, sütunun özelliklerini belirlemek ve ileride gelecek her yapı işlemi. Yapıyı değiştiren her şey kullanıcı onayına bağlıdır; onayı uygulama alır. Cowork yapı değişikliğini motoru kullanarak yapar; motor yalnız araçtır.
+
+_(Abdüllatif'in onayıyla eklendi, 2026-09-24.)_
 
 ### Mükerrerlik protokolü
+
+> **2026-09-24:** Aşağıdaki protokol eski tasarıma aittir ve bu haliyle geçerli değildir. Mükerrerlik modülü olacak, tasarımı ayrıca konuşulacak.
 
 DEFTERUC'te aynı varlığı temsil etme ihtimali bulunan nesneleri tespit etmek, ilgili faaliyetleri durdurmak ve mükerrerliği çözmek için uygulanan kurallar bütünüdür.
 
@@ -31,11 +43,15 @@ _(Abdüllatif'in onayıyla eklendi, 2026-09-11.)_
 
 ### Yazmak (write) ve kayıt etmek (save)
 
+> **2026-09-24:** Eski tasarıma aittir; "Kayıt" tanımıyla (kayıt = satır eklemek) çelişir. Yeniden konuşulacak.
+
 Yazmak ve kayıt etmek farklı şeylerdir; DEFTERUC'te ayrı tutulur. İşlemleri deftere yazmak kayıt etmek değildir; kayıt etmek ayrı bir adımdır ve belge kaydının tanımlanmasıyla olur. İleriki sürümlerde bir ajan yazıp bir ajan kontrol edebilir; yazan ajan kontrol ajanının onayıyla kaydeder (ihtimal, karar değil).
 
 _(Abdüllatif'in onayıyla eklendi, 2026-09-11.)_
 
 ### İşlemin yarım kalması
+
+> **2026-09-24:** Eski tasarıma aittir ("Yazmak ve kayıt etmek" tanımına dayanır). Yeniden konuşulacak.
 
 İşlemin yarım kalması, kaydedilememesidir. İşlemleri deftere yazmak kayıt etmek değildir; kayıt etmek ayrı bir şeydir (bkz. Yazmak ve kayıt etmek). Şüpheli işlemler bekletilirken belgedeki diğer işlemler deftere yazılır; şüphe giderildikten sonra belge kaydı tanımlanır. Belge kaydının geçersiz olduğuna karar verilirse (belge yanlışsa) o belgenin bütün işlemleri geri alınır, doğru belge işlenir.
 
