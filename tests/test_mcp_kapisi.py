@@ -446,7 +446,34 @@ def test_yapi_istegi_bekler_onay_sonrasi_kayit_yazilir_ve_yapi_okunur(
         mcp_kapisi.ARAC_SATIR_EKLE,
         {"tablo": "kisiler", "satirlar": [{"ad_soyad": "Ayşe"}, {"ad_soyad": "Ali"}]},
     )
-    assert yazilan == {"tablo": "kisiler", "eklenen": 2}
+    assert yazilan == {
+        "tablo": "kisiler",
+        "eklenen": 2,
+        "anahtar_sutunlari": ["id"],
+        "anahtarlar": [[1], [2]],
+    }
+    okunan = _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIRLARI_OKU,
+        {"tablo": "kisiler", "kosul": "ad_soyad = ?", "parametreler": ["Ali"]},
+    )
+    assert okunan == {
+        "tablo": "kisiler",
+        "sutunlar": ["id", "ad_soyad"],
+        "satirlar": [[2, "Ali"]],
+        "eslesen_toplam": 1,
+        "donen": 1,
+        "baslangic": 0,
+        "devami_var": False,
+    }
+    assert "okunamadı: not authorized" in _hata(
+        sunucu,
+        mcp_kapisi.ARAC_SATIRLARI_OKU,
+        {"tablo": "kisiler", "kosul": f'1 IN (SELECT 1 FROM "{onay.SISTEM_TABLOSU}")'},
+    )
+    assert "sistem tablosu okunamaz" in _hata(
+        sunucu, mcp_kapisi.ARAC_SATIRLARI_OKU, {"tablo": onay.SISTEM_TABLOSU}
+    )
     (tablo,) = _cagir(sunucu, mcp_kapisi.ARAC_YAPIYI_OKU, {})["tablolar"]
     assert tablo["ad"] == "kisiler" and tablo["sql"] == KISILER_SQL
     assert tablo["satir_sayisi"] == 2

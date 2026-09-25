@@ -117,12 +117,42 @@ def test_satirlar_tek_islemde_eklenir_ve_sayi_doner(veritabani: vt.Veritabani) -
             {"ad_soyad": "Can", "puan": True},
         ],
     )
-    assert eklenen == 3
+    assert eklenen == kayit.EklemeSonucu(3, ("id",), ((1,), (2,), (3,)))
     assert _satirlar(
         veritabani, "SELECT ad_soyad, puan, buyuk_harf FROM kisiler ORDER BY id"
     ) == [("Ayşe", 1.5, "AYşE"), ("Ali", None, "ALI"), ("Can", 1.0, "CAN")]
     # SQLite'ın upper() işlevi yalnız ASCII harfleri büyütür; REAL sütun
     # doğru/yanlış değerini 1.0/0.0 olarak saklar.
+
+
+def test_anahtar_turleri_metin_anahtar_rowid_ve_bilesik(
+    veritabani: vt.Veritabani,
+) -> None:
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "kodlar", (motor.Sutun("kod", ("TEXT", "PRIMARY KEY")), motor.Sutun("a"))
+        ),
+    )
+    _uygula(veritabani, motor.TabloOlusturmaIstegi("serbest", (motor.Sutun("a"),)))
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "bilesik",
+            (motor.Sutun("yil", ("INTEGER",)), motor.Sutun("no", ("INTEGER",))),
+            kisitlar=("PRIMARY KEY (yil, no)",),
+            secenekler=("WITHOUT ROWID",),
+        ),
+    )
+    assert kayit.satirlar_ekle(
+        veritabani, "kodlar", [{"kod": "X1"}, {"kod": "X2", "a": 1}]
+    ) == kayit.EklemeSonucu(2, ("kod",), (("X1",), ("X2",)))
+    assert kayit.satirlar_ekle(
+        veritabani, "serbest", [{"a": 1}, {"a": 2}]
+    ) == kayit.EklemeSonucu(2, ("rowid",), ((1,), (2,)))
+    assert kayit.satirlar_ekle(
+        veritabani, "bilesik", [{"yil": 2026, "no": 7}]
+    ) == kayit.EklemeSonucu(1, ("yil", "no"), ((2026, 7),))
 
 
 def test_bir_satir_reddedilirse_hicbiri_yazilmaz(veritabani: vt.Veritabani) -> None:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
+from defteruc.cekirdek import yapi
 from defteruc.cekirdek.motor import adi_dogrula
 from defteruc.cekirdek.veritabani import Veritabani
 
@@ -13,9 +15,16 @@ type Deger = str | int | float | bool | None
 class KayitHatasi(Exception): ...
 
 
+@dataclass(frozen=True, slots=True)
+class EklemeSonucu:
+    eklenen: int
+    anahtar_sutunlari: tuple[str, ...]
+    anahtarlar: tuple[tuple[Deger, ...], ...]
+
+
 def satirlar_ekle(
     veritabani: Veritabani, tablo: str, satirlar: Sequence[Mapping[str, Deger]]
-) -> int:
+) -> EklemeSonucu:
     adi_dogrula(tablo, "tablo")
     if not satirlar:
         raise KayitHatasi("eklenecek satır yok")
@@ -23,14 +32,18 @@ def satirlar_ekle(
     try:
         with veritabani.islem() as oturum:
             baglanti = oturum.connection()
-            for sql, degerler in cumleler:
-                baglanti.exec_driver_sql(sql, degerler)
+            anahtar = yapi.anahtar_sutunlari(baglanti, tablo) or (yapi.ROWID,)
+            donus = " RETURNING " + ", ".join(yapi.sutun_adi(a) for a in anahtar)
+            anahtarlar = tuple(
+                tuple(baglanti.exec_driver_sql(sql + donus, degerler).one())
+                for sql, degerler in cumleler
+            )
     except SQLAlchemyError as hata:
         neden = hata.orig if isinstance(hata, DBAPIError) else hata
         raise KayitHatasi(
             f"{tablo}: satırlar eklenemedi, hiçbiri yazılmadı: {neden}"
         ) from hata
-    return len(satirlar)
+    return EklemeSonucu(len(satirlar), anahtar, anahtarlar)
 
 
 def _ekleme_sql(

@@ -9,6 +9,7 @@ from itertools import pairwise
 from sqlalchemy import Connection
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
+from defteruc.cekirdek import yapi
 from defteruc.cekirdek.veritabani import Veritabani, YabanciAnahtarIhlali
 
 AD_BICIMI = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -355,12 +356,6 @@ def _son_sutunu_dogrula(baglanti: Connection, tablo: str, ad: str) -> None:
         )
 
 
-def _anahtar_sutunlar(baglanti: Connection, tablo: str) -> tuple[str, ...]:
-    satirlar = baglanti.exec_driver_sql(f"PRAGMA table_xinfo({_tirnakla(tablo)})").all()
-    anahtar = sorted((int(s[5]), str(s[1])) for s in satirlar if int(s[5]) > 0)
-    return tuple(ad for _, ad in anahtar)
-
-
 DEGER_DENETIMI_GRUP_BOYUTU = 64
 
 
@@ -377,7 +372,7 @@ def _kopyayi_dogrula(
     if rowid_takma is not None:
         anahtarlar = (rowid_takma,)
     else:
-        anahtarlar = _anahtar_sutunlar(baglanti, tablo)
+        anahtarlar = yapi.anahtar_sutunlari(baglanti, tablo)
     if not anahtarlar:  # pragma: no cover - WITHOUT ROWID tablonun anahtarı vardır
         raise MotorHatasi(f"{tablo}: satırları eşleştirecek anahtar yok; iş reddedildi")
     e, y = _tirnakla(tablo), _tirnakla(gecici)
@@ -456,7 +451,7 @@ def _yeniden_kurma_on_denetimi(
         raise SutunlarUyusmuyor(
             f"{tablo}: deger_donusumu_izinli tablonun sütunu olmalı: {izinsiz}"
         )
-    kimlik = _anahtar_sutunlar(baglanti, tablo)
+    kimlik = yapi.anahtar_sutunlari(baglanti, tablo)
     kimlikte = [a for a in istek.deger_donusumu_izinli if a in kimlik]
     if kimlikte:
         raise SutunlarUyusmuyor(

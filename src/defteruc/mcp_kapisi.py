@@ -17,7 +17,7 @@ from defteruc.baslangic import (
     BaslangicHatasi,
     ortami_hazirla,
 )
-from defteruc.cekirdek import kayit, motor, onay, yapi
+from defteruc.cekirdek import kayit, motor, okuma, onay, yapi
 from defteruc.cekirdek.veritabani import Veritabani, VeritabaniMesgul
 
 SUNUCU_ADI = "defteruc"
@@ -34,6 +34,7 @@ ARAC_ISTEK_DURUMU = "istek_durumu"
 ARAC_BEKLEYEN_ISTEKLER = "bekleyen_istekler"
 ARAC_YAPIYI_OKU = "yapiyi_oku"
 ARAC_SATIR_EKLE = "satir_ekle"
+ARAC_SATIRLARI_OKU = "satirlari_oku"
 ARACLAR = (
     ARAC_SISTEM_DURUMU,
     ARAC_TABLO_OLUSTURMA_ISTEGI,
@@ -45,6 +46,7 @@ ARACLAR = (
     ARAC_BEKLEYEN_ISTEKLER,
     ARAC_YAPIYI_OKU,
     ARAC_SATIR_EKLE,
+    ARAC_SATIRLARI_OKU,
 )
 SURUM_BILINMIYOR = "bilinmiyor"
 
@@ -66,6 +68,9 @@ SUNUCU_TALIMATI = (
     "onay alamazsın ve onayı bekletemezsin. Aynı talep kimliğiyle istek_durumu "
     "aracını sorarak sonucu öğren (UYGULANDI, REDDEDILDI, UYGULANAMADI). Tablo "
     "hazır olduğunda satırları satir_ekle ile yaz; satır eklemek onay gerektirmez. "
+    "Yazılan satırlar ve kimlikleri satirlari_oku ile okunur; bir kaydı başka bir "
+    "kayda bağlamadan ya da aynı kaydın var olup olmadığına karar vermeden önce "
+    "oku. "
     "Adlar sade ve Türkçe karaktersizdir: küçük ASCII harfle başlar, harf, "
     "rakam ve alt çizgi içerir. Sütun özellikleri, kısıtlar ve seçenekler "
     "SQLite'ın CREATE TABLE söz dizimindeki parçalardır (örn. 'INTEGER', "
@@ -120,7 +125,17 @@ ARAC_SATIR_EKLE_ACIKLAMASI = (
     "Mevcut tabloya satır ekler (kayıt); onay gerektirmez. satirlar: her biri "
     "sütun adı → değer sözlüğü; değer metin, tam sayı, ondalık, doğru/yanlış ya "
     "da null olabilir. Hepsi tek işlemde yazılır: biri reddedilirse hiçbiri "
-    "yazılmaz."
+    "yazılmaz. Yanıt her satırın anahtarını verir: birincil anahtar sütunları, "
+    "yoksa rowid."
+)
+ARAC_SATIRLARI_OKU_ACIKLAMASI = (
+    "Tablodan satır okur. kosul: SQL WHERE ifadesi (parametre yerleri ? ile, "
+    "değerler parametreler listesinde; metne gömme); sinir: en çok satır "
+    "(varsayılan 100, en çok 1000); baslangic: atlanacak satır sayısı. Yanıt: "
+    "sütun adları, satırlar, koşula uyan toplam (eslesen_toplam), dönen sayı "
+    "(donen) ve devamı olup olmadığı (devami_var); devamı için baslangic = "
+    "baslangic + donen ile yeniden çağır. Sıra birincil anahtara göredir. "
+    "Yalnız okur; sistem tabloları okunamaz."
 )
 
 
@@ -318,11 +333,40 @@ def sunucu_kur(ayarlar: Ayarlar) -> MCPServer[None]:
         tablo: str, satirlar: tuple[dict[str, kayit.Deger], ...]
     ) -> dict[str, object]:
         try:
-            eklenen = kayit.satirlar_ekle(veritabani, tablo, satirlar)
+            sonuc = kayit.satirlar_ekle(veritabani, tablo, satirlar)
         except (motor.GecersizAd, kayit.KayitHatasi, VeritabaniMesgul) as hata:
             raise ToolError(str(hata)) from hata
-        gunluk.olay_kaydet(OLAY_MCP_KAYIT, f"tablo={tablo} eklenen={eklenen}")
-        return {"tablo": tablo, "eklenen": eklenen}
+        gunluk.olay_kaydet(OLAY_MCP_KAYIT, f"tablo={tablo} eklenen={sonuc.eklenen}")
+        return {
+            "tablo": tablo,
+            "eklenen": sonuc.eklenen,
+            "anahtar_sutunlari": list(sonuc.anahtar_sutunlari),
+            "anahtarlar": [list(a) for a in sonuc.anahtarlar],
+        }
+
+    @sunucu.tool(name=ARAC_SATIRLARI_OKU, description=ARAC_SATIRLARI_OKU_ACIKLAMASI)
+    def satirlari_oku(
+        tablo: str,
+        kosul: str = "",
+        parametreler: tuple[okuma.Deger, ...] = (),
+        sinir: int = okuma.SINIR_VARSAYILAN,
+        baslangic: int = 0,
+    ) -> dict[str, object]:
+        try:
+            sonuc = okuma.satirlari_oku(
+                veritabani, tablo, kosul, parametreler, sinir, baslangic
+            )
+        except (motor.MotorHatasi, okuma.OkumaHatasi, VeritabaniMesgul) as hata:
+            raise ToolError(str(hata)) from hata
+        return {
+            "tablo": tablo,
+            "sutunlar": list(sonuc.sutunlar),
+            "satirlar": [list(s) for s in sonuc.satirlar],
+            "eslesen_toplam": sonuc.eslesen_toplam,
+            "donen": sonuc.donen,
+            "baslangic": sonuc.baslangic,
+            "devami_var": sonuc.devami_var,
+        }
 
     return sunucu
 

@@ -8,6 +8,8 @@ from defteruc.cekirdek.veritabani import Veritabani
 
 SISTEM_ON_EKI = "_defteruc_"
 
+ROWID = "rowid"
+
 
 @dataclass(frozen=True, slots=True)
 class SutunBilgisi:
@@ -33,6 +35,16 @@ class TabloBilgisi:
     sutunlar: tuple[SutunBilgisi, ...]
     indeksler: tuple[IndeksBilgisi, ...]
     satir_sayisi: int
+
+
+def anahtar_sutunlari(baglanti: Connection, tablo: str) -> tuple[str, ...]:
+    satirlar = baglanti.exec_driver_sql(f'PRAGMA table_xinfo("{tablo}")').all()
+    anahtar = sorted((int(s[5]), str(s[1])) for s in satirlar if int(s[5]) > 0)
+    return tuple(ad for _, ad in anahtar)
+
+
+def sutun_adi(ad: str) -> str:
+    return ad if ad == ROWID else f'"{ad}"'
 
 
 def yapiyi_oku(veritabani: Veritabani) -> tuple[TabloBilgisi, ...]:

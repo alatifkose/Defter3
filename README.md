@@ -140,14 +140,23 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   `istek_durumu`, `bekleyen_istekler`, `yapiyi_oku`, `satir_ekle`. Ayrıntı
   "MCP kapısı" bölümünde.
 * **Yapıyı okuma** (`cekirdek/yapi.py`) ve **satır ekleme = kayıt**
-  (`cekirdek/kayit.py`, onaysız, tek transaction). Motor yapıyı okumaz; okuma
-  ayrı modüldedir.
+  (`cekirdek/kayit.py`, onaysız, tek transaction, eklenen her satırın
+  anahtarı döner). Motor yapıyı okumaz; okuma ayrı modüldedir.
+* **Satır okuma** (`cekirdek/okuma.py`, 2026-09-25): koşul ve parametreyle,
+  sayfalı; SQLite yetkilendirme kancasıyla yalnız okuma, sistem tabloları
+  alt sorgudan da erişilemez. Ayrıntı "Satır okuma" bölümünde.
 * **Kilit hatası anlamlı** (`VeritabaniMesgul`, 2026-09-25): iki süreç aynı
   anda yazınca bekleyen taraf 10 s bekler, sonra iş yapılmadan anlaşılır hata
   alır. Ayrıntı "Veritabanı" bölümünde.
 
-Henüz yok: onay penceresi, yeni mükerrerlik tasarımı, Cowork ile uçtan uca
-gerçek deneme (Adım 6).
+Cowork ile uçtan uca gerçek deneme 2026-09-25'te yapıldı: yapı okundu,
+tablo isteği bırakıldı, `defteruc onayla` ile uygulandı, iki satır yazıldı,
+yapı yeniden okundu. Denemenin gösterdiği eksik (satırlar okunamıyor,
+kimlikler görünmüyor) aynı gün kapatıldı.
+
+Henüz yok: onay penceresi, yeni mükerrerlik tasarımı, komut satırından satır
+gösterme (okuma çekirdekte olduğundan pencere ve komut satırı sonra aynı
+işlevi kullanır).
 
 ## Yapı istekleri ve onay
 
@@ -199,6 +208,43 @@ ve isteği açmadan önce doğrular; `uygula_baglantida(baglanti, istek)` işi o
 bağlantıda yapar; `istek_sql(istek)` çalışacak cümleyi üretir. Yapıya
 dokunan tek üretim çağıranı onay modülüdür; motor testleri de aynı iki
 çağrıyla çalışır.
+
+## Satır okuma
+
+`src/defteruc/cekirdek/okuma.py` (2026-09-25). Cowork'un yazdığı kaydı bulup
+okuyabilmesi için: bir kaydı başka kayda bağlamak, aynı kaydın var olup
+olmadığına bakmak, kimlikleri öğrenmek. Onay gerektirmez: veriyi
+değiştirmez. Aynı gün `satirlar_ekle` de eklenen her satırın anahtarını
+döndürür oldu (`EklemeSonucu`: birincil anahtar sütunları ve değerleri,
+birincil anahtar yoksa `rowid`; `INSERT ... RETURNING` ile, WITHOUT ROWID
+ve bileşik anahtarda da). Bu, ekleme işleminin yanıtına bilgi ekler, yeni bir
+yetki getirmez; onay kuralları aynen kalır.
+
+`satirlari_oku(veritabani, tablo, kosul, parametreler, sinir, baslangic)`:
+koşul bir SQL `WHERE` ifadesidir, motorun parça kuralından geçer (üst düzeyde
+`;` ve `,` yok, yorum yok, parantez dengeli), değerler `?` yer tutucularıyla
+parametre olarak verilir, metne gömülmez. Sıra birincil anahtara, yoksa
+`rowid`'e göredir. Sınır varsayılan 100, en çok 1000. Sonuç sütun adları,
+satırlar, **koşula uyan toplam** (`eslesen_toplam`), dönen sayı (`donen`),
+başlangıç ve devamı olup olmadığı (`devami_var`); devamı `baslangic + donen`
+ile alınır. Sistem tablosu adıyla çağrı daha bağlantı açılmadan reddedilir.
+
+**Erişim sınırı, parça kuralıyla değil kancayla.** Parça kuralı alt sorguyu
+engellemez: koşulda `(SELECT sql FROM _defteruc_yapi_istekleri)` ya da
+`(SELECT sql FROM sqlite_master)` yazılabilir. Bu yüzden okuma, sayım ve
+seçme boyunca `sqlite3` bağlantısına SQLite'ın yetkilendirme kancası
+(`set_authorizer`) takılır: `SELECT` ve sıradan işlevler serbest;
+`_defteruc_*` ve `sqlite_*` tablolarına `READ` yasak (alt sorgu dahil,
+hangi sütun olursa olsun); yazma, yapı işlemi, `PRAGMA`, `ATTACH` ve
+`load_extension` yasak. İhlal SQLite'ın kendi "prohibited / not authorized"
+hatasıyla `OkumaHatasi` olur. Kanca iş bitince kaldırılır; kaldırılamazsa
+bağlantı geçersizleştirilir, havuza dönmez. Bu davranış önce betikle
+doğrulandı, sonra testle kanıtlandı (`tests/test_okuma.py`): alt sorguyla
+sistem tablosu, `sqlite_master`, `sqlite_schema`, `load_extension`
+reddedilir; `upper()` ve sıradan alt sorgu geçer; okuma sonrası aynı
+bağlantı yeniden yazabilir ve `PRAGMA` çalışır. İkili (BLOB) değer JSON'a
+giremediğinden `<N baytlık ikili veri>` metniyle döner; Cowork'un yazma yolu
+ikili değer üretmez.
 
 ## Veritabanı
 
@@ -497,7 +543,8 @@ Araçlar (2026-09-25; adları `ARACLAR`):
 | `istek_durumu` | Talep kimliğiyle durum: `BEKLIYOR`, `UYGULANDI`, `REDDEDILDI`, `UYGULANAMADI` (+ sebep). | - |
 | `bekleyen_istekler` | Kullanıcının kararını bekleyen istekler. | - |
 | `yapiyi_oku` | Tablolar: ad, `CREATE TABLE` cümlesi, sütunlar (`table_xinfo`), indeksler, satır sayısı. Sistem tabloları (`_defteruc_*`) ve `sqlite_*` listede yoktur. | - |
-| `satir_ekle` | Mevcut tabloya satırlar yazar (kayıt); hepsi tek transaction, biri düşerse hiçbiri yazılmaz. | yok |
+| `satir_ekle` | Mevcut tabloya satırlar yazar (kayıt); hepsi tek transaction, biri düşerse hiçbiri yazılmaz. Her satırın anahtarı yanıtta. | yok |
+| `satirlari_oku` | Koşul, parametre, sınır ve başlangıçla satır okur; koşula uyan toplam ve devamı olup olmadığı yanıtta. Yalnız okur, sistem tabloları alt sorgudan da kapalı. | - |
 
 Yapı isteği araçları isteği uygulamaz: motorun SQL üretimiyle doğrular
 (geçersiz ad ya da parça araç hatasıdır), `BEKLIYOR` yazar ve yanıtta talep
@@ -718,7 +765,8 @@ src/defteruc/    uygulama paketi
     motor.py        yapı işleri: tablo, sütun, sütun özelliği, indeks; ham SQL
     onay.py         yapı istekleri: sistem tablosu, bekleyenler, onay ve ret
     yapi.py         mevcut yapıyı okuma (tablolar, sütunlar, indeksler, satır sayısı)
-    kayit.py        satır ekleme (kayıt): onaysız, tek transaction
+    kayit.py        satır ekleme (kayıt): onaysız, tek transaction, anahtar döner
+    okuma.py        satır okuma: koşul, sayfalama, yetkilendirme kancasıyla yalnız okuma
     arsiv.py        gelen dizini sınırı, akışla SHA-256, içerik adresli atomik arşiv, bütünlük
   finans/         finansal domain; çekirdeği kullanabilir (boş)
 tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi; test_arsiv.py: arşiv)
