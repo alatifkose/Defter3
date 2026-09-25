@@ -133,8 +133,15 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   üzerinden `UPDATE ... FROM` ile 500'lük gruplarla. Kimlik, değer ve kimlik
   denetimi aynen; bütün sütunlar boş bırakılamaz ve varsayılansızsa sınırda
   tek adımda taşınamaz, açık hatayla reddedilir (dış inceleme 84ced62 bulgu
-  2). Onayda gösterilen kopya cümlesi tek adımlı biçimdir; iki aşamalı yol
-  aynı satırları aynı kimlikle taşır.
+  2). **Onayda gösterilen SQL çalışacak SQL'dir:** istek bırakılırken
+  (`onay.istek_birak` → `motor.istek_sql_baglantida`) geçici tablo bir
+  SAVEPOINT içinde kurulup okunur ve hemen geri alınır; kopya cümleleri
+  gerçek bağlantının sütun sınırına, örtük rowid takma adına ve üretilen
+  sütunlara göre üretilir, sonra transaction yalnız istek satırını commit
+  eder. Tablo henüz yoksa ya da tanım kurulamıyorsa önizleme tek adımlı
+  genel biçime düşer, onay o hatayı `UYGULANAMADI` olarak verir. Test,
+  onayda çalışan cümleleri yakalayıp önizlemedeki her cümlenin birebir
+  çalıştığını doğrular (sıradan tablo ve tam sınır).
 
 * **Yapı istekleri ve onay** (`cekirdek/onay.py`, 2026-09-25): bir yapı
   isteği bırakıldığında uygulanmaz, sistem tablosunda "bekliyor" olarak
@@ -195,8 +202,10 @@ bırakılırken çalışır: geçersiz ad ya da parça (`GecersizAd`,
 `GecersizParca`) daha kayıt yazılmadan reddedilir, veritabanına dokunulmaz.
 Kabul edilen istek `BEKLIYOR` yazılır, talep kimliği döner. Kullanıcıya
 gösterilecek şey `sql` sütunudur: onaylanan bir özet değil, çalışacak
-cümlenin kendisidir (yeniden kurmada dört cümle; indeks, trigger ve görünüm
-taşıması motorun kendi işidir, metne girmez).
+cümlenin kendisidir (yeniden kurmada kurma, kopya cümleleri, silme ve
+adlandırma; kopya cümleleri bağlantının sınırına göre üretilir, bkz. motor
+"Sütun sınırı"; indeks, trigger ve görünüm taşıması motorun kendi işidir,
+metne girmez).
 
 **Karar** (`onayla`, `reddet`). Onay ile motor çağrısı tek transaction'dadır:
 motorun `islem_ac` bağlamı istek türüne göre normal ya da yabancı anahtar

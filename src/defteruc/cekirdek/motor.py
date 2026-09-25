@@ -229,6 +229,41 @@ def istek_sql(istek: YapiIstegi) -> str:
             return indeks_silme_sql(istek)
 
 
+def istek_sql_baglantida(baglanti: Connection, istek: YapiIstegi) -> str:
+    sql = istek_sql(istek)
+    if not isinstance(istek, SutunOzelligiDegistirmeIstegi):
+        return sql
+    return _yeniden_kurma_onizlemesi(baglanti, istek, sql)
+
+
+def _yeniden_kurma_onizlemesi(
+    baglanti: Connection, istek: SutunOzelligiDegistirmeIstegi, tek_bicim: str
+) -> str:
+    kurma, _, silme, adlandirma = sutun_ozelligi_degistirme_sql(istek)
+    tablo, gecici = istek.tablo, istek.tablo + GECICI_AD_EKI
+    mevcut = _sutun_bilgisi(baglanti, tablo)
+    if not mevcut:
+        return tek_bicim
+    try:
+        baglanti.exec_driver_sql("SAVEPOINT onizleme")
+        try:
+            baglanti.exec_driver_sql(kurma)
+            yeni = _sutun_bilgisi(baglanti, gecici)
+            kopyalanacak = tuple(ad for ad, uretilen in yeni.items() if not uretilen)
+            rowid_takma = None
+            if not yapi.rowidsiz(baglanti, tablo) and not yapi.rowidsiz(
+                baglanti, gecici
+            ):
+                rowid_takma = yapi.rowid_takma_adi(tuple(mevcut))
+            kopya = _kopya_cumleleri(baglanti, gecici, tablo, kopyalanacak, rowid_takma)
+        finally:
+            baglanti.exec_driver_sql("ROLLBACK TO onizleme")
+            baglanti.exec_driver_sql("RELEASE onizleme")
+    except (SQLAlchemyError, MotorHatasi):
+        return tek_bicim
+    return ";\n".join((kurma, *kopya, silme, adlandirma))
+
+
 def yeniden_kurma_gerekir(istek: YapiIstegi) -> bool:
     return isinstance(istek, SutunOzelligiDegistirmeIstegi)
 

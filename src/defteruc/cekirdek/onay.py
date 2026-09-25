@@ -74,9 +74,11 @@ def sistem_tablosunu_hazirla(veritabani: Veritabani) -> None:
 
 def istek_birak(veritabani: Veritabani, istek: m.YapiIstegi) -> int:
     tur = istek_turu(istek)
-    sql = m.istek_sql(istek)
+    m.istek_sql(istek)
     with veritabani.islem() as oturum:
-        sonuc = oturum.connection().exec_driver_sql(
+        baglanti = oturum.connection()
+        sql = m.istek_sql_baglantida(baglanti, istek)
+        sonuc = baglanti.exec_driver_sql(
             f'INSERT INTO "{SISTEM_TABLOSU}" (tur, istek, sql, durum, olusturma) '
             "VALUES (?, ?, ?, ?, ?)",
             (tur, istek_json(istek), sql, Durum.BEKLIYOR.value, _simdi()),

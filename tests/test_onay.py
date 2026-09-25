@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from defteruc import ayarlar as ay
 from defteruc.cekirdek import motor as m
@@ -424,3 +424,111 @@ def test_yabanci_anahtar_sema_hatasi_uygulanamadi_olur(
             text("SELECT sql FROM sqlite_master WHERE name = 'parent'")
         ).scalar_one()
     assert "PRIMARY KEY" in str(tanim)
+
+
+# --- önizleme = çalışan SQL: yeniden kurma cümleleri bağlantının sınırına göre ------
+
+
+def _calisanlari_yakala(
+    veritabani: vt.Veritabani, kimlik: int
+) -> tuple[onay.YapiIstegiKaydi, list[str]]:
+    calisanlar: list[str] = []
+
+    def kaydet(
+        conn: object,
+        cursor: object,
+        statement: object,
+        parameters: object,
+        context: object,
+        executemany: object,
+    ) -> None:
+        calisanlar.append(str(statement))
+
+    event.listen(veritabani.motor, "before_cursor_execute", kaydet)
+    try:
+        kayit = onay.onayla(veritabani, kimlik)
+    finally:
+        event.remove(veritabani.motor, "before_cursor_execute", kaydet)
+    return kayit, calisanlar
+
+
+def _onizleme_calisanla_ayni(veritabani: vt.Veritabani, kimlik: int) -> None:
+    kayit = onay.kayit_getir(veritabani, kimlik)
+    kayit, calisanlar = _calisanlari_yakala(veritabani, kimlik)
+    assert kayit.durum is onay.Durum.UYGULANDI, kayit.sonuc
+    for cumle in kayit.sql.split(";\n"):
+        assert cumle in calisanlar, cumle[:120]
+
+
+def test_yeniden_kurma_onizlemesi_ortuk_kimligi_ve_calisan_cumleleri_gosterir(
+    veritabani: vt.Veritabani,
+) -> None:
+    onay.onayla(veritabani, onay.istek_birak(veritabani, KISILER))
+    kimlik = onay.istek_birak(veritabani, KISILER_YENI)
+    sql = onay.kayit_getir(veritabani, kimlik).sql
+    assert 'SELECT rowid, "id", "ad_soyad" FROM "kisiler"' in sql
+    assert sql.count("INSERT OR ABORT") == 1 and "UPDATE" not in sql
+    _onizleme_calisanla_ayni(veritabani, kimlik)
+
+
+def test_tam_sinirda_onizleme_iki_asamali_kopyayi_gosterir(
+    veritabani: vt.Veritabani,
+) -> None:
+    import sqlite3
+
+    with veritabani.islem() as oturum:
+        ham = oturum.connection().connection.dbapi_connection
+        assert isinstance(ham, sqlite3.Connection)
+        n = ham.getlimit(sqlite3.SQLITE_LIMIT_COLUMN)
+    onay.onayla(
+        veritabani,
+        onay.istek_birak(
+            veritabani,
+            m.TabloOlusturmaIstegi(
+                "fullwidth", tuple(m.Sutun(f"c{i}", ("INTEGER",)) for i in range(n))
+            ),
+        ),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(
+            text(f"INSERT INTO fullwidth (rowid, c0, c{n - 1}) VALUES (5, 1, 2)")
+        )
+    yeni = m.SutunOzelligiDegistirmeIstegi(
+        "fullwidth",
+        tuple(
+            m.Sutun(f"c{i}", ("INTEGER", "NOT NULL") if i == n - 1 else ("INTEGER",))
+            for i in range(n)
+        ),
+    )
+    kimlik = onay.istek_birak(veritabani, yeni)
+    sql = onay.kayit_getir(veritabani, kimlik).sql
+    assert sql.count("INSERT OR ABORT") == 1
+    assert sql.count("UPDATE") == 1 and 'FROM "fullwidth" AS e WHERE e.rowid' in sql
+    assert f'(rowid, "c{n - 1}", "c0"' in sql
+    _onizleme_calisanla_ayni(veritabani, kimlik)
+    with veritabani.islem() as oturum:
+        satirlar = oturum.execute(
+            text(f"SELECT rowid, c0, c{n - 1} FROM fullwidth")
+        ).all()
+    assert [tuple(r) for r in satirlar] == [(5, 1, 2)]
+
+
+def test_onizleme_gecici_tablo_birakmaz_ve_olmayan_tabloda_tek_bicimdir(
+    veritabani: vt.Veritabani,
+) -> None:
+    kimlik = onay.istek_birak(veritabani, KISILER_YENI)
+    assert onay.kayit_getir(veritabani, kimlik).sql == m.istek_sql(KISILER_YENI)
+    onay.onayla(veritabani, onay.istek_birak(veritabani, KISILER))
+    bozuk = m.SutunOzelligiDegistirmeIstegi(
+        "kisiler",
+        (
+            m.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+            m.Sutun("ad_soyad", ("TEXT", "CHECK (yok > 0)")),
+        ),
+    )
+    kimlik = onay.istek_birak(veritabani, bozuk)
+    assert onay.kayit_getir(veritabani, kimlik).sql == m.istek_sql(bozuk)
+    assert "kisiler" in _tablolar(veritabani)
+    assert not any(ad.endswith(m.GECICI_AD_EKI) for ad in _tablolar(veritabani))
+    kayit = onay.onayla(veritabani, kimlik)
+    assert kayit.durum is onay.Durum.UYGULANAMADI
