@@ -107,11 +107,15 @@ def yapiyi_oku(veritabani: Veritabani) -> tuple[TabloBilgisi, ...]:
         baglanti = oturum.connection()
         tablolar = baglanti.exec_driver_sql(
             "SELECT name, sql FROM sqlite_master WHERE type = 'table' "
-            "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE ? ESCAPE '\\' "
+            "AND name NOT LIKE ? ESCAPE '\\' AND name NOT LIKE ? ESCAPE '\\' "
             "ORDER BY name",
-            (SISTEM_ON_EKI.replace("_", "\\_") + "%",),
+            (_like_on_eki("sqlite_"), _like_on_eki(SISTEM_ON_EKI)),
         ).all()
         return tuple(_tablo(baglanti, str(t[0]), str(t[1])) for t in tablolar)
+
+
+def _like_on_eki(on_ek: str) -> str:
+    return on_ek.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%") + "%"
 
 
 def _tablo(baglanti: Connection, ad: str, sql: str) -> TabloBilgisi:
@@ -127,8 +131,12 @@ def _tablo(baglanti: Connection, ad: str, sql: str) -> TabloBilgisi:
         )
         for s in baglanti.exec_driver_sql(f"PRAGMA table_xinfo({tirnakli})").all()
     )
+    benzersizler = {
+        str(i[1]): int(i[2]) != 0
+        for i in baglanti.exec_driver_sql(f"PRAGMA index_list({tirnakli})").all()
+    }
     indeksler = tuple(
-        IndeksBilgisi(ad=str(i[0]), benzersiz=" UNIQUE " in f" {i[1]} ", sql=str(i[1]))
+        IndeksBilgisi(ad=str(i[0]), benzersiz=benzersizler[str(i[0])], sql=str(i[1]))
         for i in baglanti.exec_driver_sql(
             "SELECT name, sql FROM sqlite_master WHERE type = 'index' "
             "AND tbl_name = ? AND sql IS NOT NULL ORDER BY name",

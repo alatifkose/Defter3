@@ -408,3 +408,62 @@ def test_null_anahtarli_satirlar_rowid_ile_ayirt_edilir(
     assert okunan.satirlar == ((None, "A"), (None, "B"))
     tek = okuma.satirlari_oku(veritabani, "nullable_pk", "rowid = ?", (2,))
     assert tek.satirlar == ((None, "B"),)
+
+
+# --- inceleme 7dba285, bulgu 5 ve 6: indeks benzersizliği ve sqlite_ süzgeci ----------
+
+
+def test_indeks_benzersizligi_metin_degil_pragma_soyler(
+    veritabani: vt.Veritabani,
+) -> None:
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "items",
+            (
+                motor.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+                motor.Sutun("tag", ("TEXT",)),
+            ),
+        ),
+    )
+    _uygula(
+        veritabani,
+        motor.IndeksOlusturmaIstegi(
+            "ix_tag", "items", ("tag",), kosul="tag = ' UNIQUE '"
+        ),
+    )
+    _uygula(
+        veritabani,
+        motor.IndeksOlusturmaIstegi("ux_id", "items", ("id",), benzersiz=True),
+    )
+    _uygula(
+        veritabani,
+        motor.IndeksOlusturmaIstegi(
+            "ix_ifade", "items", ("lower(tag)",), kosul="id > 0"
+        ),
+    )
+    kayit.satirlar_ekle(veritabani, "items", [{"tag": " UNIQUE "}, {"tag": " UNIQUE "}])
+    (tablo,) = yapi.yapiyi_oku(veritabani)
+    assert [(i.ad, i.benzersiz) for i in tablo.indeksler] == [
+        ("ix_ifade", False),
+        ("ix_tag", False),
+        ("ux_id", True),
+    ]
+
+
+def test_sqlite_ile_baslayan_kullanici_tablosu_listelenir(
+    veritabani: vt.Veritabani,
+) -> None:
+    _uygula(
+        veritabani, motor.TabloOlusturmaIstegi("sqliteverileri", (motor.Sutun("ad"),))
+    )
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "sayacli", (motor.Sutun("id", ("INTEGER", "PRIMARY KEY", "AUTOINCREMENT")),)
+        ),
+    )
+    kayit.satirlar_ekle(veritabani, "sayacli", [{"id": 1}])
+    adlar = [t.ad for t in yapi.yapiyi_oku(veritabani)]
+    assert adlar == ["sayacli", "sqliteverileri"]
+    assert onay.SISTEM_TABLOSU not in adlar and "sqlite_sequence" not in adlar

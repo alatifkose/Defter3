@@ -266,6 +266,10 @@ parametre olarak verilir, metne gömülmez. Sıra birincil anahtara, yoksa
 satırlar, **koşula uyan toplam** (`eslesen_toplam`), dönen sayı (`donen`),
 başlangıç ve devamı olup olmadığı (`devami_var`); devamı `baslangic + donen`
 ile alınır. Sistem tablosu adıyla çağrı daha bağlantı açılmadan reddedilir.
+Sorgu `SELECT *`'dır; açık anahtar sütunları sonuçtaki konumlarından
+alınır, yalnız örtük rowid takma adı ek alan olarak seçilir. Böylece SQLite
+sütun sınırına yakın geçerli bir tablo yazılıp okunabilir (dış inceleme
+7dba285 bulgu 4; sınır testte bağlantıdan okunur).
 
 **Satır kimliği sözleşmesi** (`yapi.satir_kimligi`; ekleme, okuma ve motorun
 yeniden kurması aynı yeri kullanır; dış inceleme 7dba285 bulgu 2). Tanımlı
@@ -631,7 +635,7 @@ Araçlar (2026-09-25; adları `ARACLAR`):
 | `indeks_olusturma_istegi` / `indeks_silme_istegi` | İndeks için yapı isteği bırakır. | bekler |
 | `istek_durumu` | Talep kimliğiyle durum: `BEKLIYOR`, `UYGULANDI`, `REDDEDILDI`, `UYGULANAMADI` (+ sebep). | - |
 | `bekleyen_istekler` | Kullanıcının kararını bekleyen istekler. | - |
-| `yapiyi_oku` | Tablolar: ad, `CREATE TABLE` cümlesi, sütunlar (`table_xinfo`), indeksler, satır sayısı. Sistem tabloları (`_defteruc_*`) ve `sqlite_*` listede yoktur. | - |
+| `yapiyi_oku` | Tablolar: ad, `CREATE TABLE` cümlesi, sütunlar (`table_xinfo`), indeksler (benzersizlik `PRAGMA index_list`'ten, SQL metninden değil), satır sayısı. Sistem tabloları (`_defteruc_*`) ve `sqlite_*` listede yoktur; önek karşılaştırmasında alt çizgi kaçırılır, `sqliteverileri` gibi kullanıcı tabloları görünür (dış inceleme 7dba285 bulgu 5 ve 6). | - |
 | `satir_ekle` | Mevcut tabloya satırlar yazar (kayıt); hepsi tek transaction, biri düşerse hiçbiri yazılmaz. Her satırın anahtarı yanıtta. | yok |
 | `satirlari_oku` | Koşul, parametre, sınır ve başlangıçla satır okur; koşula uyan toplam ve devamı olup olmadığı yanıtta. Yalnız okur, sistem tabloları alt sorgudan da kapalı. | - |
 
