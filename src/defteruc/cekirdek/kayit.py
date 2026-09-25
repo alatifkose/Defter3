@@ -33,8 +33,8 @@ def satirlar_ekle(
         with veritabani.islem() as oturum:
             baglanti = oturum.connection()
             yapi.yazma_kilidi_al(baglanti, tablo)
-            anahtar = yapi.satir_kimligi(baglanti, tablo)
-            donus = " RETURNING " + ", ".join(yapi.sutun_adi(a) for a in anahtar)
+            kimlik = yapi.satir_kimligi(baglanti, tablo)
+            donus = " RETURNING " + yapi.kimlik_secimi(kimlik)
             anahtarlar = tuple(
                 tuple(baglanti.exec_driver_sql(sql + donus, degerler).one())
                 for sql, degerler in cumleler
@@ -48,7 +48,7 @@ def satirlar_ekle(
         raise KayitHatasi(
             f"{tablo}: satırlar eklenemedi, hiçbiri yazılmadı: {neden}"
         ) from hata
-    return EklemeSonucu(len(satirlar), anahtar, anahtarlar)
+    return EklemeSonucu(len(satirlar), kimlik.sutunlar, anahtarlar)
 
 
 def _ekleme_sql(

@@ -267,9 +267,14 @@ satırlar, **koşula uyan toplam** (`eslesen_toplam`), dönen sayı (`donen`),
 başlangıç ve devamı olup olmadığı (`devami_var`); devamı `baslangic + donen`
 ile alınır. Sistem tablosu adıyla çağrı daha bağlantı açılmadan reddedilir.
 Sorgu `SELECT *`'dır; açık anahtar sütunları sonuçtaki konumlarından
-alınır, yalnız örtük rowid takma adı ek alan olarak seçilir. Böylece SQLite
-sütun sınırına yakın geçerli bir tablo yazılıp okunabilir (dış inceleme
-7dba285 bulgu 4; sınır testte bağlantıdan okunur).
+alınır. Örtük rowid kimliği aynı transaction'da, aynı koşul, sıra, sınır ve
+başlangıçla ayrı bir sorguyla okunur; rowid sırası toplam sıra olduğundan
+eşleşme kaymaz ve SQLite sütun sınırına tam ulaşmış anahtarsız tablo da
+okunabilir (dış inceleme 7dba285 bulgu 4 ve 43db970 bulgu 2; sınır testte
+bağlantıdan okunur). Kimliğin örtük mü açık mı olduğu sütun adından değil,
+`yapi.Kimlik.ortuk` bayrağından bilinir: `rowid` adlı gerçek bir sütunla
+başlayan bileşik anahtar bütün bileşenleriyle döner ve filtre parametresi
+olarak geri verilebilir (43db970 bulgu 1).
 
 **Satır kimliği sözleşmesi** (`yapi.satir_kimligi`; ekleme, okuma ve motorun
 yeniden kurması aynı yeri kullanır; dış inceleme 7dba285 bulgu 2). Tanımlı

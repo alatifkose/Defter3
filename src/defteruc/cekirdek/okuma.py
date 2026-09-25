@@ -54,31 +54,32 @@ def satirlari_oku(
         with veritabani.islem() as oturum:
             baglanti = oturum.connection()
             kimlik = yapi.satir_kimligi(baglanti, tablo)
-            siralama = ", ".join(yapi.sutun_adi(a) for a in kimlik)
-            ortuk = kimlik[0] if kimlik[0] in yapi.ROWID_TAKMA_ADLARI else None
-            secim = f"{ortuk}, *" if ortuk else "*"
+            secim = yapi.kimlik_secimi(kimlik)
+            kuyruk = f'FROM "{tablo}"{nerede} ORDER BY {secim} LIMIT ? OFFSET ?'
+            baglar = (*degerler, sinir, baslangic)
             with _yalniz_okuma(baglanti):
                 toplam = int(
                     baglanti.exec_driver_sql(
                         f'SELECT count(*) FROM "{tablo}"{nerede}', degerler
                     ).scalar_one()
                 )
-                sonuc = baglanti.exec_driver_sql(
-                    f'SELECT {secim} FROM "{tablo}"{nerede} '
-                    f"ORDER BY {siralama} LIMIT ? OFFSET ?",
-                    (*degerler, sinir, baslangic),
-                )
-                adlar = tuple(str(k) for k in sonuc.keys())
-                ham = tuple(tuple(s) for s in sonuc.all())
-                if ortuk:
-                    sutunlar = adlar[1:]
-                    anahtarlar = tuple(s[:1] for s in ham)
-                    satirlar = tuple(s[1:] for s in ham)
+                sonuc = baglanti.exec_driver_sql(f"SELECT * {kuyruk}", baglar)
+                sutunlar = tuple(str(k) for k in sonuc.keys())
+                satirlar = tuple(tuple(s) for s in sonuc.all())
+                if kimlik.ortuk:
+                    # Aynı transaction, aynı koşul ve sıra: örtük kimlik ayrı
+                    # okunur ki sütun sınırındaki tablo da okunabilsin.
+                    anahtarlar = tuple(
+                        tuple(s)
+                        for s in baglanti.exec_driver_sql(
+                            f"SELECT {secim} {kuyruk}", baglar
+                        ).all()
+                    )
+                    if len(anahtarlar) != len(satirlar):  # pragma: no cover
+                        raise OkumaHatasi(f"{tablo}: kimlik ve satır sayısı uyuşmadı")
                 else:
-                    sutunlar = adlar
-                    konumlar = tuple(adlar.index(a) for a in kimlik)
-                    anahtarlar = tuple(tuple(s[k] for k in konumlar) for s in ham)
-                    satirlar = ham
+                    konumlar = tuple(sutunlar.index(a) for a in kimlik.sutunlar)
+                    anahtarlar = tuple(tuple(s[k] for k in konumlar) for s in satirlar)
     except yapi.KimlikYok as hata:
         raise OkumaHatasi(f"{tablo}: okunamadı: {hata}") from hata
     except SQLAlchemyError as hata:
@@ -91,7 +92,7 @@ def satirlari_oku(
         donen=len(satirlar),
         baslangic=baslangic,
         devami_var=baslangic + len(satirlar) < toplam,
-        anahtar_sutunlari=kimlik,
+        anahtar_sutunlari=kimlik.sutunlar,
         anahtarlar=anahtarlar,
     )
 

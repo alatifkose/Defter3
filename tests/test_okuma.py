@@ -302,3 +302,65 @@ def test_genis_rowid_tablosu_ortuk_kimlikle_okunur(veritabani: vt.Veritabani) ->
     sonuc = okuma.satirlari_oku(veritabani, "genis")
     assert len(sonuc.sutunlar) == n and sonuc.satirlar[0][0] == 7
     assert sonuc.anahtar_sutunlari == ("rowid",) and sonuc.anahtarlar == ((1,),)
+
+
+# --- inceleme 43db970, bulgu 1: rowid adlı gerçek anahtar sütunu örtük kimlik sanılmaz
+
+
+@pytest.mark.parametrize("secenekler", [(), ("WITHOUT ROWID",)])
+def test_rowid_ile_baslayan_bilesik_anahtar_tam_doner_ve_geri_kullanilir(
+    veritabani: vt.Veritabani, secenekler: tuple[str, ...]
+) -> None:
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "compound",
+            (
+                motor.Sutun("rowid", ("TEXT", "NOT NULL")),
+                motor.Sutun("part", ("INTEGER", "NOT NULL")),
+                motor.Sutun("ad", ("TEXT",)),
+            ),
+            kisitlar=("PRIMARY KEY (rowid, part)",),
+            secenekler=secenekler,
+        ),
+    )
+    eklenen = kayit.satirlar_ekle(
+        veritabani,
+        "compound",
+        [
+            {"rowid": "same", "part": 1, "ad": "A"},
+            {"rowid": "same", "part": 2, "ad": "B"},
+        ],
+    )
+    okunan = okuma.satirlari_oku(veritabani, "compound")
+    assert eklenen.anahtar_sutunlari == okunan.anahtar_sutunlari == ("rowid", "part")
+    assert eklenen.anahtarlar == okunan.anahtarlar == (("same", 1), ("same", 2))
+    assert all(len(a) == len(okunan.anahtar_sutunlari) for a in okunan.anahtarlar)
+    tek = okuma.satirlari_oku(
+        veritabani, "compound", '"rowid" = ? AND "part" = ?', okunan.anahtarlar[1]
+    )
+    assert tek.satirlar == (("same", 2, "B"),) and tek.anahtarlar == (("same", 2),)
+
+
+# --- inceleme 43db970, bulgu 2: tam sütun sınırındaki anahtarsız tablo okunur -------
+
+
+def test_tam_sutun_sinirindaki_anahtarsiz_tablo_okunur(
+    veritabani: vt.Veritabani,
+) -> None:
+    import sqlite3
+
+    with veritabani.islem() as oturum:
+        ham = oturum.connection().connection.dbapi_connection
+        assert isinstance(ham, sqlite3.Connection)
+        sinir = ham.getlimit(sqlite3.SQLITE_LIMIT_COLUMN)
+    sutunlar = tuple(motor.Sutun(f"c{i}", ("INTEGER",)) for i in range(sinir))
+    _uygula(veritabani, motor.TabloOlusturmaIstegi("fullwidth", sutunlar))
+    kayit.satirlar_ekle(veritabani, "fullwidth", [{"c0": 7}, {"c0": 8}, {"c0": 9}])
+    sonuc = okuma.satirlari_oku(
+        veritabani, "fullwidth", "c0 > ?", (7,), sinir=1, baslangic=1
+    )
+    assert len(sonuc.sutunlar) == sinir
+    assert sonuc.anahtar_sutunlari == ("rowid",)
+    assert sonuc.anahtarlar == ((3,),) and sonuc.satirlar[0][0] == 9
+    assert (sonuc.eslesen_toplam, sonuc.donen, sonuc.devami_var) == (2, 1, False)

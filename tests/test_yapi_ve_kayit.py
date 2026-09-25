@@ -374,7 +374,9 @@ def test_satir_kimligi_yalniz_dolu_anahtari_secer(
 ) -> None:
     with veritabani.islem() as oturum:
         oturum.execute(text(f'CREATE TABLE "t" ({tanim})'))
-        assert yapi.satir_kimligi(oturum.connection(), "t") == beklenen
+        kimlik = yapi.satir_kimligi(oturum.connection(), "t")
+        assert kimlik.sutunlar == beklenen
+        assert kimlik.ortuk == (beklenen[0] in yapi.ROWID_TAKMA_ADLARI)
 
 
 def test_without_rowid_anahtari_her_zaman_kimliktir(veritabani: vt.Veritabani) -> None:
@@ -385,7 +387,7 @@ def test_without_rowid_anahtari_her_zaman_kimliktir(veritabani: vt.Veritabani) -
                 'PRIMARY KEY ("yil", "no")) WITHOUT ROWID'
             )
         )
-        assert yapi.satir_kimligi(oturum.connection(), "w") == ("yil", "no")
+        assert yapi.satir_kimligi(oturum.connection(), "w").sutunlar == ("yil", "no")
 
 
 def test_null_anahtarli_satirlar_rowid_ile_ayirt_edilir(

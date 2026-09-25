@@ -14,6 +14,12 @@ ROWID_TAKMA_ADLARI = ("rowid", "_rowid_", "oid")
 class KimlikYok(Exception): ...
 
 
+@dataclass(frozen=True, slots=True)
+class Kimlik:
+    sutunlar: tuple[str, ...]
+    ortuk: bool
+
+
 type Deger = str | int | float | bool | bytes | None
 
 
@@ -66,7 +72,7 @@ def _anahtar_otomatik_indeksli(baglanti: Connection, tablo: str) -> bool:
     return any(str(s[3]) == "pk" for s in satirlar)
 
 
-def satir_kimligi(baglanti: Connection, tablo: str) -> tuple[str, ...]:
+def satir_kimligi(baglanti: Connection, tablo: str) -> Kimlik:
     satirlar = baglanti.exec_driver_sql(f'PRAGMA table_xinfo("{tablo}")').all()
     anahtar = sorted(
         (int(s[5]), str(s[1]), str(s[2]), int(s[3]) != 0)
@@ -76,7 +82,7 @@ def satir_kimligi(baglanti: Connection, tablo: str) -> tuple[str, ...]:
     if anahtar:
         adlar = tuple(ad for _, ad, _, _ in anahtar)
         if all(dolu for _, _, _, dolu in anahtar):
-            return adlar
+            return Kimlik(adlar, ortuk=False)
         (_, _, tur, _) = anahtar[0]
         if (
             len(anahtar) == 1
@@ -84,22 +90,24 @@ def satir_kimligi(baglanti: Connection, tablo: str) -> tuple[str, ...]:
             and not rowidsiz(baglanti, tablo)
             and not _anahtar_otomatik_indeksli(baglanti, tablo)
         ):
-            return adlar
+            return Kimlik(adlar, ortuk=False)
     takma = rowid_takma_adi(tuple(str(s[1]) for s in satirlar))
     if takma is None:
         raise KimlikYok(
             f"{tablo}: rowid, _rowid_ ve oid adlarının üçü de sütun; örtük satır "
             "kimliği güvenle okunamaz"
         )
-    return (takma,)
+    return Kimlik((takma,), ortuk=True)
 
 
 def yazma_kilidi_al(baglanti: Connection, tablo: str) -> None:
     baglanti.exec_driver_sql(f'DELETE FROM "{tablo}" WHERE 0')
 
 
-def sutun_adi(ad: str) -> str:
-    return ad if ad in ROWID_TAKMA_ADLARI else f'"{ad}"'
+def kimlik_secimi(kimlik: Kimlik) -> str:
+    if kimlik.ortuk:
+        return kimlik.sutunlar[0]
+    return ", ".join(f'"{ad}"' for ad in kimlik.sutunlar)
 
 
 def yapiyi_oku(veritabani: Veritabani) -> tuple[TabloBilgisi, ...]:
