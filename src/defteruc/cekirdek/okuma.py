@@ -54,7 +54,9 @@ def satirlari_oku(
         with veritabani.islem() as oturum:
             baglanti = oturum.connection()
             kimlik = yapi.satir_kimligi(baglanti, tablo)
-            kimlik_secimi = ", ".join(yapi.sutun_adi(a) for a in kimlik)
+            siralama = ", ".join(yapi.sutun_adi(a) for a in kimlik)
+            ortuk = kimlik[0] if kimlik[0] in yapi.ROWID_TAKMA_ADLARI else None
+            secim = f"{ortuk}, *" if ortuk else "*"
             with _yalniz_okuma(baglanti):
                 toplam = int(
                     baglanti.exec_driver_sql(
@@ -62,14 +64,21 @@ def satirlari_oku(
                     ).scalar_one()
                 )
                 sonuc = baglanti.exec_driver_sql(
-                    f'SELECT {kimlik_secimi}, * FROM "{tablo}"{nerede} '
-                    f"ORDER BY {kimlik_secimi} LIMIT ? OFFSET ?",
+                    f'SELECT {secim} FROM "{tablo}"{nerede} '
+                    f"ORDER BY {siralama} LIMIT ? OFFSET ?",
                     (*degerler, sinir, baslangic),
                 )
-                sutunlar = tuple(str(k) for k in sonuc.keys())[len(kimlik) :]
+                adlar = tuple(str(k) for k in sonuc.keys())
                 ham = tuple(tuple(s) for s in sonuc.all())
-                anahtarlar = tuple(s[: len(kimlik)] for s in ham)
-                satirlar = tuple(s[len(kimlik) :] for s in ham)
+                if ortuk:
+                    sutunlar = adlar[1:]
+                    anahtarlar = tuple(s[:1] for s in ham)
+                    satirlar = tuple(s[1:] for s in ham)
+                else:
+                    sutunlar = adlar
+                    konumlar = tuple(adlar.index(a) for a in kimlik)
+                    anahtarlar = tuple(tuple(s[k] for k in konumlar) for s in ham)
+                    satirlar = ham
     except yapi.KimlikYok as hata:
         raise OkumaHatasi(f"{tablo}: okunamadı: {hata}") from hata
     except SQLAlchemyError as hata:

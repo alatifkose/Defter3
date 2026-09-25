@@ -259,3 +259,46 @@ def test_acik_anahtar_ve_bilesik_anahtar_okumada(veritabani: vt.Veritabani) -> N
     sonuc = okuma.satirlari_oku(veritabani, "bilesik")
     assert sonuc.anahtar_sutunlari == ("yil", "no") and sonuc.anahtarlar == ((2026, 7),)
     assert sonuc.satirlar == ((2026, 7),)
+
+
+# --- inceleme 7dba285, bulgu 4: açık anahtar sonuçta ikinci kez sayılmaz ------------
+
+
+def test_sinira_yakin_genis_tablo_yazilir_ve_okunur(veritabani: vt.Veritabani) -> None:
+    import sqlite3
+
+    with veritabani.islem() as oturum:
+        ham = oturum.connection().connection.dbapi_connection
+        assert isinstance(ham, sqlite3.Connection)
+        sinir = ham.getlimit(sqlite3.SQLITE_LIMIT_COLUMN)
+    n = sinir // 2 + 1
+    sutunlar = tuple(motor.Sutun(f"c{i}", ("INTEGER",)) for i in range(n))
+    anahtar = "PRIMARY KEY (" + ", ".join(s.ad for s in sutunlar) + ")"
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi("wide", sutunlar, (anahtar,), ("WITHOUT ROWID",)),
+    )
+    satir = {f"c{i}": i for i in range(n)}
+    eklenen = kayit.satirlar_ekle(veritabani, "wide", [satir])
+    assert eklenen.anahtarlar == (tuple(range(n)),)
+    sonuc = okuma.satirlari_oku(veritabani, "wide")
+    assert len(sonuc.sutunlar) == n
+    assert sonuc.satirlar == (tuple(range(n)),)
+    assert sonuc.anahtar_sutunlari == tuple(s.ad for s in sutunlar)
+    assert sonuc.anahtarlar == (tuple(range(n)),)
+
+
+def test_genis_rowid_tablosu_ortuk_kimlikle_okunur(veritabani: vt.Veritabani) -> None:
+    import sqlite3
+
+    with veritabani.islem() as oturum:
+        ham = oturum.connection().connection.dbapi_connection
+        assert isinstance(ham, sqlite3.Connection)
+        sinir = ham.getlimit(sqlite3.SQLITE_LIMIT_COLUMN)
+    n = sinir - 1
+    sutunlar = tuple(motor.Sutun(f"c{i}", ("INTEGER",)) for i in range(n))
+    _uygula(veritabani, motor.TabloOlusturmaIstegi("genis", sutunlar))
+    kayit.satirlar_ekle(veritabani, "genis", [{"c0": 7}])
+    sonuc = okuma.satirlari_oku(veritabani, "genis")
+    assert len(sonuc.sutunlar) == n and sonuc.satirlar[0][0] == 7
+    assert sonuc.anahtar_sutunlari == ("rowid",) and sonuc.anahtarlar == ((1,),)
