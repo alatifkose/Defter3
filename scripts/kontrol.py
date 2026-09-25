@@ -9,11 +9,6 @@ from pathlib import Path
 PROJE_KOKU = Path(__file__).resolve().parent.parent
 
 type Calistirici = Callable[[Sequence[str], Path], int]
-"""Bir komutu verilen kökte çalıştırıp çıkış kodunu döndürür.
-
-Araç başlatılamazsa ``FileNotFoundError`` ya da ``PermissionError``
-yükseltir. Gerçek uygulaması ``alt_sureci_calistir``; testler taklit verir.
-"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +39,6 @@ def adimlar(python: str = sys.executable) -> tuple[Adim, ...]:
 
 
 def alt_sureci_calistir(komut: Sequence[str], kok: Path) -> int:
-    """Komutu kökte çalıştırır; çıktıyı gizlemez, çıkış kodunu döndürür."""
     return subprocess.run(list(komut), cwd=kok, check=False).returncode
 
 
@@ -66,7 +60,6 @@ def hepsini_calistir(
     kok: Path,
     calistirici: Calistirici = alt_sureci_calistir,
 ) -> int:
-    """Bütün adımları çalıştırır, toplu sonucu yazar; 0 = hepsi başarılı."""
     sonuclar = [adimi_calistir(adim, kok, calistirici) for adim in adimlar_]
 
     print("\n=== Toplu sonuç ===", flush=True)

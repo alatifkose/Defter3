@@ -19,15 +19,10 @@ CIKIS_BASARILI = 0
 CIKIS_HATALI = 1
 
 
-class BaslangicHatasi(Exception):
-    """Ayarlar, dizinler ya da günlük hazırlanamadı.
-
-    Mesajı kullanıcıya gösterilmeye uygundur; hangi adımın düştüğünü söyler.
-    """
+class BaslangicHatasi(Exception): ...
 
 
 def main() -> int:
-    """Uygulamayı başlatır; çıkış kodunu döndürür."""
     try:
         return _baslat()
     except Exception as hata:
@@ -38,11 +33,6 @@ def main() -> int:
 
 
 def ortami_hazirla() -> tuple[Ayarlar, Path]:
-    """Ayarları yükler, dizinleri açar, günlüğü kurar.
-
-    Başarıda ayarları ve log dosyasının yolunu döndürür. Bir adım düşerse
-    ``BaslangicHatasi`` yükseltir; günlük kurulmamış kalır.
-    """
     try:
         ayarlar = ayarlari_yukle()
     except AyarHatasi as hata:

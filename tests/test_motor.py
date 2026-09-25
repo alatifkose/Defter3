@@ -40,7 +40,6 @@ def veritabani(
 
 
 def _sutunlar(v: vt.Veritabani, tablo: str) -> list[tuple[str, str, int, object]]:
-    """(ad, tür, notnull, varsayılan): testin okuması, motorun değil."""
     with v.islem() as oturum:
         satirlar = oturum.execute(text(f'PRAGMA table_info("{tablo}")')).all()
     return [(str(s[1]), str(s[2]), int(s[3]), s[4]) for s in satirlar]
@@ -104,8 +103,6 @@ def test_tablo_olusturur_ve_ozellikleri_oldugu_gibi_yazar(
 def test_ozellikler_koda_gomulu_degil_baska_tabloya_bag_dahil(
     veritabani: vt.Veritabani,
 ) -> None:
-    """Motor özellik listesi tutmaz; ``REFERENCES`` de sıradan bir parçadır
-    ve veritabanı onu gerçekten uygular."""
     m.tablo_olustur(veritabani, KISILER)
     m.tablo_olustur(
         veritabani,
@@ -139,8 +136,6 @@ def test_ozellikteki_iki_nokta_bag_parametresi_sanilmaz(
 
 
 def test_sutun_tanimlari_da_siradan_bir_tablodur(veritabani: vt.Veritabani) -> None:
-    """Görünen ad gibi tanım bilgileri motorda değil, Cowork'un motorla açtığı
-    sıradan bir tabloda durur; eşleşme o tabloya satır eklemektir (kayıt)."""
     m.tablo_olustur(veritabani, KISILER)
     m.tablo_olustur(
         veritabani,
@@ -207,7 +202,6 @@ def test_olmayan_tabloya_sutun_ekleme_veritabaninda_duser(
 
 
 def test_dusen_istek_tablo_birakmaz(veritabani: vt.Veritabani) -> None:
-    """Aynı sütun iki kez: SQLite reddeder, tablo kalmaz."""
     with pytest.raises(m.MotorHatasi, match="duplicate column"):
         m.tablo_olustur(
             veritabani,
@@ -329,7 +323,6 @@ def test_baska_tablonun_bagi_yeniden_kurulan_tabloyu_izler(
 def test_uymayan_satirda_is_duser_eski_tablo_eksiksiz_kalir(
     veritabani: vt.Veritabani,
 ) -> None:
-    """Veli'nin doğum tarihi NULL; NOT NULL isteği SQLite'ta düşer."""
     _kisileri_doldur(veritabani)
     istek = m.SutunOzelligiDegistirmeIstegi(
         "kisiler",
@@ -440,7 +433,6 @@ BAGLI_NESNELER = (
 
 
 def _nesneler(v: vt.Veritabani) -> list[tuple[str, str, str]]:
-    """(tür, ad, cümle), oluşturma sırasıyla; tablolar hariç."""
     with v.islem() as oturum:
         satirlar = oturum.execute(
             text(
@@ -515,7 +507,6 @@ def test_dusen_iste_bagli_nesneler_de_eksiksiz_kalir(
 
 
 def test_baska_tablonun_nesneleri_oldugu_gibi_kalir(veritabani: vt.Veritabani) -> None:
-    """Başka tablonun indeksine dokunulmaz; görünümü aynı cümleyle geri açılır."""
     _kisileri_doldur(veritabani)
     with veritabani.islem() as oturum:
         oturum.execute(text("CREATE TABLE kisiler_arsiv (id INTEGER, ad TEXT)"))
@@ -598,9 +589,6 @@ def test_kisit_secenek_ve_uretilen_sutunlu_tablo_kurulur(
 def test_kisit_secenek_ve_uretilen_sutun_yeniden_kurmada_korunur(
     veritabani: vt.Veritabani,
 ) -> None:
-    """İstek kısıt ve seçenekleri yeniden taşır; üretilen sütun kopyalanmaz,
-    yeniden hesaplanır. fiyat artık NOT NULL DEFAULT 0 (satırlar uyumlu değil:
-    NULL var) yerine tutar'ın formülü değişiyor."""
     _hesaplari_doldur(veritabani)
 
     m.sutun_ozelligi_degistir(
@@ -636,8 +624,6 @@ def test_kisit_secenek_ve_uretilen_sutun_yeniden_kurmada_korunur(
 def test_kisitlar_birebir_ayni_degilse_dokunmadan_reddeder(
     veritabani: vt.Veritabani,
 ) -> None:
-    """Kısıt sayısı aynı olsa da içerik farklıysa ret: UNIQUE yerine CHECK (1)
-    gönderilip benzersizlik sessizce kaldırılamaz (inceleme 2, sınır notu)."""
     _hesaplari_doldur(veritabani)
     sutunlar = HESAPLAR.sutunlar
 
@@ -710,7 +696,6 @@ def test_secenek_sirasi_bosluk_ve_harf_boyutu_onemsiz(
 
 
 def test_siradan_sutun_uretilen_sutuna_cevrilebilir(veritabani: vt.Veritabani) -> None:
-    """Kopyalama listesini SQLite belirler: iki tarafta da üretilmeyen sütunlar."""
     _kisileri_doldur(veritabani)
 
     m.sutun_ozelligi_degistir(
@@ -733,7 +718,6 @@ def test_siradan_sutun_uretilen_sutuna_cevrilebilir(veritabani: vt.Veritabani) -
 
 
 def test_elle_acilmis_tablonun_kisitlari_da_sayilir(veritabani: vt.Veritabani) -> None:
-    """Motor dışı, tırnaksız, yorumlu tanım: sayım yine doğru."""
     with veritabani.islem() as oturum:
         oturum.execute(
             text(
@@ -943,8 +927,6 @@ def test_indeks_ad_ve_parca_siniri_dokunmadan(veritabani: vt.Veritabani) -> None
 def test_gorunumun_instead_of_triggeri_silme_sirasini_bozmaz(
     veritabani: vt.Veritabani,
 ) -> None:
-    """Görünüm silinince INSTEAD OF trigger'ı kendiliğinden gider; trigger'lar
-    görünümlerden önce silinmezse ikinci DROP düşerdi."""
     _kisileri_doldur(veritabani)
     with veritabani.islem() as oturum:
         oturum.execute(text("CREATE VIEW g AS SELECT id, ad_soyad FROM kisiler"))
@@ -967,7 +949,6 @@ def test_gorunumun_instead_of_triggeri_silme_sirasini_bozmaz(
 
 
 def test_autoincrement_sayaci_korunur(veritabani: vt.Veritabani) -> None:
-    """Silinmiş kimlik yeniden dağıtılmaz: sayaç yeniden kurmadan sonra da 2'de."""
     m.tablo_olustur(
         veritabani,
         m.TabloOlusturmaIstegi(
@@ -1073,8 +1054,6 @@ def test_parantez_ve_tirnak_icindeki_virgul_noktali_virgul_serbest(parca: str) -
 def test_on_conflict_politikasi_kopyalamada_satir_yutamaz(
     veritabani: vt.Veritabani, politika: str
 ) -> None:
-    """Yeni tanımdaki ON CONFLICT IGNORE/REPLACE düz INSERT'i sessizce
-    eksiltirdi; kopyalama OR ABORT ile çatışmada düşer, iş geri alınır."""
     m.tablo_olustur(
         veritabani,
         m.TabloOlusturmaIstegi(
@@ -1135,8 +1114,6 @@ def test_not_null_on_conflict_replace_degeri_degistiremez(
 def test_uretilen_sutun_normale_cevrilince_degeri_korunur(
     veritabani: vt.Veritabani, tur: str
 ) -> None:
-    """Eski üretilen sütun okunabilir; yeni tarafta yazılabilir olduğunda
-    hesaplanmış değer taşınır (30, 30 kalır)."""
     m.tablo_olustur(
         veritabani,
         m.TabloOlusturmaIstegi(
@@ -1172,10 +1149,6 @@ def test_uretilen_sutun_normale_cevrilince_degeri_korunur(
 
 
 def test_kisit_alanindan_sutun_eklenemez(veritabani: vt.Veritabani) -> None:
-    """'ekstra TEXT' kısıt değil sütun tanımıdır. İlk ağ: kısıtlar mevcutla
-    birebir aynı olmalı (KisitlarUyusmuyor). İkinci ağ: geçici tablonun gerçek
-    sütun listesi istekle karşılaştırılır (SutunlarUyusmuyor). Her durumda
-    dokunulmaz."""
     sutunlar = (m.Sutun("id", ("INTEGER", "PRIMARY KEY")), m.Sutun("ad", ("TEXT",)))
     m.tablo_olustur(veritabani, m.TabloOlusturmaIstegi("t", sutunlar, ("UNIQUE (ad)",)))
     with veritabani.islem() as oturum:
@@ -1196,8 +1169,6 @@ def test_kisit_alanindan_sutun_eklenemez(veritabani: vt.Veritabani) -> None:
 
 
 def test_ortuk_rowid_korunur(veritabani: vt.Veritabani) -> None:
-    """INTEGER PRIMARY KEY olmayan tabloda satır kimliği rowid'dir; yeniden
-    kurma onu da taşır (görünümler, dış kayıtlar rowid'ye dayanabilir)."""
     m.tablo_olustur(
         veritabani, m.TabloOlusturmaIstegi("t", (m.Sutun("ad", ("TEXT",)),))
     )
@@ -1218,8 +1189,6 @@ def test_ortuk_rowid_korunur(veritabani: vt.Veritabani) -> None:
 def test_rowid_adli_sutun_varsa_ortuk_kimlik_baska_takma_adla_tasinir(
     veritabani: vt.Veritabani,
 ) -> None:
-    """'rowid' adlı gerçek sütun örtük kimliği gölgeler; motor gölgelenmemiş
-    takma adı (_rowid_ ya da oid) kullanır, kimlikler korunur (inceleme 3)."""
     m.tablo_olustur(
         veritabani,
         m.TabloOlusturmaIstegi(
@@ -1250,9 +1219,6 @@ def test_rowid_adli_sutun_varsa_ortuk_kimlik_baska_takma_adla_tasinir(
 
 
 def test_rowid_takma_adi_secimi() -> None:
-    """Gölgelenmemiş ilk takma ad; üçü de gölgeliyse None (motorun açtığı
-    tabloda olamaz: AD_BICIMI '_rowid_' adına izin vermez; elle açılmış tabloda
-    olursa yeniden kurma MotorHatasi ile reddedilir)."""
     takma = m._rowid_takma_adi  # pyright: ignore[reportPrivateUsage]
     assert takma(("id", "ad")) == "rowid"
     assert takma(("rowid", "ad")) == "_rowid_"
@@ -1277,8 +1243,6 @@ def test_without_rowid_tabloda_rowid_aranmaz(veritabani: vt.Veritabani) -> None:
 def test_havuza_hicbir_zaman_denetimsiz_baglanti_donmez(
     veritabani: vt.Veritabani,
 ) -> None:
-    """Havuza her dönüşte (checkin) foreign_keys açık olmalı: başarılı, düşen ve
-    ihlalli yeniden kurma yollarının üçünde de."""
     from sqlalchemy import event
 
     donusler: list[int] = []
@@ -1318,8 +1282,6 @@ def test_havuza_hicbir_zaman_denetimsiz_baglanti_donmez(
 def test_kisitin_tirnak_icindeki_sabiti_degistirilemez(
     veritabani: vt.Veritabani, eski: str, yeni: str
 ) -> None:
-    """Sadeleştirme tırnak içine dokunmaz: CHECK (ad = 'A') ile CHECK (ad = 'a')
-    farklı kurallardır; NULL satırlı tabloda kopyalama bunu yakalayamazdı."""
     sutunlar = (m.Sutun("id", ("INTEGER", "PRIMARY KEY")), m.Sutun("ad", ("TEXT",)))
     m.tablo_olustur(
         veritabani, m.TabloOlusturmaIstegi("t", sutunlar, (f"CHECK (ad = '{eski}')",))
@@ -1376,8 +1338,6 @@ def test_tirnak_disi_bosluk_ve_harf_boyutu_esdeger(
 def test_yorum_iceren_parca_dokunmadan_reddedilir(
     veritabani: vt.Veritabani, parca: str
 ) -> None:
-    """Parçalar boşlukla birleşir; satır sonu yorumu sonraki parçayı yutardı
-    (NOT NULL kaybı, sütun kaybı). Yorum hiçbir parçada olamaz."""
     with pytest.raises(m.GecersizParca, match="yorum"):
         m.tablo_olustur(
             veritabani, m.TabloOlusturmaIstegi("t", (m.Sutun("a", (parca,)),))
@@ -1406,8 +1366,6 @@ def test_yorum_iceren_parca_dokunmadan_reddedilir(
 def test_yorumlu_parca_not_null_yutamaz_ve_sutun_yutamaz(
     veritabani: vt.Veritabani,
 ) -> None:
-    """İncelemenin üç senaryosu: oluşturmada NOT NULL kaybı, sütun kaybı, yeniden
-    kurmada kural kaybı. Üçü de parça sınırında reddedilir."""
     with pytest.raises(m.GecersizParca):
         m.tablo_olustur(
             veritabani,
@@ -1445,9 +1403,6 @@ def test_tirnak_icindeki_yorum_isareti_serbest() -> None:
 def test_olusturma_ve_ekleme_gercek_sutunlari_dogrular(
     veritabani: vt.Veritabani,
 ) -> None:
-    """Ek savunma: oluşturmadan sonra SQLite'ın açtığı sütunlar istekle, eklemeden
-    sonra son sütun istenen adla karşılaştırılır. Yardımcılar elle kurulmuş
-    tabloda doğrudan sınanır (parça sınırı geçerken uyuşmazlık üretilemez)."""
     with veritabani.islem() as oturum:
         oturum.execute(text("CREATE TABLE t (a TEXT, b TEXT)"))
         baglanti = oturum.connection()
@@ -1486,9 +1441,6 @@ def test_sadelestir_tirnak_icine_dokunmaz(metin: str, beklenen: str) -> None:
 def test_int_pk_integer_pk_olunca_kimlikler_degisir_reddedilir(
     veritabani: vt.Veritabani,
 ) -> None:
-    """INT PRIMARY KEY ayrı rowid taşır; INTEGER PRIMARY KEY rowid'nin takma
-    adıdır. Kopyada NULL id kendiliğinden dolar, rowid'ler değişir; satır
-    sayısı aynı kalır. Kimlik korunamıyorsa iş geri alınır."""
     eski = (m.Sutun("id", ("INT", "PRIMARY KEY")), m.Sutun("data", ("TEXT",)))
     m.tablo_olustur(veritabani, m.TabloOlusturmaIstegi("t", eski))
     with veritabani.islem() as oturum:
@@ -1515,8 +1467,6 @@ def test_int_pk_integer_pk_olunca_kimlikler_degisir_reddedilir(
 def test_tur_degisimi_degeri_donusturuyorsa_izinsiz_reddedilir(
     veritabani: vt.Veritabani,
 ) -> None:
-    """TEXT '9007199254740993' REAL olunca 9007199254740992.0 olur; TEXT '1'
-    INTEGER olunca saklama sınıfı değişir. İkisi de izinsiz ret."""
     m.tablo_olustur(
         veritabani,
         m.TabloOlusturmaIstegi(
@@ -1545,8 +1495,6 @@ def test_tur_degisimi_degeri_donusturuyorsa_izinsiz_reddedilir(
 def test_tur_degisimi_izin_verilen_sutunda_bilerek_donusturur(
     veritabani: vt.Veritabani,
 ) -> None:
-    """Dönüşüm açıkça istenirse (deger_donusumu_izinli) o sütun için değer
-    denetimi yapılmaz; diğer sütunlar yine korunur."""
     m.tablo_olustur(
         veritabani,
         m.TabloOlusturmaIstegi(
@@ -1594,8 +1542,6 @@ def test_izin_listesindeki_ad_sutun_olmali(veritabani: vt.Veritabani) -> None:
 def test_deger_koruma_without_rowid_tabloda_anahtarla_eslesir(
     veritabani: vt.Veritabani,
 ) -> None:
-    """rowid olmayan tabloda satırlar birincil anahtarla eşleştirilir; değer
-    değişimi orada da yakalanır."""
     _hesaplari_doldur(veritabani)  # PRIMARY KEY (banka_id, hesap_no), WITHOUT ROWID
 
     with pytest.raises(m.KopyaDegerDegisti):
@@ -1623,8 +1569,6 @@ def test_deger_koruma_without_rowid_tabloda_anahtarla_eslesir(
 def test_temp_trigger_varsa_sessizce_silmek_yerine_reddedilir(
     veritabani: vt.Veritabani,
 ) -> None:
-    """TEMP trigger sqlite_temp_master'dadır; bağlı nesne taramasında görünmez,
-    eski tabloyla silinir ve geri kurulmazdı. Destek yok: açık ret."""
     m.tablo_olustur(
         veritabani,
         m.TabloOlusturmaIstegi("t", (m.Sutun("id", ("INTEGER", "PRIMARY KEY")),)),
@@ -1655,10 +1599,6 @@ def test_temp_trigger_varsa_sessizce_silmek_yerine_reddedilir(
 
 
 def test_kimlik_sutununa_donusum_izni_verilemez(veritabani: vt.Veritabani) -> None:
-    """WITHOUT ROWID tabloda kimlik birincil anahtardır. Anahtar sütunu izin
-    listesine konunca 'e.id IS y.id' TEXT '001' ile INTEGER 1'i eşleştiriyor,
-    değer denetiminden de çıkıyordu; kimlik değişiyordu. Kimlik sütununa izin
-    verilemez, izinsiz hâli zaten reddedilir."""
     eski = (m.Sutun("id", ("TEXT", "PRIMARY KEY")), m.Sutun("data", ("TEXT",)))
     m.tablo_olustur(
         veritabani, m.TabloOlusturmaIstegi("t", eski, secenekler=("WITHOUT ROWID",))
@@ -1688,7 +1628,6 @@ def test_kimlik_sutununa_donusum_izni_verilemez(veritabani: vt.Veritabani) -> No
 def test_rowid_takma_adi_olan_sutuna_da_donusum_izni_verilemez(
     veritabani: vt.Veritabani,
 ) -> None:
-    """INTEGER PRIMARY KEY rowid'nin takma adıdır; kimliktir."""
     _kisileri_doldur(veritabani)
     with pytest.raises(m.MotorHatasi, match="kimlik"):
         m.sutun_ozelligi_degistir(
@@ -1703,8 +1642,6 @@ def test_rowid_takma_adi_olan_sutuna_da_donusum_izni_verilemez(
 def test_bilesik_anahtarda_kimlik_eslestirme_tur_donusumune_kanmaz(
     veritabani: vt.Veritabani,
 ) -> None:
-    """Anahtar eşleştirmesi typeof ile yapılır: TEXT '1' ile INTEGER 1 aynı
-    kimlik sayılmaz; anahtar olmayan sütuna izin verilse bile ret."""
     eski = (m.Sutun("a", ("TEXT",)), m.Sutun("b", ("TEXT",)), m.Sutun("v", ("TEXT",)))
     m.tablo_olustur(
         veritabani,
@@ -1732,9 +1669,6 @@ def test_bilesik_anahtarda_kimlik_eslestirme_tur_donusumune_kanmaz(
 def test_genis_tablo_yeniden_kurulur_ve_son_sutun_da_denetlenir(
     veritabani: vt.Veritabani,
 ) -> None:
-    """600 sütunlu tabloda düz OR zinciri SQLite ifade derinliği sınırına
-    takılıyordu ('Expression tree is too large'). Denetim sütun gruplarıyla
-    yürür; son gruptaki izinsiz dönüşüm yine yakalanır."""
     sutunlar = tuple(m.Sutun(f"c{i}", ("TEXT",)) for i in range(600))
     m.tablo_olustur(veritabani, m.TabloOlusturmaIstegi("t", sutunlar))
     with veritabani.islem() as oturum:
@@ -1768,9 +1702,6 @@ def test_genis_tablo_yeniden_kurulur_ve_son_sutun_da_denetlenir(
 def test_cok_genis_bilesik_anahtarla_yeniden_kurma(
     veritabani: vt.Veritabani, genislik: int
 ) -> None:
-    """Anahtar koşulu düz AND zinciriydi; 600 sütunluk birincil anahtarda SQLite
-    ifade derinliği sınırına takılıyordu. Koşullar dengeli ağaç hâlinde
-    parantezlenir (derinlik logaritmik)."""
     sutunlar = tuple(m.Sutun(f"c{i}", ("TEXT",)) for i in range(genislik))
     kisitlar = ("PRIMARY KEY (" + ", ".join(s.ad for s in sutunlar) + ")",)
     m.tablo_olustur(

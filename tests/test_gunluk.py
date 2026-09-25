@@ -26,7 +26,6 @@ def _satirlar(dosya: Path) -> list[str]:
 
 
 def _dosya_isleyicileri() -> list[logging.Handler]:
-    """Bu modülün kurduğu handler'lar; pytest'in kendi yakalayıcıları sayılmaz."""
     return [
         isleyici
         for isleyici in logging.getLogger(gunluk.GUNLUK_ADI).handlers
@@ -181,8 +180,6 @@ GIZLI_METIN = "SENTETIK-GIZLI IBAN TR00 0000 0000 0000 0000 00"
 
 
 class _KayitYakalayici(logging.Handler):
-    """Aynı logger'a bağlı ikinci handler; gördüğü kayıt nesnelerini saklar."""
-
     def __init__(self) -> None:
         super().__init__()
         self.kayitlar: list[logging.LogRecord] = []
@@ -219,7 +216,6 @@ def test_kutuphane_sabit_uyarisi_oldugu_gibi_yazilir(log_dizini: Path) -> None:
 
 
 def test_kutuphane_parametreli_kaydin_degerleri_gizlenir(log_dizini: Path) -> None:
-    """SDK'nın beklenen hata yolu: istisnasız INFO, hata metni parametrede."""
     dosya = gunluk.gunlugu_kur(log_dizini)
     gunluk.kutuphane_gunlugunu_yonlendir("deneme_kutuphane")
 

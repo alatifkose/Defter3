@@ -138,7 +138,6 @@ class Konusma:
 
     @property
     def yanitlar(self) -> dict[int, dict[str, Any]]:
-        """stdout'taki her satırı JSON-RPC mesajı olarak çözer; kimliğe göre verir."""
         yanitlar: dict[int, dict[str, Any]] = {}
         for satir in self.stdout_satirlari:
             mesaj: dict[str, Any] = json.loads(satir)
@@ -154,7 +153,6 @@ def _sunucuyla_konus(
     mesajlar: tuple[dict[str, Any], ...],
     komut: str = SUNUCU_KOMUTU,
 ) -> Konusma:
-    """Mesajları sırayla gönderir; istek olanların yanıtını bekler, sonra kapatır."""
     surec = subprocess.Popen(
         [sys.executable, "-c", komut],
         stdin=subprocess.PIPE,
@@ -195,7 +193,6 @@ def _sunucuyla_konus(
 def _sunucuyu_calistir(
     cwd: Path, cevre: dict[str, str], mesajlar: tuple[dict[str, Any], ...]
 ) -> subprocess.CompletedProcess[str]:
-    """Bütün girdiyi tek seferde verir; yanıt beklemez. Başarısız başlangıç için."""
     girdi = "".join(json.dumps(mesaj) + "\n" for mesaj in mesajlar)
     return subprocess.run(
         [sys.executable, "-c", SUNUCU_KOMUTU],
@@ -271,7 +268,6 @@ HATALI_SUNUCU_KOMUTU = (
     "mcp_kapisi.sistem_durumu = patlat\n"
     "sys.exit(mcp_kapisi.main())\n"
 )
-"""Gerçek sunucu, araç gövdesi sentetik hassas içerikli hatayla değiştirilmiş."""
 
 BEKLENEN_HATALI_SUNUCU_KOMUTU = (
     "import sys\n"
@@ -282,7 +278,6 @@ BEKLENEN_HATALI_SUNUCU_KOMUTU = (
     "mcp_kapisi.sistem_durumu = patlat\n"
     "sys.exit(mcp_kapisi.main())\n"
 )
-"""Aynı sunucu, beklenen ToolError: SDK istisnasız INFO kaydıyla hata metnini loglar."""
 
 
 def test_stdio_beklenen_arac_hatasi_metni_gunluge_gecmez(
@@ -348,9 +343,6 @@ def test_ayar_hatasinda_stdout_bos_stderr_aciklayici(tmp_path: Path) -> None:
 def test_stdio_istemci_metni_ve_yetenek_icerigi_gunluge_suzulerek_gecer(
     tmp_path: Path, test_koku: Path
 ) -> None:
-    """İstemci adındaki satır sonu günlük satırı bozuyordu; deneysel yetenek
-    içeriği aynen loga giriyordu. Gerçek stdio ile: kontrol karakteri '?'
-    olur, uzunluk sınırlanır, yeteneklerin yalnız adları yazılır."""
     istekler = copy.deepcopy(ILK_ISTEKLER)
     istekler[0]["params"]["clientInfo"]["name"] = "client\nFORGED_LOG_LINE"
     istekler[0]["params"]["clientInfo"]["version"] = "1.0 " + "x" * 300

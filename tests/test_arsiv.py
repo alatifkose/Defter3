@@ -133,7 +133,6 @@ def test_gelen_dizini_disi_reddedilir(tmp_path: Path, gelen: Path) -> None:
 
 
 def test_on_ek_benzerligi_yetmez(tmp_path: Path, gelen: Path) -> None:
-    """``gelen2/`` ``gelen/``in altı değildir."""
     benzer = _yaz(tmp_path / "gelen2" / "a.pdf", PDF)
     with pytest.raises(arsiv.GelenDosyaGecersiz, match="dışında"):
         arsiv.gelen_dosyayi_dogrula(str(benzer), gelen)
@@ -182,7 +181,6 @@ def test_junction_ile_iceride_gorunup_disari_cikma_reddedilir(
 
 
 def test_iceriyi_gosteren_baglanti_da_reddedilir(gelen: Path) -> None:
-    """Gelen dizini altındaki her bağlantı reddedilir; hedefi içeride olsa da."""
     _yaz(gelen / "ic" / "a.pdf", PDF)
     if sys.platform == "win32":
         _junction(gelen / "bag", gelen / "ic")
@@ -194,7 +192,6 @@ def test_iceriyi_gosteren_baglanti_da_reddedilir(gelen: Path) -> None:
 
 
 def test_gelen_dizininin_kendisi_baglanti_olabilir(tmp_path: Path) -> None:
-    """Ayar gelen dizinini bağlantıyla gösteriyorsa altındaki düz dosya geçerlidir."""
     gercek = tmp_path / "gercek_gelen"
     dosya = _yaz(gercek / "a.pdf", PDF)
     bag = tmp_path / "bag"
@@ -311,7 +308,6 @@ def test_gercek_50_mib_kabul_bir_bayt_fazlasi_red(
 def test_akis_sirasinda_buyuyen_dosya_da_reddedilir_gecici_kalmaz(
     gelen: Path, arsiv_dizini: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``stat`` küçük gösterse de akış sınırı aşarsa kesilmez, reddedilir."""
     dosya = _yaz(gelen / "a.bin", b"k" * 10)
 
     def buyuk_akis(yol: Path) -> BinaryIO:
@@ -376,9 +372,6 @@ def test_imza_algilama_ve_guvenli_fallback(
 def test_imza_uzanti_uyusmazligi_red_sebebi_degil(
     gelen: Path, arsiv_dizini: Path, ad: str, icerik: bytes, mime: str, uzanti: str
 ) -> None:
-    """Karar 2026-09-19: ad ve uzantı güvenilir içerik bilgisi değildir; MIME'ı
-    imza belirler, uzantı yalnız metadata'dır, uyuşmazlık arşivlemeye engel
-    değildir."""
     sonuc = _arsivle(_yaz(gelen / ad, icerik), gelen, arsiv_dizini)
 
     assert (sonuc.mime, sonuc.kaynak_uzantisi) == (mime, uzanti)
@@ -388,7 +381,6 @@ def test_imza_uzanti_uyusmazligi_red_sebebi_degil(
 
 
 def test_uzanti_metadata_kurali(gelen: Path, arsiv_dizini: Path) -> None:
-    """Çok uzun ya da alfasayısal olmayan uzantı boş sayılır; MIME etkilenmez."""
     sonuc = _arsivle(_yaz(gelen / "a.cokuzunbiruzanti", METIN), gelen, arsiv_dizini)
     assert sonuc.kaynak_uzantisi == ""
     sonuc = _arsivle(_yaz(gelen / "b.a-b", METIN), gelen, arsiv_dizini)
@@ -468,8 +460,6 @@ def test_tasima_hatasi_hedef_ve_gecici_birakmaz(
 def test_windows_tarzi_tasima_reddi_hedef_dogruysa_zaten_vardi(
     gelen: Path, arsiv_dizini: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Hedef, "yok" kontrolünden sonra başka süreççe yazılıp açık tutulduysa taşıma
-    reddedilir; hedef özetle doğrulanır ve sonuç "zaten vardı" olur."""
     hedef = arsiv.arsiv_yolu(arsiv_dizini, _yol(PDF))
 
     def baska_surec_yazdi_ve_reddet(_g: Path, h: Path) -> None:
@@ -550,8 +540,6 @@ def test_eszamanli_ayni_icerik_tek_gecerli_dosya(
     os.name != "nt", reason="POSIX rename var olan hedefin üstüne yazar"
 )
 def test_tasima_var_olan_hedefin_ustune_yazmaz(arsiv_dizini: Path) -> None:
-    """İçerik adresli hedef oluştuktan sonra değişmez; ikinci taşıma reddedilir ve
-    hedefteki baytlar olduğu gibi kalır (Windows)."""
     hedef = _yaz(arsiv.arsiv_yolu(arsiv_dizini, _yol(PDF)), PDF)
     gecici = _yaz(arsiv.gecici_dizin(arsiv_dizini) / "x.tmp", PDF)
     with pytest.raises(FileExistsError):
@@ -649,9 +637,6 @@ def test_arsivi_tara_siniflar(arsiv_dizini: Path, gelen: Path) -> None:
 def test_dogrulama_ile_acilis_arasinda_yol_disari_baglantiya_donerse_reddedilir(
     tmp_path: Path, gelen: Path, arsiv_dizini: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Doğrulama Path döndürüyor, açılış aynı yolu yeniden çözüyordu; arada yol
-    dışarıdaki dosyaya simgesel bağlantıya çevrilince dışarıdaki baytlar
-    arşivleniyordu. Şimdi açılan nesne tanıtıcı üzerinden yolla karşılaştırılır."""
     kaynak = _yaz(gelen / "belge.pdf", PDF + b"izinli icerik")
     disari = _yaz(tmp_path / "disari.pdf", PDF + b"disaridaki icerik")
     orijinal = arsiv._kaynagi_ac  # pyright: ignore[reportPrivateUsage]
@@ -678,8 +663,6 @@ def test_dogrulama_ile_acilis_arasinda_yol_disari_baglantiya_donerse_reddedilir(
 def test_dogrulama_ile_acilis_arasinda_baska_dosya_gelirse_reddedilir(
     gelen: Path, arsiv_dizini: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Açılan tanıtıcı ile yoldaki dosya aynı nesne değilse (açılıştan sonra yol
-    başka dosyaya çevrildi) reddedilir; Windows'ta da çalışır (bağlantı yok)."""
     kaynak = _yaz(gelen / "belge.pdf", PDF + b"ilk")
     yedek = _yaz(gelen / "yedek.pdf", PDF + b"ikinci")
     orijinal = arsiv._kaynagi_ac  # pyright: ignore[reportPrivateUsage]
@@ -701,9 +684,6 @@ def test_dogrulama_ile_acilis_arasinda_baska_dosya_gelirse_reddedilir(
 def test_dogrulama_ile_acilis_arasinda_ust_dizin_junction_olursa_reddedilir(
     tmp_path: Path, gelen: Path, arsiv_dizini: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Windows karşılığı: doğrulamadan sonra üst dizin dışarıya giden junction'a
-    çevrilir; açılan dosya dışarıdaki dosyadır. Açılıştan sonra ara yollar
-    yeniden denetlenir ve junction yakalanır (yetki gerektirmez)."""
     alt = gelen / "alt"
     kaynak = _yaz(alt / "belge.pdf", PDF + b"izinli icerik")
     disari = tmp_path / "disari"

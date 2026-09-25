@@ -28,7 +28,6 @@ def temiz_cevre(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def ayarlar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ay.Ayarlar:
-    """Test ortamı, kök ``tmp_path/kok``; dizinler hazır, veritabanı dosyası yok."""
     monkeypatch.setenv(ay.ORTAM_DEGISKENI, "test")
     monkeypatch.setenv(ay.VERI_KOKU_DEGISKENI, str(tmp_path / "kok"))
     ayar = ay.ayarlari_yukle()
@@ -109,7 +108,6 @@ def test_motor_calisma_dizininden_bagimsiz(
 
 
 def test_foreign_keys_ve_wal_her_baglantida_acik(veritabani: vt.Veritabani) -> None:
-    """İki ayrı fiziksel DBAPI bağlantısı aynı anda açık; ikisinde de politika."""
     with veritabani.motor.connect() as birinci, veritabani.motor.connect() as ikinci:
         ham_birinci = birinci.connection.dbapi_connection
         ham_ikinci = ikinci.connection.dbapi_connection
@@ -126,7 +124,6 @@ def test_foreign_keys_ve_wal_her_baglantida_acik(veritabani: vt.Veritabani) -> N
 
 
 def test_baglanti_modern_transaction_kipinde(veritabani: vt.Veritabani) -> None:
-    """``autocommit=False``: bağlantı transaction içinde gelir (DDL de geri alınır)."""
     with veritabani.motor.connect() as baglanti:
         ham = baglanti.connection.dbapi_connection
         assert ham is not None
@@ -190,7 +187,6 @@ def test_hata_alan_islem_tamamen_rollback_olur_ve_hata_yukselir(
 
 
 def test_ddl_de_islem_icinde_geri_alinir(veritabani: vt.Veritabani) -> None:
-    """CREATE TABLE transaction içindedir: hata olunca tablo kalmaz."""
     with pytest.raises(RuntimeError, match="sentetik"):
         with veritabani.islem() as oturum:
             oturum.execute(text("CREATE TABLE gecici (id INTEGER PRIMARY KEY)"))
@@ -279,9 +275,6 @@ def test_denetimsiz_islemde_hata_geri_alir_ve_denetimi_acar(
 def test_denetimsiz_islem_baglantiyi_denetim_acilana_kadar_havuza_vermez(
     veritabani: vt.Veritabani,
 ) -> None:
-    """İnceleme 2 bulgusu: Session.commit bağlantıyı denetim yeniden açılmadan
-    havuza bırakıyordu; başka bir oturum foreign_keys=0 bağlantı alabiliyordu.
-    Şimdi bağlantı iş boyunca sahiplenilir; havuza her dönüşte denetim açık."""
     from sqlalchemy import event
 
     _tablolari_kur(veritabani)
@@ -314,10 +307,6 @@ def test_denetimsiz_islem_baglantiyi_denetim_acilana_kadar_havuza_vermez(
 def test_denetim_yeniden_acilamazsa_baglanti_havuza_donmez(
     veritabani: vt.Veritabani, govde_hatasi: bool
 ) -> None:
-    """İnceleme 3: PRAGMA foreign_keys=ON düşerse bağlantı FK=0 ile havuza
-    dönüyordu. Şimdi bağlantı geçersizleştirilir (havuza dönmez). Gövde
-    başarılıysa DenetimGeriAcilamadi yükselir ve commit geri alınmış sayılmaz;
-    gövde hatalıysa asıl hata yükselir. Hata enjeksiyonu: sqlite3 authorizer."""
     from sqlalchemy import event
 
     _tablolari_kur(veritabani)

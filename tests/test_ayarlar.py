@@ -356,7 +356,6 @@ def test_test_ortaminda_ust_dizin_ile_kacis_reddedilir(
 
 
 def _simgesel_baglanti(baglanti: Path, hedef: Path) -> None:
-    """Dizin simgesel bağlantısı; yetki yoksa (Windows'ta sık) test atlanır."""
     try:
         os.symlink(hedef, baglanti, target_is_directory=True)
     except OSError as hata:
@@ -364,7 +363,6 @@ def _simgesel_baglanti(baglanti: Path, hedef: Path) -> None:
 
 
 def _junction(baglanti: Path, hedef: Path) -> None:
-    """Windows junction (yetki gerektirmez); başka platformda test atlanır."""
     if sys.platform != "win32":
         pytest.skip("junction yalnız Windows'ta var")
     sonuc = subprocess.run(
@@ -437,7 +435,6 @@ def test_test_ortaminda_kok_icini_gosteren_baglanti_kabul_edilir(
 def test_gelistirme_ortaminda_kok_disi_tekil_yol_serbest_kalir(
     tmp_path: Path, ortak_kok: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Fiziksel sınır yalnız test ortamınındır; diğer ortamların politikası aynı."""
     monkeypatch.setenv(ay.ORTAM_DEGISKENI, "gelistirme")
     monkeypatch.setenv(ay.LOG_DIZINI_DEGISKENI, str(tmp_path / "disari" / "logs"))
 

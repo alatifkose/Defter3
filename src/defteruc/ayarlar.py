@@ -26,12 +26,10 @@ class Ortam(StrEnum):
     GERCEK = "gercek"
 
 
-class AyarHatasi(ValueError):
-    """Ortam değişkenlerinden geçerli bir ayar üretilemedi."""
+class AyarHatasi(ValueError): ...
 
 
-class DizinHazirlamaHatasi(OSError):
-    """Bir ayar dizini oluşturulamadı ya da kullanılamaz durumda."""
+class DizinHazirlamaHatasi(OSError): ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +44,6 @@ class Ayarlar:
     """Cowork'un dosya bıraktığı, MCP araçlarının okumaya izinli olduğu dizin."""
 
     def gerekli_dizinler(self) -> tuple[Path, ...]:
-        """Uygulamanın çalışabilmesi için var olması gereken dizinler."""
         return (
             self.veritabani_yolu.parent,
             self.belge_dizini,
@@ -56,7 +53,6 @@ class Ayarlar:
 
 
 def ayarlari_yukle() -> Ayarlar:
-    """Ortam değişkenlerinden ayarları üretir. Diske hiçbir şey yazmaz."""
     ortam = _ortami_oku()
     veri_koku = _ortak_koku_belirle(ortam) / ortam.value
 
@@ -96,12 +92,6 @@ def ayarlari_yukle() -> Ayarlar:
 
 
 def dizinleri_hazirla(ayarlar: Ayarlar) -> None:
-    """Gerekli dizinleri oluşturur. Tekrar çağrılabilir.
-
-    Veritabanı ya da log dosyası oluşturmaz; yalnızca dizinleri hazırlar.
-    Hata durumunda hangi yolda ne olduğunu bildiren
-    ``DizinHazirlamaHatasi`` yükseltir.
-    """
     for dizin in ayarlar.gerekli_dizinler():
         try:
             dizin.mkdir(parents=True, exist_ok=True)
@@ -176,17 +166,10 @@ def _platform_veri_koku() -> Path:
 
 
 def _fiziksel_yol(yol: Path) -> Path:
-    """Yolun fiziksel karşılığı: var olan simgesel bağlantı ve junction'lar
-    çözülür, var olmayan kuyruk olduğu gibi kalır. Diske yazmaz."""
     return yol.resolve()
 
 
 def _yol_oku(degisken: str) -> Path | None:
-    """Ortam değişkeninden mutlak yol okur; tanımsızsa None döner.
-
-    Mutlak yollardaki ``..`` parçaları sözlüksel olarak sadeleştirilir;
-    bu işlem çalışma dizinine bakmaz.
-    """
     if degisken not in os.environ:
         return None
     deger = os.environ[degisken]

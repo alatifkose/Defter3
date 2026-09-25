@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import BinaryIO
 
 AZAMI_DOSYA_BOYUTU = 50 * 1024 * 1024
-"""Bayt; aşılırsa dosya kesilmez, tamamı reddedilir. Teknik kaynak sınırı."""
 OKUMA_PARCA_BOYUTU = 1024 * 1024
 GECICI_DIZIN_ADI = "gecici"
 GECICI_UZANTI = ".tmp"
@@ -28,40 +27,29 @@ _IMZALAR: tuple[tuple[bytes, str], ...] = (
 )
 
 
-class ArsivHatasi(Exception):
-    """Arşiv dosya katmanı hatalarının ortak tabanı."""
+class ArsivHatasi(Exception): ...
 
 
-class GelenDosyaGecersiz(ArsivHatasi, ValueError):
-    """Yol gelen dizini kurallarına uymuyor ya da dosya belge olamaz (boş)."""
+class GelenDosyaGecersiz(ArsivHatasi, ValueError): ...
 
 
-class DosyaOkunamadi(ArsivHatasi):
-    """Kaynak dosya açılamadı ya da okunurken hata oldu."""
+class DosyaOkunamadi(ArsivHatasi): ...
 
 
-class DosyaCokBuyuk(ArsivHatasi):
-    """Dosya ``AZAMI_DOSYA_BOYUTU`` sınırını aşıyor; kesilmez, reddedilir."""
+class DosyaCokBuyuk(ArsivHatasi): ...
 
 
-class ArsivYazilamadi(ArsivHatasi):
-    """Arşiv dizini hazırlanamadı, geçici dosya yazılamadı ya da taşınamadı."""
+class ArsivYazilamadi(ArsivHatasi): ...
 
 
-class ArsivDosyasiEksik(ArsivHatasi):
-    """Beklenen arşiv yolunda dosya yok."""
+class ArsivDosyasiEksik(ArsivHatasi): ...
 
 
-class ArsivButunlukHatasi(ArsivHatasi):
-    """Arşiv yolundaki dosya sıradan dosya değil, boyutu ya da özeti beklenenden
-    farklı."""
+class ArsivButunlukHatasi(ArsivHatasi): ...
 
 
 @dataclass(frozen=True, slots=True)
 class ArsivlenenDosya:
-    """Arşive giren dosyanın kimliği ve metadata'sı; veritabanına henüz
-    yazılmamıştır."""
-
     sha256: str
     boyut: int
     mime: str
@@ -77,8 +65,6 @@ class ArsivlenenDosya:
 
 @dataclass(frozen=True, slots=True)
 class ArsivTaramasi:
-    """Arşiv dizinindeki dosyaların sınıflaması (yalnız dosya sistemi)."""
-
     adresli: tuple[str, ...]
     """``<2hex>/<sha256>`` biçimine uyan göreli yollar (veritabanı bilinmez)."""
     yarim: tuple[str, ...]
@@ -91,9 +77,6 @@ class ArsivTaramasi:
 
 
 def gelen_dosyayi_dogrula(yol: str | Path, gelen_dizini: Path) -> Path:
-    """Yolu gelen dizini kurallarıyla denetler; geçerse dosyanın sözlüksel
-    (sadeleştirilmiş) yolunu döndürür. Her red ``GelenDosyaGecersiz`` ya da
-    ``DosyaOkunamadi``; mesajda yol yoktur."""
     if not gelen_dizini.is_absolute():
         raise ValueError("gelen dizini mutlak bir yol olmalı.")
     metin = str(yol)
@@ -122,8 +105,6 @@ def gelen_dosyayi_dogrula(yol: str | Path, gelen_dizini: Path) -> Path:
 
 
 def _ara_yollari_denetle(sade: Path, gelen_sade: Path) -> None:
-    """Gelen dizininden dosyaya inen ara yollarda bağlantı/junction yok, fiziksel
-    yol gelen dizininin içinde ve sıradan bir dosya."""
     for ara in _inen_parcalar(sade, gelen_sade):
         if ara.is_symlink() or os.path.isjunction(ara):
             raise GelenDosyaGecersiz(
@@ -143,15 +124,12 @@ def _ara_yollari_denetle(sade: Path, gelen_sade: Path) -> None:
 
 
 def _sozluksel_altinda(yol: Path, dizin: Path) -> bool:
-    """``yol`` sözlüksel olarak ``dizin``in (kendisi değil) altında mı; Windows'ta
-    büyük-küçük harf ayrımı yapılmaz."""
     y = Path(os.path.normcase(str(yol)))
     d = Path(os.path.normcase(str(dizin)))
     return y != d and y.is_relative_to(d)
 
 
 def _inen_parcalar(yol: Path, dizin: Path) -> Iterator[Path]:
-    """``dizin``den ``yol``a inen ara yollar: ilk alt dizinden dosyanın kendisine."""
     parcalar = yol.parts[len(dizin.parts) :]
     simdiki = dizin
     for parca in parcalar:
@@ -163,14 +141,12 @@ def _inen_parcalar(yol: Path, dizin: Path) -> Iterator[Path]:
 
 
 def arsiv_goreli_yolu(sha256: str) -> str:
-    """İçerikten deterministik arşiv yolu: ``<ilk iki hex>/<sha256>``; uzantısız."""
     if not SHA256_BICIMI.fullmatch(sha256):
         raise ValueError("SHA-256 64 karakter küçük harf onaltılık olmalı.")
     return f"{sha256[:2]}/{sha256}"
 
 
 def arsiv_yolu(arsiv_dizini: Path, goreli_yol: str) -> Path:
-    """Arşiv dizini + göreli yol → fiziksel yol. Göreli yol arşiv biçiminde olmalı."""
     eslesme = GORELI_YOL_BICIMI.fullmatch(goreli_yol)
     if eslesme is None or eslesme.group(1) != eslesme.group(2)[:2]:
         raise ValueError("arşiv göreli yolu <2hex>/<sha256> biçiminde olmalı.")
@@ -190,32 +166,13 @@ KAYNAK_ACMA_BAYRAKLARI = (
     | getattr(os, "O_CLOEXEC", 0)
     | getattr(os, "O_NOFOLLOW", 0)
 )
-"""Kaynağı açma bayrakları: POSIX'te son parça simgesel bağlantıysa açılmaz
-(``O_NOFOLLOW``); Windows'ta bu bayrak yoktur, bağlantı ``_acilani_dogrula``
-ile yakalanır."""
 
 
 def _kaynagi_ac(yol: Path) -> BinaryIO:
-    """Kaynak dosyayı okumak için açar (testlerde hata enjeksiyonu noktası)."""
     return os.fdopen(os.open(yol, KAYNAK_ACMA_BAYRAKLARI), "rb")
 
 
 def _acilani_dogrula(girdi: BinaryIO, yol: Path, gelen_sade: Path) -> None:
-    """Açılan nesne, doğrulanan yoldaki sıradan dosya mı; **tanıtıcı üzerinden**.
-
-    ``gelen_dosyayi_dogrula`` ile açılış arasında yol değişmiş olabilir
-    (yerine dışarıya giden simgesel bağlantı, başka bir dosya, junction'a
-    dönen üst dizin). Bu yüzden açılıştan sonra: ``fstat`` (açık tanıtıcı) ile
-    ``lstat`` (yol) aynı nesne olmalı (``st_dev``, ``st_ino``), ikisi de
-    sıradan dosya olmalı, yol reparse point olmamalı ve ara yollar yeniden
-    denetlenir. Doğrulama geçmezse ``GelenDosyaGecersiz``; kopyalama
-    başlamamıştır (inceleme 4, 2026-09-24).
-
-    Kalan aralık: bu denetimlerin arasına giren iki ardışık değişiklik.
-    Python, Windows'ta tanıtıcıya göreli açma (``openat``) sunmadığından
-    aralık tamamen kapatılamaz; gelen dizininde eşzamanlı yazan başka bir
-    süreç olmadığı sürece söz konusu değildir.
-    """
     try:
         acilan = os.fstat(girdi.fileno())
         yoldaki = os.lstat(yol)
@@ -234,21 +191,14 @@ def _acilani_dogrula(girdi: BinaryIO, yol: Path, gelen_sade: Path) -> None:
 
 
 def _geciciyi_ac(yol: Path) -> BinaryIO:
-    """Geçici dosyayı yazmak için açar (testlerde hata enjeksiyonu noktası)."""
     return yol.open("xb")
 
 
 def _yerine_koy(gecici: Path, hedef: Path) -> None:
-    """Atomik taşıma; var olan hedefin üstüne yazmaz (testlerde hata enjeksiyonu
-    noktası). Windows'ta hedef varsa ``FileExistsError``; POSIX'te aynı baytların
-    üstüne yazılır, açık okuyucular etkilenmez. ``os.replace`` kullanılmaz:
-    üstüne yazma sırasında hedefi açan okuyucu Windows'ta geçici hata alır."""
     os.rename(gecici, hedef)
 
 
 def sha256_hesapla(yol: Path) -> tuple[str, int]:
-    """Dosyayı akışla özetler; (sha256, boyut) döndürür. Açılamazsa
-    ``DosyaOkunamadi``."""
     ozet = hashlib.sha256()
     boyut = 0
     try:
@@ -264,9 +214,6 @@ def sha256_hesapla(yol: Path) -> tuple[str, int]:
 def arsiv_dosyasini_dogrula(
     arsiv_dizini: Path, goreli_yol: str, boyut: int, sha256: str | None = None
 ) -> Path:
-    """Arşiv dosyası yerinde, sıradan dosya ve beklenen boyutta mı; ``sha256``
-    verilmişse özeti de baştan sona doğrulanır. Geçerse fiziksel yolu döner;
-    yoksa ``ArsivDosyasiEksik``, uymuyorsa ``ArsivButunlukHatasi``."""
     yol = arsiv_yolu(arsiv_dizini, goreli_yol)
     kisa = goreli_yol[3:15]
     try:
@@ -304,11 +251,6 @@ def dosyayi_arsivle(
     arsiv_dizini: Path,
     azami_boyut: int = AZAMI_DOSYA_BOYUTU,
 ) -> ArsivlenenDosya:
-    """Gelen dizinindeki dosyayı denetler ve içerik adresli yola atomik arşivler.
-
-    Dönen değer veritabanına yazılmamıştır. Hata yollarının hiçbirinde geçici
-    dosya ya da yarım hedef kalmaz.
-    """
     kaynak = gelen_dosyayi_dogrula(yol, gelen_dizini)
     uzanti = _uzanti(kaynak.name)
     try:
@@ -355,13 +297,6 @@ def _dizini_hazirla(dizin: Path) -> None:
 def _akisla_kopyala(
     kaynak: Path, gecici: Path, azami_boyut: int, gelen_sade: Path
 ) -> tuple[str, int, str]:
-    """Kaynağı geçici dosyaya akışla kopyalar; (sha256, boyut, mime) döndürür.
-
-    Açılan nesne önce tanıtıcı üzerinden doğrulanır (``_acilani_dogrula``).
-    İlk parça okunur okunmaz boş dosya reddedilir ve MIME imzadan belirlenir;
-    geçici dosya ancak bundan sonra açılır. Sınır aşımında kopya durur ve hata
-    yükselir.
-    """
     ozet = hashlib.sha256()
     boyut = 0
     try:
@@ -398,11 +333,6 @@ def _akisla_kopyala(
 def _hedefe_tasi(
     gecici: Path, arsiv_dizini: Path, goreli_yol: str, ozet: str, boyut: int
 ) -> bool:
-    """Geçici dosyayı hedefe atomik taşır; var olan hedefin üstüne yazmaz. Hedef
-    zaten varsa ya da taşıma "hedef var" diye reddedilirse hedef özetle
-    doğrulanır: aynıysa kopya atılır ve ``True`` (zaten vardı), değilse bütünlük
-    hatası. Taşıma başarılıysa ``False``. Hedef oluştuktan sonra hiç
-    değişmediğinden doğrulama sırasında okuma çakışması olmaz."""
     hedef = arsiv_yolu(arsiv_dizini, goreli_yol)
     if hedef.exists() or hedef.is_symlink():
         arsiv_dosyasini_dogrula(arsiv_dizini, goreli_yol, boyut, ozet)
@@ -421,8 +351,6 @@ def _hedefe_tasi(
 
 
 def _dizini_esle(dizin: Path) -> None:
-    """Dizin girdisini diske eşler (POSIX); Windows'ta dizin açılamaz, atlanır.
-    Desteklemeyen dosya sisteminde sessizce geçilir: en iyi çaba."""
     if os.name == "nt":
         return
     try:
@@ -450,7 +378,6 @@ def _uzanti(ad: str) -> str:
 
 
 def _mime_belirle(bas: bytes) -> str:
-    """MIME yalnız içerik imzasından; bilinmiyorsa güvenli genel değer."""
     for imza, mime in _IMZALAR:
         if bas.startswith(imza):
             return mime
@@ -461,8 +388,6 @@ def _mime_belirle(bas: bytes) -> str:
 
 
 def arsivi_tara(arsiv_dizini: Path) -> ArsivTaramasi:
-    """Arşiv dizinindeki bütün dosyaları sınıflar; hiçbir şeyi silmez, değiştirmez.
-    Dizin yoksa boş tarama döner."""
     adresli: list[str] = []
     yarim: list[str] = []
     taninmayan: list[str] = []

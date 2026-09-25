@@ -27,7 +27,6 @@ class Bagimlilik:
 
 
 def _modul_adi(dosya: Path, kaynak_koku: Path) -> str:
-    """``src/defteruc/cekirdek/a/b.py`` → ``defteruc.cekirdek.a.b``."""
     parcalar = list(dosya.relative_to(kaynak_koku).with_suffix("").parts)
     if parcalar[-1] == "__init__":
         parcalar.pop()
@@ -35,14 +34,12 @@ def _modul_adi(dosya: Path, kaynak_koku: Path) -> str:
 
 
 def _paket_adi(modul_adi: str, dosya: Path) -> str:
-    """Göreli importların çözüldüğü paket: ``__init__`` için modülün kendisi."""
     if dosya.name == "__init__.py":
         return modul_adi
     return modul_adi.rpartition(".")[0]
 
 
 def _goreli_cozumle(paket: str, seviye: int, modul: str | None) -> str:
-    """``from ..x import y`` ya da ``"..x"`` metnini mutlak modül adına çevirir."""
     govde = paket.split(".")
     if seviye > 1:
         govde = govde[: len(govde) - (seviye - 1)]
@@ -64,7 +61,6 @@ def _uygulama_ici_mi(modul_adi: str) -> bool:
 
 
 def _metin_arg(dugum: ast.Call, konum: int, anahtar: str) -> str | None:
-    """Çağrının ``konum``. konumsal ya da ``anahtar=`` argümanı, metin sabitiyse."""
     aday: ast.expr | None = None
     if len(dugum.args) > konum:
         aday = dugum.args[konum]
@@ -78,7 +74,6 @@ def _metin_arg(dugum: ast.Call, konum: int, anahtar: str) -> str | None:
 
 
 def _dinamik_hedef(dugum: ast.Call, paket: str, dinamik_adlar: set[str]) -> str | None:
-    """``import_module`` / ``__import__`` çağrısının mutlak hedefi; değilse ``None``."""
     islev = dugum.func
     if isinstance(islev, ast.Name):
         if islev.id not in dinamik_adlar:
@@ -99,7 +94,6 @@ def _dinamik_hedef(dugum: ast.Call, paket: str, dinamik_adlar: set[str]) -> str 
 
 
 def bagimliliklar(dosya: Path, kaynak_koku: Path) -> list[Bagimlilik]:
-    """Dosyanın statik ve metin hedefli dinamik importları, mutlak adlarla."""
     agac = ast.parse(dosya.read_text(encoding="utf-8"), filename=str(dosya))
     paket = _paket_adi(_modul_adi(dosya, kaynak_koku), dosya)
 
@@ -140,7 +134,6 @@ def bagimliliklar(dosya: Path, kaynak_koku: Path) -> list[Bagimlilik]:
 
 
 def yasak_importlar(dosya: Path, kaynak_koku: Path) -> list[str]:
-    """Dosyadaki doğrudan ``defteruc.finans`` bağımlılıkları, ``satır: ifade``."""
     bulgular: list[str] = []
     for b in bagimliliklar(dosya, kaynak_koku):
         if _yasak_mi(b.hedef):
@@ -151,7 +144,6 @@ def yasak_importlar(dosya: Path, kaynak_koku: Path) -> list[str]:
 
 
 def sinir_ihlalleri(cekirdek_dizini: Path, kaynak_koku: Path) -> dict[str, list[str]]:
-    """Çekirdek ağacındaki her ``.py`` için doğrudan ihlal listesi."""
     ihlaller: dict[str, list[str]] = {}
     for dosya in sorted(cekirdek_dizini.rglob("*.py")):
         bulgular = yasak_importlar(dosya, kaynak_koku)
@@ -164,7 +156,6 @@ def sinir_ihlalleri(cekirdek_dizini: Path, kaynak_koku: Path) -> dict[str, list[
 
 
 def _modul_dosyalari(kaynak_koku: Path) -> dict[str, Path]:
-    """``defteruc`` altındaki bütün modüller: ad → dosya."""
     return {
         _modul_adi(d, kaynak_koku): d
         for d in sorted((kaynak_koku / UYGULAMA_PAKETI).rglob("*.py"))
@@ -172,9 +163,6 @@ def _modul_dosyalari(kaynak_koku: Path) -> dict[str, Path]:
 
 
 def _yukleme_adimlari(hedef: str) -> list[tuple[str, str]]:
-    """``hedef`` import edilince Python'un çalıştırdığı modüller: önce üst
-    paketlerin ``__init__``'leri, sonra hedefin kendisi. (modül adı, zincirde
-    gösterilecek etiket) çiftleri."""
     parcalar = hedef.split(".")
     adimlar: list[tuple[str, str]] = []
     for i in range(1, len(parcalar)):
@@ -187,13 +175,6 @@ def _yukleme_adimlari(hedef: str) -> list[tuple[str, str]]:
 def _finansa_giden_zincir(
     baslangic: str, dosyalar: dict[str, Path], kaynak_koku: Path
 ) -> list[str] | None:
-    """En kısa ``baslangic → ... → defteruc.finans*`` zinciri; yoksa ``None``.
-
-    Genişlik öncelikli tarama; her modül bir kez ziyaret edilir (döngüler
-    bitirir). Bir hedef yüklenirken çalışacak üst paket ``__init__``'leri de
-    düğüm olarak eklenir; zincirde ``(üst paket, X yüklenirken)`` etiketiyle
-    görünür. Başlangıç modülünün kendi üst paketleri de dahildir.
-    """
     kuyruk: deque[tuple[str, list[str]]] = deque()
     gorulen: set[str] = set()
 
@@ -216,7 +197,6 @@ def _finansa_giden_zincir(
 
 
 def dolayli_ihlaller(cekirdek_dizini: Path, kaynak_koku: Path) -> dict[str, list[str]]:
-    """Çekirdek dosyası → finansa giden en kısa modül zinciri (dolaylı dahil)."""
     dosyalar = _modul_dosyalari(kaynak_koku)
     ihlaller: dict[str, list[str]] = {}
     for dosya in sorted(cekirdek_dizini.rglob("*.py")):
@@ -367,7 +347,6 @@ def test_denetleyici_izinli_importlara_dokunmaz(tmp_path: Path) -> None:
 
 
 def test_finans_cekirdegi_kullanabilir(tmp_path: Path) -> None:
-    """Ters yön denetlenmez: finans içindeki çekirdek importu ihlal değildir."""
     kok = _sentetik_agac(
         tmp_path, "from defteruc.cekirdek import x\n", "finans/hesap.py"
     )
@@ -400,7 +379,6 @@ def test_dolayli_bagimlilik_zincirle_yakalanir(tmp_path: Path) -> None:
 def test_ust_paket_initializer_uzerinden_finansa_ulasma_yakalanir(
     tmp_path: Path,
 ) -> None:
-    """İnceleme örneği: alt modül temiz, üst paketin __init__'i finansı yüklüyor."""
     kok = _sentetik_agac(
         tmp_path,
         "from defteruc.yardimci.alt import veri\n",
@@ -421,7 +399,6 @@ def test_ust_paket_initializer_uzerinden_finansa_ulasma_yakalanir(
 
 
 def test_baslangic_modulunun_kendi_ust_paketi_de_denetlenir(tmp_path: Path) -> None:
-    """defteruc/__init__ finansı yüklerse hiçbir çekirdek modülü onsuz yüklenemez."""
     kok = _sentetik_agac(
         tmp_path,
         "import os\n",
@@ -508,8 +485,6 @@ YASAK_FINANS_ADLARI: tuple[str, ...] = (
     "GIDER",
     "BAKIYE",
 )
-"""Çekirdekte tanımlayıcı ya da metin sabiti olarak geçemeyecek finansal adlar.
-Çok parçalı ad (``PARA_BIRIMI``) ardışık parçalar olarak aranır."""
 
 _TURKCE_ASCII = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
 _AD_PARCASI = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+")
@@ -517,13 +492,10 @@ _YASAK_PARCA_DIZILERI = tuple(tuple(ad.split("_")) for ad in YASAK_FINANS_ADLARI
 
 
 def ad_parcalari(metin: str) -> list[str]:
-    """``HesapHareketi`` → ``["HESAP", "HAREKETI"]``, ``para_birimi`` →
-    ``["PARA", "BIRIMI"]``; Türkçe harfler ASCII'ye indirgenir, büyük harf."""
     return [p.upper() for p in _AD_PARCASI.findall(metin.translate(_TURKCE_ASCII))]
 
 
 def yasak_finans_adi(metin: str) -> str | None:
-    """Metindeki ilk yasak finansal ad (tam parça eşleşmesi); yoksa ``None``."""
     parcalar = ad_parcalari(metin)
     for dizi in _YASAK_PARCA_DIZILERI:
         n = len(dizi)
@@ -534,8 +506,6 @@ def yasak_finans_adi(metin: str) -> str | None:
 
 
 def _belge_metinleri(agac: ast.AST) -> set[int]:
-    """Tek başına duran metin ifadeleri (docstring, nitelik açıklaması) — düğüm
-    kimlikleri; bunlar denetim dışıdır."""
     return {
         id(dugum.value)
         for dugum in ast.walk(agac)
@@ -546,7 +516,6 @@ def _belge_metinleri(agac: ast.AST) -> set[int]:
 
 
 def finansal_adlar(dosya: Path) -> list[str]:
-    """Dosyadaki yasak finansal adlar: ``satır: tür 'metin' (YASAK_AD)``."""
     agac = ast.parse(dosya.read_text(encoding="utf-8"), filename=str(dosya))
     belge = _belge_metinleri(agac)
     bulgular: list[str] = []
@@ -584,7 +553,6 @@ def finansal_adlar(dosya: Path) -> list[str]:
 
 
 def finansal_ad_ihlalleri(*dizinler: Path) -> dict[str, list[str]]:
-    """Verilen ağaçlardaki her ``.py`` için bulgu listesi (proje köküne göre yol)."""
     ihlaller: dict[str, list[str]] = {}
     for dizin in dizinler:
         for dosya in sorted(dizin.rglob("*.py")):

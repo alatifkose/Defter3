@@ -42,12 +42,6 @@ ARAC_SISTEM_DURUMU_ACIKLAMASI = (
 
 @dataclass(frozen=True)
 class SistemDurumu:
-    """Aracın yapılandırılmış yanıtı.
-
-    ``slots=True`` bilerek yok: SDK dataclass'tan JSON şeması üretirken slot
-    tanımlayıcılarını varsayılan değer sanıp şemayı düşürüyor.
-    """
-
     uygulama_surumu: str
     ortam: str
     yetenekler: list[str]
@@ -55,7 +49,6 @@ class SistemDurumu:
 
 
 def uygulama_surumu() -> str:
-    """Kurulu paketin sürümü; paket bulunamazsa ``bilinmiyor``."""
     try:
         return version(PAKET_ADI)
     except PackageNotFoundError:
@@ -63,7 +56,6 @@ def uygulama_surumu() -> str:
 
 
 def sistem_durumu(ayarlar: Ayarlar) -> SistemDurumu:
-    """Uygulamanın durumunu döndürür; yol ya da sır içermez."""
     return SistemDurumu(
         uygulama_surumu=uygulama_surumu(),
         ortam=ayarlar.ortam.value,
@@ -72,31 +64,16 @@ def sistem_durumu(ayarlar: Ayarlar) -> SistemDurumu:
 
 
 GUNLUK_METIN_AZAMI = 64
-"""İstemciden gelen bir metnin günlükte alabileceği en çok karakter."""
 
 GUNLUK_YETENEK_AZAMI = 8
-"""Günlüğe yazılacak en çok yetenek adı."""
 
 
 def gunluk_icin_suz(metin: str, azami: int = GUNLUK_METIN_AZAMI) -> str:
-    """İstemciden gelen metni günlük için süzer: yazdırılamayan karakterler
-    (satır sonu, sekme, kontrol karakterleri) ``?`` olur, uzunluk ``azami``
-    ile sınırlanır (``…`` eklenir). Günlük satırı yapısı istemci metniyle
-    bozulamaz (inceleme 4, 2026-09-24)."""
     suzulmus = "".join(c if c.isprintable() else "?" for c in metin)
     return suzulmus if len(suzulmus) <= azami else suzulmus[:azami] + "…"
 
 
 def el_sikisma_ozeti(baglam: Context[Any, Any]) -> str:
-    """Bağlantının el sıkışma bilgisini tek satırda özetler.
-
-    İstemcinin ``initialize`` ile bildirdiği ad ve sürüm (süzülmüş,
-    sınırlı), müzakere edilen protokol sürümü (süzülmüş) ve istemcinin
-    bildirdiği yeteneklerin yalnız **adları** (süzülmüş, sınırlı sayıda).
-    Yetenek içerikleri (özellikle ``experimental`` altındaki serbest veri)
-    günlüğe yazılmaz: istemcinin gönderdiği metin kişisel veri ya da sır
-    taşıyabilir; günlük satırının yapısını da bozamamalıdır.
-    """
     oturum = baglam.session
     parametreler = oturum.client_params
     if parametreler is None:
@@ -120,7 +97,6 @@ def el_sikisma_ozeti(baglam: Context[Any, Any]) -> str:
 
 
 def sunucu_kur(ayarlar: Ayarlar) -> MCPServer[None]:
-    """MCP sunucusunu ve araçlarını kurar; henüz çalıştırmaz."""
     sunucu: MCPServer[None] = MCPServer(
         name=SUNUCU_ADI,
         version=uygulama_surumu(),
@@ -136,7 +112,6 @@ def sunucu_kur(ayarlar: Ayarlar) -> MCPServer[None]:
 
 
 def main() -> int:
-    """MCP kapısını stdio üzerinde çalıştırır; çıkış kodunu döndürür."""
     try:
         ayarlar, _ = ortami_hazirla()
     except BaslangicHatasi as hata:

@@ -53,7 +53,6 @@ DISLANMAMALI = (
 
 
 def _dislananlar(yollar: tuple[str, ...]) -> set[str]:
-    """Verilen yollardan .gitignore kurallarına takılanları döndürür."""
     git = shutil.which("git")
     if git is None:
         pytest.skip("git bulunamadı")
