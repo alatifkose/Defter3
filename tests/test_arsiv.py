@@ -1,12 +1,3 @@
-"""Arşiv dosya katmanı testleri (Aşama 4.4): gelen dizini sınırı, akışla kopya,
-SHA-256, içerik adresli atomik taşıma, bütünlük doğrulama, tarama.
-
-Veritabanı yok; yalnız dosya sistemi (``tmp_path``). Dosyalar sentetiktir:
-envanter listesi görünümlü PDF, sahte PNG / JPEG baytları, metin. Simgesel
-bağlantı testleri Windows'ta yetki yoksa, junction testleri Windows dışında
-atlanır (``test_ayarlar`` kalıbı).
-"""
-
 from __future__ import annotations
 
 import hashlib

@@ -1,9 +1,3 @@
-"""Hypothesis ortam kontrolü.
-
-Bu dosya DEFTERUC'ün bir davranışını sınamaz. Yalnızca Hypothesis'in
-özellik tabanlı testleri üretip çalıştırabildiğini doğrular.
-"""
-
 from hypothesis import given
 from hypothesis import strategies as st
 

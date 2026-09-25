@@ -1,22 +1,3 @@
-"""DEFTERUC uygulama başlangıcı.
-
-``uv run defteruc`` bu modülün ``main`` fonksiyonunu çalıştırır. Sıra:
-
-1. ``ayarlari_yukle()`` ile ayarlar ortam değişkenlerinden okunur.
-2. ``dizinleri_hazirla()`` ile seçilen ortamın dizinleri açılır.
-3. ``gunlugu_kur()`` ile teknik günlük log dizininde kurulur.
-4. Başlangıç olayı günlüğe yazılır, kısa bir mesajla sıfır çıkış kodu döner.
-
-Herhangi bir adım başarısızsa anlaşılır bir hata stderr'e yazılır ve çıkış
-kodu 1 olur. Ayarlar ya da günlük kurulmadan oluşan hatalar da stderr'e
-gider; günlük kurulamadıysa başarılı başlangıç mesajı verilmez.
-
-İlk üç adım ``ortami_hazirla()`` içindedir; MCP kapısı da aynı işlevle
-başlar, böylece iki giriş noktası aynı ayarları ve aynı günlüğü kullanır.
-
-Modül import edildiğinde dizin ya da dosya oluşturulmaz.
-"""
-
 from __future__ import annotations
 
 import sys

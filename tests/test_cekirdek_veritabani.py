@@ -1,11 +1,3 @@
-"""Genel veritabanı altyapısı testleri (Aşama 4.1).
-
-Gerçek SQLite dosyalarıyla, ``test`` ortamında ve ``tmp_path`` altındaki bir
-veri köküyle; ``:memory:`` kullanılmaz. Böylece dosya yolu, WAL, dış anahtar
-ve işlem sınırı gerçek dosya üzerinde sınanır. Tablolar testin kendi ham SQL
-tablolarıdır; uygulama tablosu yoktur.
-"""
-
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path

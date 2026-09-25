@@ -1,9 +1,3 @@
-"""Uygulama başlangıç akışı testleri.
-
-Bütün yollar tmp_path altındadır; ortam ``test`` seçilir ve veri kökü açıkça
-verilir, böylece kullanıcının gerçek veri ve belge dizinlerine dokunulmaz.
-"""
-
 import os
 import subprocess
 import sys

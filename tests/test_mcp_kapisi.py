@@ -1,12 +1,3 @@
-"""MCP kapısı testleri.
-
-Sunucu ayrı bir süreçte, ``test`` ortamında ve geçici veri köküyle başlatılır.
-İstemci taklidi yoktur: JSON-RPC mesajları ham satırlar olarak stdin'e
-yazılır, her isteğin yanıtı stdout'tan okunduktan sonra sıradakine geçilir;
-stdin en sonda kapatılır. Böylece stdout'un protokol dışında hiçbir şey
-taşımadığı da sınanır.
-"""
-
 import copy
 import dataclasses
 import json

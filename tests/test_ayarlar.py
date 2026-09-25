@@ -1,10 +1,3 @@
-"""Merkezi ayar yönetimi testleri.
-
-Bütün yollar tmp_path altındadır. Kullanıcının kendi DEFTERUC_* ortam
-değişkenleri her testten önce temizlenir; gerçek kullanıcı dizinlerine
-dokunulmaz.
-"""
-
 import os
 import subprocess
 import sys

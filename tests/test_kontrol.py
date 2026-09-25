@@ -1,8 +1,3 @@
-"""scripts/kontrol.py toplu çıkış davranışı testleri.
-
-Alt süreçler taklit edilir; gerçek Ruff, Pyright ya da pytest başlatılmaz.
-"""
-
 from collections.abc import Sequence
 from pathlib import Path
 

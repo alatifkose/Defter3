@@ -1,10 +1,3 @@
-"""Teknik hata günlüğü testleri.
-
-Log dosyaları yalnızca tmp_path altında açılır. Her testten sonra handler
-kapatılır; böylece handler birikmez ve Windows'ta geçici dosya kilitli
-kalmaz.
-"""
-
 import logging
 from collections.abc import Iterator
 from pathlib import Path

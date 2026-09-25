@@ -1,23 +1,3 @@
-"""DEFTERUC MCP kapısı.
-
-Cowork'un DEFTERUC'e ulaştığı tek kapı. ``uv run defteruc-mcp`` bu modülün
-``main`` fonksiyonunu çalıştırır; sunucu stdio taşımasıyla konuşur.
-
-Kapsam: tek araç ``sistem_durumu``. Ürün verisi yazılmaz; veritabanına
-dokunulmaz.
-
-Kurallar:
-
-* stdout yalnız protokole aittir; bu modül stdout'a hiçbir şey yazmaz.
-  SDK'nın stdio taşıması sunucu çalışırken dosya tanımlayıcısı 1'i stderr'e
-  çevirir, yine de bütün tanı çıktısı teknik günlüğe gider: SDK'nın ``mcp``
-  günlüğü de aynı dosyaya bağlanır.
-* Araç yanıtlarında yol, anahtar ya da ortam değişkeni dökümü yoktur.
-* Her araç çağrısında el sıkışma özeti (istemci adı ve sürümü, protokol
-  sürümü, istemci yetenekleri) günlüğe yazılır; Aşama 3'ün ölçümü budur.
-* Modül import edildiğinde sunucu kurulmaz, dosya oluşturulmaz.
-"""
-
 from __future__ import annotations
 
 import sys

@@ -1,9 +1,3 @@
-"""Test ortamı kontrolü.
-
-Bu dosya DEFTERUC'ün bir davranışını sınamaz. Yalnızca pytest'in ve
-geçici dizin fikstürünün bu makinede çalıştığını doğrular.
-"""
-
 from pathlib import Path
 
 

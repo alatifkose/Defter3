@@ -1,10 +1,3 @@
-"""Birinci motor testleri (karar 2026-09-24).
-
-Gerçek SQLite dosyasıyla, ``test`` ortamında ``tmp_path`` altında. Motor
-yapıyı okumaz; yapıyı **testler** okur (``PRAGMA table_info``) ve motorun
-istenileni olduğu gibi yazdığını doğrular.
-"""
-
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path

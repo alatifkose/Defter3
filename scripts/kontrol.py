@@ -1,19 +1,3 @@
-"""DEFTERUC toplu kalite kontrolü.
-
-Proje kökünden tek komutla çalışır::
-
-    uv run python scripts/kontrol.py
-
-Sırayla Ruff biçim kontrolü, Ruff statik kontrolü, Pyright ve pytest
-çalıştırılır. Bir adım başarısız olsa da sonraki adımlar çalışır; sonunda
-toplu sonuç yazdırılır. Herhangi bir adım başarısızsa ya da bir araç
-başlatılamazsa çıkış kodu sıfırdan farklıdır.
-
-Bu betik kaynak dosyalarını değiştirmez: otomatik biçimlendirme, ``--fix``
-ya da bağımlılık güncellemesi yapmaz. Araçlar betiği çalıştıran Python
-yorumlayıcısından (``sys.executable -m ...``) çağrılır.
-"""
-
 from __future__ import annotations
 
 import subprocess

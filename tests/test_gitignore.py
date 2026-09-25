@@ -1,11 +1,3 @@
-"""Kritik Git dışlama kurallarının doğrulanması.
-
-Kişisel finans verisi taşıyan dosyalar (veritabanı, WAL/SHM, belgeler, loglar,
-yedekler, sırlar) depoya girmemeli; kaynak dosyalar ise girmeli. Kontrol
-``git check-ignore --no-index`` ile yapılır; hiçbir dosya oluşturulmaz, depo
-değişmez. Git bulunamazsa test atlanır.
-"""
-
 import shutil
 import subprocess
 from pathlib import Path
