@@ -154,9 +154,13 @@ tablo isteği bırakıldı, `defteruc onayla` ile uygulandı, iki satır yazıld
 yapı yeniden okundu. Denemenin gösterdiği eksik (satırlar okunamıyor,
 kimlikler görünmüyor) aynı gün kapatıldı.
 
-Henüz yok: onay penceresi, yeni mükerrerlik tasarımı, komut satırından satır
-gösterme (okuma çekirdekte olduğundan pencere ve komut satırı sonra aynı
-işlevi kullanır).
+* **Onay penceresi** (`pencere.py`, PySide6, 2026-09-25): `defteruc
+  pencere`. Bekleyen istekler, seçilenin SQL'i, Onayla / Reddet, son
+  kararlar, beş saniyede bir kendiliğinden yenileme. Ayrıntı "Onay
+  penceresi" bölümünde.
+
+Henüz yok: yeni mükerrerlik tasarımı, satır gösterme (pencere ve komut
+satırı; okuma çekirdekte hazır), pencerede onay öncesi ikinci soru.
 
 ## Yapı istekleri ve onay
 
@@ -208,6 +212,35 @@ ve isteği açmadan önce doğrular; `uygula_baglantida(baglanti, istek)` işi o
 bağlantıda yapar; `istek_sql(istek)` çalışacak cümleyi üretir. Yapıya
 dokunan tek üretim çağıranı onay modülüdür; motor testleri de aynı iki
 çağrıyla çalışır.
+
+## Onay penceresi
+
+`src/defteruc/pencere.py` (2026-09-25, PySide6). Komut satırındaki üç
+komutun pencere hâli; ilk sürüm bilerek küçük: önce çalışsın, Abdüllatif
+görsün, sonra büyüsün. `defteruc pencere` ile açılır; Qt yalnız bu komutta
+yüklenir (`komutlar.pencere` modülü tembel içe aktarır), diğer komutlar ve
+MCP sunucusu Qt'ye dokunmaz.
+
+Düzen: solda bekleyen istekler listesi (`[kimlik] tür · yerel saat`) ve son
+kararlar listesi (`[kimlik] tür · durum · karar saati · varsa sebep`, en
+yeniden eskiye, `onay.son_kararlar`); sağda seçili isteğin **çalışacak SQL
+cümlesi** (salt okunur), "Onayla ve uygula", "Reddet", "Yenile" düğmeleri ve
+son işlemin mesajı. Seçim yokken karar düğmeleri kapalıdır. Her beş saniyede
+bir liste kendiliğinden yenilenir (Cowork'un yeni bıraktığı istek görünür),
+seçim korunur. Onay ve red aynı çekirdek işlevleri çağırır (`onay.onayla`,
+`onay.reddet`), sonuç aynı biçimde günlüğe düşer (`onay_karari`);
+uygulanamayan onay sebebiyle, başka yerden karar verilmiş istek
+(`ZatenKararVerilmis`) ve meşgul veritabanı mesaj olarak gösterilir, pencere
+kapanmaz. Onay tek tıktır; ikinci bir "emin misiniz" sorusu yoktur (karar:
+önce çalışan sürüm; istenirse eklenir). Yapı isteği bırakma pencerede
+yoktur, o Cowork'un işidir.
+
+Testler (`tests/test_pencere.py`) Qt'nin ekransız (`offscreen`) platformuyla
+gerçek pencere kurar, düğmelere `click()` ile basar ve listeleri, SQL
+kutusunu, mesajı, veritabanını ve günlüğü doğrular; olay döngüsü
+çalıştırılmaz, zamanlayıcı testte kapalıdır (`yenileme_ms=0`) ve yenileme
+doğrudan çağrılır. `defteruc pencere` komutu `pencere.calistir`'ı
+çağırdığıyla sınanır.
 
 ## Satır okuma
 
@@ -459,6 +492,14 @@ uv sync
 Python 3.13 ve uv gerekir. `uv sync` sanal ortamı ve geliştirme
 bağımlılıklarını (pytest, hypothesis, ruff, pyright, pre-commit) kurar.
 
+Bilinen tuzak (2026-09-25): Claude masaüstü açıkken MCP sunucusu
+`.venv\Scripts\defteruc-mcp.exe` dosyasını kilitli tutar; bu sırada `uv sync`
+ve bağımlılık değişikliği sonrası ilk `uv run` projeyi yeniden kuramaz ve
+"os error 32" ile düşer. Çözüm: Claude masaüstünü kapatıp `uv sync`, ya da
+geçici olarak `UV_NO_SYNC=1` ile çalışmak (bağımlılık `uv pip install` ile
+sanal ortama, `uv lock` ile kilide ayrı ayrı yazılır; PySide6 böyle
+eklendi).
+
 Klon sonrası bir kez, commit öncesi kontrol kancasını yükle:
 
 ```bash
@@ -509,7 +550,13 @@ istek bırakır.
 uv run defteruc reddet 3
 ```
 
-Talep 3'ü reddeder; motor çağrılmaz. Olmayan talep kimliği ya da karar
+Talep 3'ü reddeder; motor çağrılmaz.
+
+```bash
+uv run defteruc pencere
+```
+
+Onay penceresini açar (aşağıda). Olmayan talep kimliği ya da karar
 verilmiş talep için stderr'e sebep, çıkış kodu `1`. Eksik ya da sayı olmayan
 kimlik ve bilinmeyen alt komut `argparse` kullanım hatasıdır (çıkış kodu `2`).
 Her karar günlüğe `onay_karari` olayıyla düşer: talep kimliği, tür, durum;
@@ -757,7 +804,8 @@ geçerlidir.
 src/defteruc/    uygulama paketi
   ayarlar.py      merkezi ayarlar (ortam, yollar)
   baslangic.py    uv run defteruc giriş noktası; alt komutlar; ortak hazırlık (ortami_hazirla)
-  komutlar.py     bekleyenler / onayla / reddet alt komutları
+  komutlar.py     bekleyenler / onayla / reddet / pencere alt komutları
+  pencere.py      onay penceresi (PySide6): bekleyenler, SQL, onay/ret, son kararlar
   gunluk.py       teknik hata günlüğü
   mcp_kapisi.py   uv run defteruc-mcp; MCP sunucusu ve araçları
   cekirdek/       genel çekirdek; finansı tanımaz

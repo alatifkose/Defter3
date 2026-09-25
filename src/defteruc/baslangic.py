@@ -61,6 +61,7 @@ def _ayristirici() -> argparse.ArgumentParser:
     komut.add_parser(
         komutlar.KOMUT_BEKLEYENLER, help="bekleyen yapı isteklerini göster"
     )
+    komut.add_parser(komutlar.KOMUT_PENCERE, help="onay penceresini aç")
     for ad, aciklama in (
         (komutlar.KOMUT_ONAYLA, "bekleyen yapı isteğini onayla ve uygula"),
         (komutlar.KOMUT_REDDET, "bekleyen yapı isteğini reddet"),
@@ -85,6 +86,8 @@ def _calistir(argv: Sequence[str] | None) -> int:
             return komutlar.onayla(ayarlar, int(secenekler.kimlik))
         case komutlar.KOMUT_REDDET:
             return komutlar.reddet(ayarlar, int(secenekler.kimlik))
+        case komutlar.KOMUT_PENCERE:
+            return komutlar.pencere(ayarlar)
         case _:
             return _baslat(ayarlar, log_dosyasi)
 

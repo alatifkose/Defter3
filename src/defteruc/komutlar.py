@@ -18,6 +18,7 @@ OLAY_ONAY_KARARI = "onay_karari"
 KOMUT_BEKLEYENLER = "bekleyenler"
 KOMUT_ONAYLA = "onayla"
 KOMUT_REDDET = "reddet"
+KOMUT_PENCERE = "pencere"
 
 
 @contextmanager
@@ -39,7 +40,7 @@ def bekleyenleri_goster(ayarlar: Ayarlar) -> int:
     _yaz(f"Bekleyen yapı istekleri: {len(kayitlar)}")
     for kayit in kayitlar:
         _yaz("")
-        _yaz(f"[{kayit.kimlik}] {kayit.tur} · bırakıldı {_yerel(kayit.olusturma)}")
+        _yaz(f"[{kayit.kimlik}] {kayit.tur} · bırakıldı {yerel_zaman(kayit.olusturma)}")
         _yaz(kayit.sql)
     _yaz("")
     _yaz(f"Onaylamak için: defteruc {KOMUT_ONAYLA} <kimlik>")
@@ -54,7 +55,7 @@ def onayla(ayarlar: Ayarlar, kimlik: int) -> int:
     except (onay.OnayHatasi, VeritabaniMesgul) as hata:
         _hata_yaz(str(hata))
         return CIKIS_HATALI
-    _karari_kaydet(kayit)
+    karari_kaydet(kayit)
     if kayit.durum is onay.Durum.UYGULANDI:
         _yaz(f"Talep {kimlik} onaylandı ve uygulandı ({kayit.tur}).")
         return CIKIS_BASARILI
@@ -72,19 +73,25 @@ def reddet(ayarlar: Ayarlar, kimlik: int) -> int:
     except (onay.OnayHatasi, VeritabaniMesgul) as hata:
         _hata_yaz(str(hata))
         return CIKIS_HATALI
-    _karari_kaydet(kayit)
+    karari_kaydet(kayit)
     _yaz(f"Talep {kimlik} reddedildi ({kayit.tur}); hiçbir şey uygulanmadı.")
     return CIKIS_BASARILI
 
 
-def _karari_kaydet(kayit: onay.YapiIstegiKaydi) -> None:
+def pencere(ayarlar: Ayarlar) -> int:
+    from defteruc import pencere as pencere_modulu
+
+    return pencere_modulu.calistir(ayarlar)
+
+
+def karari_kaydet(kayit: onay.YapiIstegiKaydi) -> None:
     gunluk.olay_kaydet(
         OLAY_ONAY_KARARI,
         f"talep={kayit.kimlik} tur={kayit.tur} durum={kayit.durum.value}",
     )
 
 
-def _yerel(zaman: str) -> str:
+def yerel_zaman(zaman: str) -> str:
     return datetime.fromisoformat(zaman).astimezone().strftime("%Y-%m-%d %H:%M")
 
 

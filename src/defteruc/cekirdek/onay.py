@@ -99,6 +99,20 @@ def bekleyenler(veritabani: Veritabani) -> tuple[YapiIstegiKaydi, ...]:
     return tuple(_kayit(tuple(s)) for s in satirlar)
 
 
+def son_kararlar(veritabani: Veritabani, sinir: int) -> tuple[YapiIstegiKaydi, ...]:
+    with veritabani.islem() as oturum:
+        satirlar = (
+            oturum.connection()
+            .exec_driver_sql(
+                f'SELECT {SUTUNLAR} FROM "{SISTEM_TABLOSU}" WHERE durum != ? '
+                "ORDER BY karar DESC, kimlik DESC LIMIT ?",
+                (Durum.BEKLIYOR.value, sinir),
+            )
+            .all()
+        )
+    return tuple(_kayit(tuple(s)) for s in satirlar)
+
+
 def kayit_getir(veritabani: Veritabani, kimlik: int) -> YapiIstegiKaydi:
     with veritabani.islem() as oturum:
         satir = (
