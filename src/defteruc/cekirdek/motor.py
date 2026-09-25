@@ -130,20 +130,18 @@ def _tirnakla(ad: str) -> str:
 
 
 def _kendi_adini_cevir(parca: str, kaynak: str, hedef: str, sade: bool = False) -> str:
-    # Tablonun kendi adıyla nitelenmiş başvuruları (qc.amount, "qc".amount) hedef
-    # ada çevirir; metin sabitlerine ve başka adlara dokunmaz. Ayrıştırma değil,
-    # tırnak/kelime izleme: parça zaten doğrulanmıştır (yorum yok, tırnaklar dengeli).
+    # Tablonun kendi adıyla nitelenmiş başvuruları (qc.amount, "qc".amount,
+    # 'qc'.amount) hedef ada çevirir; metin sabitlerine ve başka adlara dokunmaz.
+    # Ayrıştırma değil, tırnak/kelime izleme: parça zaten doğrulanmıştır (yorum
+    # yok, tırnaklar dengeli). Tek tırnak SQLite'ta metin sabitidir, ama noktayla
+    # sürüyorsa SQLite onu tanımlayıcı sayar (inceleme a9efca2 bulgu 2); 'qc.amount'
+    # ya da tek başına 'qc' metin olarak kalır.
     sonuc: list[str] = []
     i, n = 0, len(parca)
     aranan = kaynak.casefold()
     while i < n:
         c = parca[i]
-        if c == "'":
-            j = parca.find("'", i + 1)
-            j = n - 1 if j < 0 else j
-            sonuc.append(parca[i : j + 1])
-            i = j + 1
-        elif c in '"`[':
+        if c in "'\"`[":
             kapanis = "]" if c == "[" else c
             j = parca.find(kapanis, i + 1)
             j = n - 1 if j < 0 else j

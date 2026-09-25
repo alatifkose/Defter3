@@ -828,3 +828,30 @@ def test_sonsuz_sayi_iki_icerikte_de_ayni_ve_geri_yazilabilir(
     yapilandirilmis = yanit["structuredContent"]
     assert yapilandirilmis["satirlar"] == [[1, {"sayi": "inf"}], [2, {"sayi": "-inf"}]]
     assert json.loads(yanit["content"][0]["text"]) == yapilandirilmis
+
+
+# --- inceleme a9efca2, bulgu 1: bekleyen_istekler güncel önizlemeyi verir ------------
+
+
+def test_bekleyen_istekler_sonradan_olusan_tablonun_onizlemesini_yeniler(
+    test_koku: Path,
+) -> None:
+    sunucu, ayar = _hazir_sunucu(test_koku)
+    degisiklik = {
+        "tablo": "kuyruk",
+        "sutunlar": [{"ad": "deger", "ozellikler": ["INTEGER", "NOT NULL"]}],
+    }
+    eski = _cagir(sunucu, mcp_kapisi.ARAC_SUTUN_OZELLIGI_DEGISTIRME_ISTEGI, degisiklik)
+    assert "rowid" not in eski["sql"]
+    _tablo_ac(
+        sunucu,
+        ayar,
+        {"tablo": "kuyruk", "sutunlar": [{"ad": "deger", "ozellikler": ["INTEGER"]}]},
+    )
+    (bekleyen,) = _cagir(sunucu, mcp_kapisi.ARAC_BEKLEYEN_ISTEKLER, {})["istekler"]
+    assert bekleyen["talep_kimligi"] == eski["talep_kimligi"]
+    assert 'SELECT rowid, "deger" FROM "kuyruk"' in bekleyen["sql"]
+    durum = _cagir(
+        sunucu, mcp_kapisi.ARAC_ISTEK_DURUMU, {"talep_kimligi": eski["talep_kimligi"]}
+    )
+    assert durum["sql"] == bekleyen["sql"] and durum["durum"] == "BEKLIYOR"

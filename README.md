@@ -127,9 +127,12 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   yazılır; silinmiş kimlikler yeniden dağıtılmaz. Bu okumalar yalnız bu işe
   özeldir. **Tablonun kendi adıyla nitelenmiş başvurular** (`CHECK
   (qc.amount > 0)`, sütun içinde ya da tablo düzeyinde, `"qc".amount` ve
-  `QC . amount` biçimleri dahil) geçici tablo kurulurken geçici ada çevrilir
-  (`_kendi_adini_cevir`: tırnak ve kelime izleyen bir tarama, metin sabitine
-  ve başka adlara dokunmaz, ayrıştırma değil); son adımdaki `RENAME` SQLite'ın
+  `QC . amount`, `` `qc`.amount ``, `[qc].amount` ve SQLite'ın noktayla
+  sürdüğünde tanımlayıcı saydığı `'qc'.amount` biçimleri dahil) geçici tablo
+  kurulurken geçici ada çevrilir (`_kendi_adini_cevir`: tırnak ve kelime
+  izleyen bir tarama, metin sabitine (`'qc'`, `'qc.amount'`) ve başka adlara
+  dokunmaz, ayrıştırma değil; tek tırnaklı biçim dış inceleme a9efca2 bulgu
+  2); son adımdaki `RENAME` SQLite'ın
   kendi kuralıyla başvuruyu asıl ada geri yazar ve tırnaklı saklar
   (`"qc".amount`). Kısıt karşılaştırması bu yüzden kendi adını sade biçime
   indirgeyip karşılaştırır; ikinci ve sonraki yeniden kurmalar da geçer (dış
@@ -156,9 +159,21 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   gerçek bağlantının sütun sınırına, örtük rowid takma adına ve üretilen
   sütunlara göre üretilir, sonra transaction yalnız istek satırını commit
   eder. Tablo henüz yoksa ya da tanım kurulamıyorsa önizleme tek adımlı
-  genel biçime düşer, onay o hatayı `UYGULANAMADI` olarak verir. Test,
-  onayda çalışan cümleleri yakalayıp önizlemedeki her cümlenin birebir
-  çalıştığını doğrular (sıradan tablo ve tam sınır).
+  genel biçime düşer. Tablo talep bırakıldıktan sonra oluşabilir ya da
+  değişebilir (isteklerin beklemesi sistemin normal hâlidir); bu yüzden
+  önizleme talep anına bağlı kalmaz: **bekleyenler her okunduğunda**
+  (`onay.bekleyenler`: pencere, komut satırı, MCP `bekleyen_istekler`)
+  yeniden kurma isteklerinin önizlemesi güncel şemayla yeniden üretilir ve
+  değiştiyse saklanır; **onay anında** aynı bağlantıda bir kez daha
+  üretilir ve saklı metinden farklıysa karar verilmez, yeni metin saklanır ve
+  `OnizlemeDegisti` yükselir (pencere mesaj gösterip SQL kutusunu yeniler,
+  komut satırı stderr'e yazıp `1` ile çıkar; istek `BEKLIYOR` kalır, günlüğe
+  karar düşmez). Böylece kullanıcının onayladığı metin her zaman çalışan
+  metindir (dış inceleme a9efca2 bulgu 1). Tanım hiç kurulamıyorsa onay o
+  hatayı `UYGULANAMADI` olarak verir. Test, onayda çalışan cümleleri yakalayıp
+  önizlemedeki her cümlenin birebir çalıştığını doğrular (sıradan tablo, tam
+  sınır, tablonun talep ile onay arasında oluştuğu sıra ve pencere
+  yenilenmeden basılan bayat onay).
 
 * **Yapı istekleri ve onay** (`cekirdek/onay.py`, 2026-09-25): bir yapı
   isteği bırakıldığında uygulanmaz, sistem tablosunda "bekliyor" olarak
@@ -226,7 +241,10 @@ metne girmez).
 
 **Karar** (`onayla`, `reddet`). Onay ile motor çağrısı tek transaction'dadır:
 motorun `islem_ac` bağlamı istek türüne göre normal ya da yabancı anahtar
-denetimsiz transaction açar; içinde önce durum satırı `BEKLIYOR → UYGULANDI`
+denetimsiz transaction açar; içinde önce saklı önizleme güncel şemayla
+üretilenle karşılaştırılır (farklıysa karar verilmez, yeni önizleme saklanır,
+`OnizlemeDegisti`; bkz. motor "Onayda gösterilen SQL"), sonra durum satırı
+`BEKLIYOR → UYGULANDI`
 olarak güncellenir (`WHERE durum = 'BEKLIYOR'` koşuluyla, tek satır
 etkilenmezse `ZatenKararVerilmis`), sonra `uygula_baglantida` çalışır. Motor
 düşerse (tablo zaten var, kopyada değer değişti, yabancı anahtar ihlali...)
@@ -270,8 +288,10 @@ bir liste kendiliğinden yenilenir (Cowork'un yeni bıraktığı istek görünü
 seçim korunur. Onay ve red aynı çekirdek işlevleri çağırır (`onay.onayla`,
 `onay.reddet`), sonuç aynı biçimde günlüğe düşer (`onay_karari`);
 uygulanamayan onay sebebiyle, başka yerden karar verilmiş istek
-(`ZatenKararVerilmis`) ve meşgul veritabanı mesaj olarak gösterilir, pencere
-kapanmaz. Onay tek tıktır; ikinci bir "emin misiniz" sorusu yoktur (karar:
+(`ZatenKararVerilmis`), pencere yenilenmeden basıldığında bu arada değişmiş
+önizleme (`OnizlemeDegisti`: karar verilmez, mesaj gösterilir, SQL kutusu yeni
+metinle yenilenir, istek listede kalır) ve meşgul veritabanı mesaj olarak
+gösterilir, pencere kapanmaz. Onay tek tıktır; ikinci bir "emin misiniz" sorusu yoktur (karar:
 önce çalışan sürüm; istenirse eklenir). Yapı isteği bırakma pencerede
 yoktur, o Cowork'un işidir.
 

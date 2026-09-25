@@ -1852,8 +1852,16 @@ def test_tam_sinirda_butun_sutunlar_zorunluysa_acik_hata(
         (("INTEGER",), ("CHECK (qc.amount > 0)",)),
         (("INTEGER", "CHECK (qc.amount > 0)"), ()),
         (("INTEGER",), ('CHECK ("qc".amount > 0 AND QC . amount < 1000)',)),
+        (("INTEGER",), ("CHECK ('qc'.amount > 0)",)),
+        (("INTEGER", "CHECK ('qc'.amount > 0)"), ()),
     ],
-    ids=["tablo_duzeyi", "sutun_ici", "tirnakli_ve_bosluklu"],
+    ids=[
+        "tablo_duzeyi",
+        "sutun_ici",
+        "tirnakli_ve_bosluklu",
+        "tek_tirnakli",
+        "tek_tirnakli_sutun_ici",
+    ],
 )
 def test_kendi_adiyla_nitelenmis_check_yeniden_kurmada_korunur(
     veritabani: vt.Veritabani,
@@ -1974,3 +1982,28 @@ def test_tam_sinirda_ertelenebilir_sutun_yoksa_acik_hata(
         assert oturum.execute(text("SELECT rowid, c0 FROM varsayilanli")).all() == [
             (3, 1)
         ]
+
+
+# --- inceleme a9efca2, bulgu 2: tek tırnakla nitelenmiş tablo adı da çevrilir --------
+
+
+@pytest.mark.parametrize(
+    ("parca", "beklenen"),
+    [
+        ("'qc'.amount > 0", '"qc__yk".amount > 0'),
+        ("'QC' . amount > 0", '"qc__yk" . amount > 0'),
+        (
+            "note <> 'qc' AND note <> 'qc.amount'",
+            "note <> 'qc' AND note <> 'qc.amount'",
+        ),
+        ("note <> 'qc' || '.amount'", "note <> 'qc' || '.amount'"),
+        ("'qc'.amount > 0 AND note <> 'qc'", "\"qc__yk\".amount > 0 AND note <> 'qc'"),
+    ],
+    ids=["tek_tirnak", "buyuk_harf_bosluk", "metin_sabiti", "birlestirme", "karisik"],
+)
+def test_kendi_adini_cevir_tek_tirnakli_tanimlayiciyi_cevirir_metni_korur(
+    parca: str, beklenen: str
+) -> None:
+    assert m._kendi_adini_cevir(parca, "qc", "qc__yk") == beklenen  # pyright: ignore[reportPrivateUsage]
+    sade = m._kendi_adini_cevir(parca, "qc", "qc", sade=True)  # pyright: ignore[reportPrivateUsage]
+    assert sade == beklenen.replace('"qc__yk"', "qc")

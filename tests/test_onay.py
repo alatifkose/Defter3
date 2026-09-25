@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import event, text
+from sqlalchemy.exc import IntegrityError
 
 from defteruc import ayarlar as ay
 from defteruc.cekirdek import motor as m
@@ -533,3 +534,58 @@ def test_onizleme_gecici_tablo_birakmaz_ve_olmayan_tabloda_tek_bicimdir(
     assert not any(ad.endswith(m.GECICI_AD_EKI) for ad in _tablolar(veritabani))
     kayit = onay.onayla(veritabani, kimlik)
     assert kayit.durum is onay.Durum.UYGULANAMADI
+
+
+# --- inceleme a9efca2, bulgu 1: tablo talep ile onay arasında oluşursa önizleme -------
+
+KUYRUK = m.TabloOlusturmaIstegi("kuyruk", (m.Sutun("deger", ("INTEGER",)),))
+KUYRUK_YENI = m.SutunOzelligiDegistirmeIstegi(
+    "kuyruk", (m.Sutun("deger", ("INTEGER", "NOT NULL")),)
+)
+ORTUK_KIMLIKLI_KOPYA = (
+    'INSERT OR ABORT INTO "kuyruk__yeniden_kurma" (rowid, "deger") '
+    'SELECT rowid, "deger" FROM "kuyruk"'
+)
+
+
+def _tablo_sonradan_olusur(veritabani: vt.Veritabani) -> int:
+    kimlik = onay.istek_birak(veritabani, KUYRUK_YENI)
+    assert onay.kayit_getir(veritabani, kimlik).sql == m.istek_sql(KUYRUK_YENI)
+    onay.onayla(veritabani, onay.istek_birak(veritabani, KUYRUK))
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO kuyruk (rowid, deger) VALUES (7, 3)"))
+    return kimlik
+
+
+def test_tablo_talep_ile_onay_arasinda_olusursa_bekleyenler_onizlemeyi_yeniler(
+    veritabani: vt.Veritabani,
+) -> None:
+    kimlik = _tablo_sonradan_olusur(veritabani)
+    (kayit,) = onay.bekleyenler(veritabani)
+    assert kayit.kimlik == kimlik and ORTUK_KIMLIKLI_KOPYA in kayit.sql
+    assert onay.kayit_getir(veritabani, kimlik).sql == kayit.sql
+    assert onay.bekleyenler(veritabani) == (kayit,)
+    assert not any(ad.endswith(m.GECICI_AD_EKI) for ad in _tablolar(veritabani))
+    _onizleme_calisanla_ayni(veritabani, kimlik)
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("SELECT rowid, deger FROM kuyruk")).all() == [(7, 3)]
+
+
+def test_bayat_onizlemeyle_onay_uygulanmaz_yeni_onizleme_kaydedilir(
+    veritabani: vt.Veritabani,
+) -> None:
+    kimlik = _tablo_sonradan_olusur(veritabani)
+    with pytest.raises(onay.OnizlemeDegisti, match="değişti"):
+        onay.onayla(veritabani, kimlik)
+    kayit = onay.kayit_getir(veritabani, kimlik)
+    assert kayit.durum is onay.Durum.BEKLIYOR and kayit.karar is None
+    assert ORTUK_KIMLIKLI_KOPYA in kayit.sql
+    assert not any(ad.endswith(m.GECICI_AD_EKI) for ad in _tablolar(veritabani))
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO kuyruk (deger) VALUES (NULL)"))
+        oturum.execute(text("DELETE FROM kuyruk WHERE deger IS NULL"))
+    _onizleme_calisanla_ayni(veritabani, kimlik)
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("SELECT rowid, deger FROM kuyruk")).all() == [(7, 3)]
+        with pytest.raises(IntegrityError, match="NOT NULL"):
+            oturum.execute(text("INSERT INTO kuyruk (deger) VALUES (NULL)"))

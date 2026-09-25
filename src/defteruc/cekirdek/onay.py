@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -28,6 +28,9 @@ class IstekYok(OnayHatasi): ...
 
 
 class ZatenKararVerilmis(OnayHatasi): ...
+
+
+class OnizlemeDegisti(OnayHatasi): ...
 
 
 ISTEK_TURLERI: dict[str, type[m.YapiIstegi]] = {
@@ -88,17 +91,37 @@ def istek_birak(veritabani: Veritabani, istek: m.YapiIstegi) -> int:
 
 
 def bekleyenler(veritabani: Veritabani) -> tuple[YapiIstegiKaydi, ...]:
+    # Bekleyen isteğin önizlemesi istek bırakıldığı anın şemasıyla hesaplanmıştır;
+    # tablo o zamandan beri oluşmuş ya da değişmiş olabilir. Liste her okunduğunda
+    # önizleme güncel şemayla yeniden üretilir ve değiştiyse kaydedilir, böylece
+    # kullanıcının gördüğü metin çalışacak metindir (inceleme a9efca2 bulgu 1).
     with veritabani.islem() as oturum:
-        satirlar = (
-            oturum.connection()
-            .exec_driver_sql(
-                f'SELECT {SUTUNLAR} FROM "{SISTEM_TABLOSU}" WHERE durum = ? '
-                "ORDER BY kimlik",
-                (Durum.BEKLIYOR.value,),
-            )
-            .all()
-        )
-    return tuple(_kayit(tuple(s)) for s in satirlar)
+        baglanti = oturum.connection()
+        satirlar = baglanti.exec_driver_sql(
+            f'SELECT {SUTUNLAR} FROM "{SISTEM_TABLOSU}" WHERE durum = ? '
+            "ORDER BY kimlik",
+            (Durum.BEKLIYOR.value,),
+        ).all()
+        kayitlar = [_kayit(tuple(s)) for s in satirlar]
+        for sira, kayit in enumerate(kayitlar):
+            guncel = _guncel_onizleme(baglanti, kayit)
+            if guncel is not None:
+                kayitlar[sira] = replace(kayit, sql=guncel)
+    return tuple(kayitlar)
+
+
+def _guncel_onizleme(baglanti: Connection, kayit: YapiIstegiKaydi) -> str | None:
+    # Saklı önizleme güncel şemayla aynıysa None; değilse yeni metni saklar ve döner.
+    if not m.yeniden_kurma_gerekir(kayit.istek):
+        return None
+    guncel = m.istek_sql_baglantida(baglanti, kayit.istek)
+    if guncel == kayit.sql:
+        return None
+    baglanti.exec_driver_sql(
+        f'UPDATE "{SISTEM_TABLOSU}" SET sql = ? WHERE kimlik = ? AND durum = ?',
+        (guncel, kayit.kimlik, Durum.BEKLIYOR.value),
+    )
+    return guncel
 
 
 def son_kararlar(veritabani: Veritabani, sinir: int) -> tuple[YapiIstegiKaydi, ...]:
@@ -131,13 +154,25 @@ def kayit_getir(veritabani: Veritabani, kimlik: int) -> YapiIstegiKaydi:
 
 def onayla(veritabani: Veritabani, kimlik: int) -> YapiIstegiKaydi:
     kayit = _bekleyen_kayit(veritabani, kimlik)
+    degisen: str | None = None
     try:
         with m.islem_ac(veritabani, kayit.istek) as baglanti:
-            _karari_yaz(baglanti, kimlik, Durum.UYGULANDI, None)
-            m.uygula_baglantida(baglanti, kayit.istek)
+            # Onaylanan metin çalışacak metin olmalı: saklı önizleme bu bağlantıda
+            # yeniden üretilenden farklıysa karar verilmez, yeni metin saklanır ve
+            # kullanıcıya yeniden bakması söylenir (inceleme a9efca2 bulgu 1).
+            degisen = _guncel_onizleme(baglanti, kayit)
+            if degisen is None:
+                _karari_yaz(baglanti, kimlik, Durum.UYGULANDI, None)
+                m.uygula_baglantida(baglanti, kayit.istek)
     except m.MotorHatasi as hata:
         with veritabani.islem() as oturum:
             _karari_yaz(oturum.connection(), kimlik, Durum.UYGULANAMADI, str(hata))
+    if degisen is not None:
+        raise OnizlemeDegisti(
+            f"talep {kimlik} için çalışacak SQL, istek bırakıldığından beri değişti "
+            "(tablo bu arada oluştu ya da değişti); karar verilmedi, yeni önizleme "
+            "kaydedildi, bakıp yeniden karar verin"
+        )
     return kayit_getir(veritabani, kimlik)
 
 

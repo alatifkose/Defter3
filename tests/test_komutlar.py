@@ -224,3 +224,26 @@ def test_bekleyenler_donusum_iznini_sql_altinda_gosterir(
     sql_sonu = cikti.index('RENAME TO "money"')
     assert "value" in cikti[sql_sonu:]
     assert "değer dönüşümü" in cikti[sql_sonu:].casefold()
+
+
+# --- inceleme a9efca2, bulgu 1: bayat önizlemeyle onay hatalı çıkar -----------------
+
+
+def test_bayat_onizlemeyle_onay_hatali_cikar_karar_yazmaz(
+    ayar: ay.Ayarlar, capsys: pytest.CaptureFixture[str]
+) -> None:
+    kuyruk = m.TabloOlusturmaIstegi("kuyruk", (m.Sutun("deger", ("INTEGER",)),))
+    yeni = m.SutunOzelligiDegistirmeIstegi(
+        "kuyruk", (m.Sutun("deger", ("INTEGER", "NOT NULL")),)
+    )
+    kimlik = _birak(ayar, yeni)
+    assert baslangic.main([komutlar.KOMUT_ONAYLA, str(_birak(ayar, kuyruk))]) == 0
+    capsys.readouterr()
+    assert baslangic.main([komutlar.KOMUT_ONAYLA, str(kimlik)]) == 1
+    cikti = capsys.readouterr()
+    assert "değişti" in cikti.err and cikti.out == ""
+    assert not any(f"talep={kimlik} " in s for s in _log_satirlari(ayar))
+    assert baslangic.main([komutlar.KOMUT_BEKLEYENLER]) == 0
+    assert 'SELECT rowid, "deger" FROM "kuyruk"' in capsys.readouterr().out
+    assert baslangic.main([komutlar.KOMUT_ONAYLA, str(kimlik)]) == 0
+    assert "onaylandı ve uygulandı" in capsys.readouterr().out

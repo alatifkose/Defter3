@@ -285,3 +285,34 @@ def test_sema_hatasiyla_dusen_onay_pencerede_sonuc_olarak_gorunur(
     assert _liste(pencere_.kararlar)[0].startswith(
         "[3] sutun_ozelligi_degistirme · UYGULANAMADI"
     )
+
+
+# --- inceleme a9efca2, bulgu 1: bayat önizlemeyle onay uygulanmaz ------------------
+
+
+def test_bayat_onizlemeyle_onay_uygulanmaz_pencere_yeni_metni_gosterir(
+    pencere_: pencere.OnayPenceresi, veritabani: vt.Veritabani, ayar: ay.Ayarlar
+) -> None:
+    kuyruk = m.TabloOlusturmaIstegi("kuyruk", (m.Sutun("deger", ("INTEGER",)),))
+    yeni = m.SutunOzelligiDegistirmeIstegi(
+        "kuyruk", (m.Sutun("deger", ("INTEGER", "NOT NULL")),)
+    )
+    kimlik = onay.istek_birak(veritabani, yeni)
+    pencere_.yenile()
+    assert "rowid" not in pencere_.sql.toPlainText()
+    onay.onayla(veritabani, onay.istek_birak(veritabani, kuyruk))
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO kuyruk (rowid, deger) VALUES (7, 3)"))
+    # pencere yenilenmeden basılıyor: ekrandaki metin bayat
+    pencere_.onayla_dugmesi.click()
+    assert "değişti" in pencere_.mesaj.text()
+    assert 'SELECT rowid, "deger" FROM "kuyruk"' in pencere_.sql.toPlainText()
+    assert pencere_.secili_kimlik() == kimlik
+    assert onay.kayit_getir(veritabani, kimlik).durum is onay.Durum.BEKLIYOR
+    pencere_.onayla_dugmesi.click()
+    assert pencere_.mesaj.text() == (
+        f"Talep {kimlik} onaylandı ve uygulandı (sutun_ozelligi_degistirme)."
+    )
+    assert _log(ayar).count(f"talep={kimlik} ") == 1
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("SELECT rowid, deger FROM kuyruk")).all() == [(7, 3)]
