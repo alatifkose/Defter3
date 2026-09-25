@@ -32,6 +32,7 @@ def satirlar_ekle(
     try:
         with veritabani.islem() as oturum:
             baglanti = oturum.connection()
+            yapi.yazma_kilidi_al(baglanti, tablo)
             anahtar = yapi.satir_kimligi(baglanti, tablo)
             donus = " RETURNING " + ", ".join(yapi.sutun_adi(a) for a in anahtar)
             anahtarlar = tuple(

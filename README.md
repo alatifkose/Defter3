@@ -196,7 +196,12 @@ olarak güncellenir (`WHERE durum = 'BEKLIYOR'` koşuluyla, tek satır
 etkilenmezse `ZatenKararVerilmis`), sonra `uygula_baglantida` çalışır. Motor
 düşerse (tablo zaten var, kopyada değer değişti, yabancı anahtar ihlali...)
 transaction bütünüyle geri alınır, yapı değişmez; ardından ayrı bir
-transaction'da durum `UYGULANAMADI` ve hata metni yazılır. Red motoru
+transaction'da durum `UYGULANAMADI` ve hata metni yazılır. Commit öncesi
+`PRAGMA foreign_key_check` ihlal satırı döndürmek yerine doğrudan SQL hatası
+da verebilir (örn. hedef tablonun birincil anahtarı kaldırılınca "foreign
+key mismatch"); `islem_ac` bu sınırdaki SQL hatasını da motor hatasına
+çevirir, sonuç yine `UYGULANAMADI` olur (dış inceleme 2026-09-25 bulgu 5).
+`VeritabaniMesgul` ve `DenetimGeriAcilamadi` bu çeviriden geçmez. Red motoru
 çağırmaz. Karar verilmiş isteğe ikinci karar yoktur. İki süreç (Cowork'un
 sunucusu ve komut satırı) aynı isteğe aynı anda karar vermeye kalkarsa
 ikincisi SQLite'ın yazma kilidinde bekler, ilk commit edince sıfır satır
@@ -310,8 +315,18 @@ sonuç: yarıda düşen bir yapı değişikliği de tamamen geri alınır.
 yazar vardır; ikinci yazar `busy_timeout` kadar bekler. Bağlantı `timeout`
 değeri `Veritabani(yol, bekleme_saniyesi=...)` ile verilir, varsayılan 10 s
 (`BEKLEME_SANIYESI`). Süre dolunca SQLite'ın `SQLITE_BUSY` / `SQLITE_LOCKED`
-hatası SQLAlchemy'nin `handle_error` olayında yakalanır ve `VeritabaniMesgul`
-olarak yükselir (`SQLAlchemyError` değildir; motor ve kayıt modülünün
+ailesinden hatalar (temel hata koduna göre, genişletilmiş kodlar dahil; dış
+inceleme 2026-09-25 bulgu 6) SQLAlchemy'nin `handle_error` olayında
+yakalanır ve `VeritabaniMesgul` olarak yükselir. `SQLITE_BUSY_SNAPSHOT`
+ayrı mesajla gelir: iş okurken başka süreç yazıp bitirmiş, okuma görüntüsü
+eskimiştir, bekleme bunu çözmez, iş baştan denenir. Bu durumu doğuran
+"önce oku, sonra yaz" sırası yazma işlerinde kapatılmıştır: kayıt ekleme
+transaction'ının ilk cümlesi sıfır satırlık bir `DELETE ... WHERE 0`'dır
+(`yapi.yazma_kilidi_al`), SQLite yazma kilidini o anda verir, sonraki
+okumalar ve `INSERT` aynı görüntüde kalır, ikinci yazar bekler; onayda ilk
+cümle zaten durum güncellemesidir. Python'un `autocommit=False` kipinde
+`isolation_level="IMMEDIATE"` etkisizdir (betikle doğrulandı), bu yüzden
+`BEGIN IMMEDIATE` yerine bu yol seçildi (`SQLAlchemyError` değildir; motor ve kayıt modülünün
 "uygulanamadı" çevirileri bunu yakalamaz, hata olduğu gibi çağırana gider,
 çünkü iş yapılmamıştır ve yeniden denenebilir). Yeniden deneme otomatik
 değildir: komut satırında kullanıcı, MCP'de Cowork tekrar çağırır.

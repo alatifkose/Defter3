@@ -269,3 +269,71 @@ def test_uc_takma_ad_da_golgeliyse_kayit_reddedilir(veritabani: vt.Veritabani) -
     with pytest.raises(kayit.KayitHatasi, match="satır kimliği"):
         kayit.satirlar_ekle(veritabani, "golge", [{"rowid": 1}])
     assert _satirlar(veritabani, "SELECT count(*) FROM golge") == [(0,)]
+
+
+# --- inceleme 2026-09-25, bulgu 6: kayıt önce yazma kilidini alır -------------------
+
+
+def test_kayit_okuma_ile_yazma_arasinda_baska_yazari_bekletir(
+    veritabani: vt.Veritabani,
+) -> None:
+    import threading
+    import time
+
+    from sqlalchemy import event
+
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "concurrent",
+            (
+                motor.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+                motor.Sutun("ad", ("TEXT",)),
+            ),
+        ),
+    )
+    ikinci = vt.Veritabani(veritabani.yol)
+    bitti = threading.Event()
+    sonuc: list[object] = []
+
+    def digeri_yazar() -> None:
+        try:
+            sonuc.append(kayit.satirlar_ekle(ikinci, "concurrent", [{"ad": "other"}]))
+        except Exception as hata:  # noqa: BLE001
+            sonuc.append(hata)
+        bitti.set()
+
+    is_parcasi = threading.Thread(target=digeri_yazar)
+    baslatildi = False
+
+    def arada(
+        conn: object,
+        cursor: object,
+        statement: object,
+        parameters: object,
+        context: object,
+        executemany: object,
+    ) -> None:
+        nonlocal baslatildi
+        if not baslatildi and str(statement).startswith(
+            'PRAGMA table_xinfo("concurrent")'
+        ):
+            baslatildi = True
+            is_parcasi.start()
+            time.sleep(0.4)
+            assert not bitti.is_set(), "ikinci yazar ilk kayıt bitmeden yazdı"
+
+    event.listen(veritabani.motor, "after_cursor_execute", arada)
+    try:
+        benim = kayit.satirlar_ekle(veritabani, "concurrent", [{"ad": "mine"}])
+        is_parcasi.join(10)
+    finally:
+        event.remove(veritabani.motor, "after_cursor_execute", arada)
+        ikinci.kapat()
+    assert baslatildi and bitti.is_set()
+    assert benim.anahtarlar == ((1,),)
+    assert isinstance(sonuc[0], kayit.EklemeSonucu) and sonuc[0].anahtarlar == ((2,),)
+    assert _satirlar(veritabani, "SELECT ad FROM concurrent ORDER BY id") == [
+        ("mine",),
+        ("other",),
+    ]

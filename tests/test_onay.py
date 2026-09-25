@@ -380,3 +380,47 @@ def test_izinsiz_donusum_yine_geri_alinir(veritabani: vt.Veritabani) -> None:
     kayit = onay.onayla(veritabani, onay.istek_birak(veritabani, DONUSUMSUZ))
     assert kayit.durum is onay.Durum.UYGULANAMADI
     assert kayit.sonuc is not None and "deger_donusumu_izinli" in kayit.sonuc
+
+
+# --- inceleme 2026-09-25, bulgu 5: denetim sınırındaki SQL hatası da sonuca çevrilir
+
+
+def _parent_child(veritabani: vt.Veritabani) -> None:
+    onay.onayla(
+        veritabani,
+        onay.istek_birak(
+            veritabani,
+            m.TabloOlusturmaIstegi(
+                "parent", (m.Sutun("id", ("INTEGER", "PRIMARY KEY")),)
+            ),
+        ),
+    )
+    onay.onayla(
+        veritabani,
+        onay.istek_birak(
+            veritabani,
+            m.TabloOlusturmaIstegi(
+                "child",
+                (
+                    m.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+                    m.Sutun("parent_id", ("INTEGER", "REFERENCES parent(id)")),
+                ),
+            ),
+        ),
+    )
+
+
+def test_yabanci_anahtar_sema_hatasi_uygulanamadi_olur(
+    veritabani: vt.Veritabani,
+) -> None:
+    _parent_child(veritabani)
+    istek = m.SutunOzelligiDegistirmeIstegi("parent", (m.Sutun("id", ("INTEGER",)),))
+    kayit = onay.onayla(veritabani, onay.istek_birak(veritabani, istek))
+    assert kayit.durum is onay.Durum.UYGULANAMADI
+    assert kayit.sonuc is not None and "foreign key mismatch" in kayit.sonuc
+    assert onay.bekleyenler(veritabani) == ()
+    with veritabani.islem() as oturum:
+        tanim = oturum.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 'parent'")
+        ).scalar_one()
+    assert "PRIMARY KEY" in str(tanim)

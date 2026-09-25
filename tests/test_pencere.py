@@ -257,3 +257,31 @@ def test_donusum_izni_pencerede_sql_yaninda_gorunur(
     pencere_.bekleyenler.setCurrentRow(1)
     assert "value" in pencere_.aciklama.text()
     assert "değer dönüşümü" in pencere_.aciklama.text().casefold()
+
+
+def test_sema_hatasiyla_dusen_onay_pencerede_sonuc_olarak_gorunur(
+    pencere_: pencere.OnayPenceresi, veritabani: vt.Veritabani
+) -> None:
+    for istek in (
+        m.TabloOlusturmaIstegi("parent", (m.Sutun("id", ("INTEGER", "PRIMARY KEY")),)),
+        m.TabloOlusturmaIstegi(
+            "child",
+            (
+                m.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+                m.Sutun("parent_id", ("INTEGER", "REFERENCES parent(id)")),
+            ),
+        ),
+    ):
+        onay.onayla(veritabani, onay.istek_birak(veritabani, istek))
+    onay.istek_birak(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi("parent", (m.Sutun("id", ("INTEGER",)),)),
+    )
+    pencere_.yenile()
+    pencere_.onayla_dugmesi.click()
+    assert pencere_.mesaj.text().startswith("Talep 3 onaylandı ama uygulanamadı")
+    assert "foreign key mismatch" in pencere_.mesaj.text()
+    assert _liste(pencere_.bekleyenler) == []
+    assert _liste(pencere_.kararlar)[0].startswith(
+        "[3] sutun_ozelligi_degistirme · UYGULANAMADI"
+    )

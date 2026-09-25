@@ -20,7 +20,8 @@ BAGLANTI_PRAGMALARI: tuple[tuple[str, str], ...] = (
 
 BEKLEME_SANIYESI = 10.0
 
-MESGUL_HATA_ADLARI = ("SQLITE_BUSY", "SQLITE_LOCKED")
+MESGUL_TEMEL_KODLARI = (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+ESKIMIS_GORUNTU = "SQLITE_BUSY_SNAPSHOT"
 
 
 def veritabani_url(yol: Path) -> URL:
@@ -41,14 +42,20 @@ def motor_olustur(yol: Path, bekleme_saniyesi: float = BEKLEME_SANIYESI) -> Engi
 
 def _mesgul_hatasini_cevir(baglam: ExceptionContext) -> None:
     hata = baglam.original_exception
-    if (
-        isinstance(hata, sqlite3.OperationalError)
-        and getattr(hata, "sqlite_errorname", None) in MESGUL_HATA_ADLARI
-    ):
+    if not isinstance(hata, sqlite3.OperationalError):
+        return
+    kod = getattr(hata, "sqlite_errorcode", None)
+    if not isinstance(kod, int) or (kod & 0xFF) not in MESGUL_TEMEL_KODLARI:
+        return
+    if getattr(hata, "sqlite_errorname", None) == ESKIMIS_GORUNTU:
         raise VeritabaniMesgul(
-            "veritabanı başka bir süreç tarafından yazılıyor, bekleme süresi doldu; "
-            "iş yapılmadı, yeniden denenebilir"
+            "okuma görüntüsü eskidi: bu iş okurken başka bir süreç yazıp bitirdi; "
+            "iş yapılmadı, baştan yeniden denenebilir"
         ) from hata
+    raise VeritabaniMesgul(
+        "veritabanı başka bir süreç tarafından yazılıyor, bekleme süresi doldu; "
+        "iş yapılmadı, yeniden denenebilir"
+    ) from hata
 
 
 def _baglantiyi_ayarla(

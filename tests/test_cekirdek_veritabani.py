@@ -359,3 +359,27 @@ def test_denetim_yeniden_acilamazsa_baglanti_havuza_donmez(
         assert sayi == (0 if govde_hatasi else 1)  # rollback / commit ayrımı korunur
         with pytest.raises(IntegrityError, match="FOREIGN KEY"):
             oturum.execute(text("INSERT INTO alt (ust_id) VALUES (99)"))
+
+
+# --- inceleme 2026-09-25, bulgu 6: eskimiş okuma görüntüsü de meşgul hatasıdır -----
+
+
+def test_eskimis_okuma_goruntusu_mesgul_hatasi_olur(tmp_path: Path) -> None:
+    yol = tmp_path / "kok" / "test" / "defteruc.sqlite3"
+    yol.parent.mkdir(parents=True)
+    birinci = vt.Veritabani(yol, bekleme_saniyesi=0.2)
+    ikinci = vt.Veritabani(yol, bekleme_saniyesi=0.2)
+    try:
+        with birinci.islem() as oturum:
+            oturum.execute(text("CREATE TABLE t (a)"))
+        with pytest.raises(vt.VeritabaniMesgul, match="eskidi"):
+            with birinci.islem() as oturum:
+                oturum.execute(text("SELECT count(*) FROM t")).scalar_one()
+                with ikinci.islem() as digeri:
+                    digeri.execute(text("INSERT INTO t VALUES (1)"))
+                oturum.execute(text("INSERT INTO t VALUES (2)"))
+        with birinci.islem() as oturum:
+            assert oturum.execute(text("SELECT count(*) FROM t")).scalar_one() == 1
+    finally:
+        birinci.kapat()
+        ikinci.kapat()

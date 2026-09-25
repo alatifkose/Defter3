@@ -76,6 +76,10 @@ def satir_kimligi(baglanti: Connection, tablo: str) -> tuple[str, ...]:
     return (takma,)
 
 
+def yazma_kilidi_al(baglanti: Connection, tablo: str) -> None:
+    baglanti.exec_driver_sql(f'DELETE FROM "{tablo}" WHERE 0')
+
+
 def sutun_adi(ad: str) -> str:
     return ad if ad in ROWID_TAKMA_ADLARI else f'"{ad}"'
 

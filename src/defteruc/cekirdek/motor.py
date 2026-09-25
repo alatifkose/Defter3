@@ -245,6 +245,8 @@ def islem_ac(
                 yield oturum.connection()
     except YabanciAnahtarIhlali as hata:
         raise MotorHatasi(f"istek uygulanamadı, geri alındı: {hata}") from hata
+    except SQLAlchemyError as hata:
+        raise _motor_hatasi(hata) from hata
 
 
 def uygula_baglantida(baglanti: Connection, istek: YapiIstegi) -> None:
