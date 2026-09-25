@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 
 from sqlalchemy import Connection
@@ -98,6 +99,13 @@ def satir_kimligi(baglanti: Connection, tablo: str) -> Kimlik:
             "kimliği güvenle okunamaz"
         )
     return Kimlik((takma,), ortuk=True)
+
+
+def sutun_siniri(baglanti: Connection) -> int:
+    ham = baglanti.connection.dbapi_connection
+    if not isinstance(ham, sqlite3.Connection):  # pragma: no cover
+        raise RuntimeError("sütun sınırı yalnız sqlite3 bağlantısından okunur")
+    return ham.getlimit(sqlite3.SQLITE_LIMIT_COLUMN)
 
 
 def yazma_kilidi_al(baglanti: Connection, tablo: str) -> None:

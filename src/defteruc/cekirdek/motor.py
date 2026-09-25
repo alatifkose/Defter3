@@ -16,6 +16,8 @@ AD_BICIMI = re.compile(r"^[a-z][a-z0-9_]*$")
 
 GECICI_AD_EKI = "__yeniden_kurma"
 
+GUNCELLEME_GRUP_BOYUTU = 500
+
 
 class MotorHatasi(Exception): ...
 
@@ -298,7 +300,8 @@ def _sutun_ozelligi_degistir(
                 f"{tablo}: rowid, _rowid_ ve oid adlarının üçü de sütun; örtük "
                 "satır kimliği güvenle okunamaz, iş reddedildi"
             )
-    baglanti.exec_driver_sql(_kopyalama_sql(gecici, tablo, kopyalanacak, rowid_takma))
+    for cumle in _kopya_cumleleri(baglanti, gecici, tablo, kopyalanacak, rowid_takma):
+        baglanti.exec_driver_sql(cumle)
     eski_sayi, yeni_sayi = (_satir_sayisi(baglanti, t) for t in (tablo, gecici))
     if eski_sayi != yeni_sayi:
         raise MotorHatasi(
@@ -323,6 +326,48 @@ def _sutun_ozelligi_degistir(
 
 
 # --- yeniden kurmanın okumaları: yalnız bu işe özel ---------------------------------
+
+
+def _kopya_cumleleri(
+    baglanti: Connection,
+    gecici: str,
+    tablo: str,
+    adlar: tuple[str, ...],
+    rowid_takma: str | None,
+) -> tuple[str, ...]:
+    sinir = yapi.sutun_siniri(baglanti)
+    if rowid_takma is None or len(adlar) + 1 <= sinir:
+        return (_kopyalama_sql(gecici, tablo, adlar, rowid_takma),)
+    # Örtük kimlikle birlikte tek SELECT sütun sınırını aşar: ilk adımda kimlik
+    # ve sınıra sığan sütunlar (boş bırakılamayan, varsayılansız olanlar önce),
+    # kalanlar aynı kimlik üzerinden gruplar hâlinde güncellenir.
+    zorunlu = _zorunlu_varsayilansiz(baglanti, gecici)
+    once = [a for a in adlar if a in zorunlu]
+    if len(once) + 1 > sinir:
+        raise MotorHatasi(
+            f"{tablo}: sütun sınırı ({sinir}) örtük satır kimliğiyle birlikte tek "
+            f"adımda kopyaya sığmıyor; boş bırakılamayan ve varsayılanı olmayan "
+            f"{len(once)} sütun ilk adımda taşınmak zorunda. İş reddedildi"
+        )
+    digerleri = [a for a in adlar if a not in zorunlu]
+    bos = sinir - 1 - len(once)
+    once += digerleri[:bos]
+    kalan = digerleri[bos:]
+    cumleler = [_kopyalama_sql(gecici, tablo, tuple(once), rowid_takma)]
+    hedef, kaynak = _tirnakla(gecici), _tirnakla(tablo)
+    for i in range(0, len(kalan), GUNCELLEME_GRUP_BOYUTU):
+        grup = kalan[i : i + GUNCELLEME_GRUP_BOYUTU]
+        setler = ", ".join(f"{_tirnakla(a)} = e.{_tirnakla(a)}" for a in grup)
+        cumleler.append(
+            f"UPDATE {hedef} SET {setler} FROM {kaynak} AS e "
+            f"WHERE e.{rowid_takma} = {hedef}.{rowid_takma}"
+        )
+    return tuple(cumleler)
+
+
+def _zorunlu_varsayilansiz(baglanti: Connection, tablo: str) -> set[str]:
+    satirlar = baglanti.exec_driver_sql(f"PRAGMA table_xinfo({_tirnakla(tablo)})").all()
+    return {str(s[1]) for s in satirlar if int(s[3]) != 0 and s[4] is None}
 
 
 def _sutun_bilgisi(baglanti: Connection, tablo: str) -> dict[str, bool]:

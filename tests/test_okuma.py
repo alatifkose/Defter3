@@ -364,3 +364,31 @@ def test_tam_sutun_sinirindaki_anahtarsiz_tablo_okunur(
     assert sonuc.anahtar_sutunlari == ("rowid",)
     assert sonuc.anahtarlar == ((3,),) and sonuc.satirlar[0][0] == 9
     assert (sonuc.eslesen_toplam, sonuc.donen, sonuc.devami_var) == (2, 1, False)
+
+
+# --- inceleme 84ced62, bulgu 1: değişken koşulda satır ile kimlik aynı değerlendirmeden
+
+
+def test_degisken_kosulda_satir_ve_kimlik_ayni_kaydi_gosterir(
+    veritabani: vt.Veritabani,
+) -> None:
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi("records", (motor.Sutun("tag", ("TEXT",)),)),
+    )
+    kayit.satirlar_ekle(
+        veritabani, "records", [{"tag": f"row-{i}"} for i in range(1, 101)]
+    )
+    kosul = "rowid IN (SELECT rowid FROM records ORDER BY random() LIMIT 5)"
+    for _ in range(5):
+        sonuc = okuma.satirlari_oku(veritabani, "records", kosul)
+        assert sonuc.donen == 5 and sonuc.anahtar_sutunlari == ("rowid",)
+        for satir, (kimlik,) in zip(sonuc.satirlar, sonuc.anahtarlar, strict=True):
+            assert satir == (f"row-{kimlik}",)
+            yeniden = okuma.satirlari_oku(veritabani, "records", "rowid = ?", (kimlik,))
+            assert yeniden.satirlar == (satir,)
+    sayfa = okuma.satirlari_oku(veritabani, "records", kosul, sinir=2, baslangic=3)
+    assert sayfa.donen == 2 and sayfa.baslangic == 3
+    assert [s[0] for s in sayfa.satirlar] == [f"row-{k[0]}" for k in sayfa.anahtarlar]
+    bos = okuma.satirlari_oku(veritabani, "records", "rowid > 1000")
+    assert bos.satirlar == () and bos.anahtarlar == ()

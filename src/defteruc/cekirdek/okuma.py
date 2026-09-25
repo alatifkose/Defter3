@@ -63,21 +63,30 @@ def satirlari_oku(
                         f'SELECT count(*) FROM "{tablo}"{nerede}', degerler
                     ).scalar_one()
                 )
-                sonuc = baglanti.exec_driver_sql(f"SELECT * {kuyruk}", baglar)
-                sutunlar = tuple(str(k) for k in sonuc.keys())
-                satirlar = tuple(tuple(s) for s in sonuc.all())
                 if kimlik.ortuk:
-                    # Aynı transaction, aynı koşul ve sıra: örtük kimlik ayrı
-                    # okunur ki sütun sınırındaki tablo da okunabilsin.
+                    # Koşul yalnız burada, bir kez değerlendirilir; satırlar bu
+                    # sabit kimlik listesiyle çekilir (değişken ifadeler ikinci
+                    # kez çalışmaz, sütun sınırındaki tablo da okunabilir).
                     anahtarlar = tuple(
                         tuple(s)
                         for s in baglanti.exec_driver_sql(
                             f"SELECT {secim} {kuyruk}", baglar
                         ).all()
                     )
+                    yerler = ", ".join("?" for _ in anahtarlar) or "NULL"
+                    sonuc = baglanti.exec_driver_sql(
+                        f'SELECT * FROM "{tablo}" WHERE {secim} IN ({yerler}) '
+                        f"ORDER BY {secim}",
+                        tuple(a[0] for a in anahtarlar),
+                    )
+                    sutunlar = tuple(str(k) for k in sonuc.keys())
+                    satirlar = tuple(tuple(s) for s in sonuc.all())
                     if len(anahtarlar) != len(satirlar):  # pragma: no cover
                         raise OkumaHatasi(f"{tablo}: kimlik ve satır sayısı uyuşmadı")
                 else:
+                    sonuc = baglanti.exec_driver_sql(f"SELECT * {kuyruk}", baglar)
+                    sutunlar = tuple(str(k) for k in sonuc.keys())
+                    satirlar = tuple(tuple(s) for s in sonuc.all())
                     konumlar = tuple(sutunlar.index(a) for a in kimlik.sutunlar)
                     anahtarlar = tuple(tuple(s[k] for k in konumlar) for s in satirlar)
     except yapi.KimlikYok as hata:

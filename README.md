@@ -126,6 +126,15 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   `AUTOINCREMENT` sayacı (`sqlite_sequence`) işten önce okunur, sonra geri
   yazılır; silinmiş kimlikler yeniden dağıtılmaz. Bu okumalar yalnız bu işe
   özeldir.
+  **Sütun sınırı:** örtük rowid ile birlikte tek `INSERT ... SELECT` SQLite
+  sonuç sütunu sınırını (`SQLITE_LIMIT_COLUMN`, bu makinede 2000) aşarsa
+  kopya iki aşamalı yapılır: ilk adım kimlik ve sınıra sığan sütunlar (boş
+  bırakılamayan, varsayılanı olmayanlar önce), kalan sütunlar aynı kimlik
+  üzerinden `UPDATE ... FROM` ile 500'lük gruplarla. Kimlik, değer ve kimlik
+  denetimi aynen; bütün sütunlar boş bırakılamaz ve varsayılansızsa sınırda
+  tek adımda taşınamaz, açık hatayla reddedilir (dış inceleme 84ced62 bulgu
+  2). Onayda gösterilen kopya cümlesi tek adımlı biçimdir; iki aşamalı yol
+  aynı satırları aynı kimlikle taşır.
 
 * **Yapı istekleri ve onay** (`cekirdek/onay.py`, 2026-09-25): bir yapı
   isteği bırakıldığında uygulanmaz, sistem tablosunda "bekliyor" olarak
@@ -275,6 +284,12 @@ bağlantıdan okunur). Kimliğin örtük mü açık mı olduğu sütun adından 
 `yapi.Kimlik.ortuk` bayrağından bilinir: `rowid` adlı gerçek bir sütunla
 başlayan bileşik anahtar bütün bileşenleriyle döner ve filtre parametresi
 olarak geri verilebilir (43db970 bulgu 1).
+Koşul yalnız kimlik sorgusunda, bir kez değerlendirilir; veri satırları
+sayfadaki sabit kimlik listesiyle (`rowid IN (...)`) çekilir. `random()` gibi
+her değerlendirmede değişen bir ifade iki farklı küme üretemez, satır ile
+yanındaki kimlik aynı kayıttır (dış inceleme 84ced62 bulgu 1). Ayrı çalışan
+sayım sorgusu böyle bir koşulda sayfadan farklı bir toplam verebilir; bu,
+koşulun doğasındandır ve `eslesen_toplam` için bilinen sınırdır.
 
 **Satır kimliği sözleşmesi** (`yapi.satir_kimligi`; ekleme, okuma ve motorun
 yeniden kurması aynı yeri kullanır; dış inceleme 7dba285 bulgu 2). Tanımlı
@@ -316,9 +331,8 @@ bağlantı geçersizleştirilir, havuza dönmez. Bu davranış önce betikle
 doğrulandı, sonra testle kanıtlandı (`tests/test_okuma.py`): alt sorguyla
 sistem tablosu, `sqlite_master`, `sqlite_schema`, `load_extension`
 reddedilir; `upper()` ve sıradan alt sorgu geçer; okuma sonrası aynı
-bağlantı yeniden yazabilir ve `PRAGMA` çalışır. İkili (BLOB) değer JSON'a
-giremediğinden `<N baytlık ikili veri>` metniyle döner; Cowork'un yazma yolu
-ikili değer üretmez.
+bağlantı yeniden yazabilir ve `PRAGMA` çalışır. İkili değer ve sonsuz sayı
+"Değer taşıma"da anlatılan etiketli nesnelerle taşınır.
 
 ## Veritabanı
 

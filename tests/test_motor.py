@@ -1732,3 +1732,112 @@ def test_cok_genis_bilesik_anahtarla_yeniden_kurma(
 )
 def test_dengeli_baglac(kosullar: list[str], beklenen: str) -> None:
     assert m._dengeli_baglac(kosullar, "AND") == beklenen  # pyright: ignore[reportPrivateUsage]
+
+
+# --- inceleme 84ced62, bulgu 2: tam sütun sınırında yeniden kurma kimliği korur
+
+
+def _sutun_siniri(v: vt.Veritabani) -> int:
+    import sqlite3
+
+    with v.islem() as oturum:
+        ham = oturum.connection().connection.dbapi_connection
+        assert isinstance(ham, sqlite3.Connection)
+        return ham.getlimit(sqlite3.SQLITE_LIMIT_COLUMN)
+
+
+def test_tam_sutun_sinirinda_yeniden_kurma_kimlik_ve_degerleri_korur(
+    veritabani: vt.Veritabani,
+) -> None:
+    n = _sutun_siniri(veritabani)
+    son = f"c{n - 1}"
+    _uygula(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "fullwidth", tuple(m.Sutun(f"c{i}", ("INTEGER",)) for i in range(n))
+        ),
+    )
+    with veritabani.islem() as oturum:
+        for kimlik, deger in ((1, 7), (3, 9), (7, 11)):
+            oturum.execute(
+                text(
+                    "INSERT INTO fullwidth (rowid, c0, c1, "
+                    f"{son}) VALUES (:k, :a, :b, :c)"
+                ),
+                {"k": kimlik, "a": deger, "b": deger + 1, "c": deger * 10},
+            )
+    yeni = m.SutunOzelligiDegistirmeIstegi(
+        "fullwidth",
+        tuple(
+            m.Sutun(
+                f"c{i}", ("INTEGER", "NOT NULL") if i in (0, n - 1) else ("INTEGER",)
+            )
+            for i in range(n)
+        ),
+    )
+    _uygula(veritabani, yeni)
+    with veritabani.islem() as oturum:
+        satirlar = oturum.execute(
+            text(f"SELECT rowid, c0, c1, {son}, c500 FROM fullwidth ORDER BY rowid")
+        ).all()
+        tanim = oturum.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 'fullwidth'")
+        ).scalar_one()
+    assert [tuple(s) for s in satirlar] == [
+        (1, 7, 8, 70, None),
+        (3, 9, 10, 90, None),
+        (7, 11, 12, 110, None),
+    ]
+    assert f'"{son}" INTEGER NOT NULL' in str(tanim)
+
+
+def test_tam_sinirda_uymayan_veri_yine_geri_alinir(veritabani: vt.Veritabani) -> None:
+    n = _sutun_siniri(veritabani)
+    _uygula(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "fullwidth", tuple(m.Sutun(f"c{i}", ("INTEGER",)) for i in range(n))
+        ),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO fullwidth (rowid, c0) VALUES (5, 1)"))
+    yeni = m.SutunOzelligiDegistirmeIstegi(
+        "fullwidth",
+        tuple(
+            m.Sutun(f"c{i}", ("INTEGER", "NOT NULL") if i == 1 else ("INTEGER",))
+            for i in range(n)
+        ),
+    )
+    with pytest.raises(m.MotorHatasi, match="NOT NULL"):
+        _uygula(veritabani, yeni)
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("SELECT rowid, c0 FROM fullwidth")).all() == [(5, 1)]
+
+
+def test_tam_sinirda_butun_sutunlar_zorunluysa_acik_hata(
+    veritabani: vt.Veritabani,
+) -> None:
+    n = _sutun_siniri(veritabani)
+    _uygula(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "fullwidth", tuple(m.Sutun(f"c{i}", ("INTEGER",)) for i in range(n))
+        ),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(
+            text(
+                "INSERT INTO fullwidth ("
+                + ", ".join(f"c{i}" for i in range(n))
+                + ") VALUES ("
+                + ", ".join("1" for _ in range(n))
+                + ")"
+            )
+        )
+    yeni = m.SutunOzelligiDegistirmeIstegi(
+        "fullwidth", tuple(m.Sutun(f"c{i}", ("INTEGER", "NOT NULL")) for i in range(n))
+    )
+    with pytest.raises(m.MotorHatasi, match="sütun sınırı"):
+        _uygula(veritabani, yeni)
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("SELECT count(*) FROM fullwidth")).scalar_one() == 1
