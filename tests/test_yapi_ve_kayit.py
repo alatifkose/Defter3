@@ -469,3 +469,29 @@ def test_sqlite_ile_baslayan_kullanici_tablosu_listelenir(
     adlar = [t.ad for t in yapi.yapiyi_oku(veritabani)]
     assert adlar == ["sayacli", "sqliteverileri"]
     assert onay.SISTEM_TABLOSU not in adlar and "sqlite_sequence" not in adlar
+
+
+# --- inceleme 1b6a849, sözleşme: ON CONFLICT REPLACE dönen kimliği silebilir
+
+
+def test_replace_politikasinda_eklenen_yurutulen_ekleme_sayisidir(
+    veritabani: vt.Veritabani,
+) -> None:
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "replace_probe",
+            (
+                motor.Sutun("code", ("TEXT", "UNIQUE ON CONFLICT REPLACE")),
+                motor.Sutun("note"),
+            ),
+        ),
+    )
+    sonuc = kayit.satirlar_ekle(
+        veritabani,
+        "replace_probe",
+        [{"code": "A", "note": "first"}, {"code": "A", "note": "second"}],
+    )
+    assert sonuc == kayit.EklemeSonucu(2, ("rowid",), ((1,), (2,)))
+    kalan = okuma.satirlari_oku(veritabani, "replace_probe")
+    assert kalan.anahtarlar == ((2,),) and kalan.satirlar == (("A", "second"),)

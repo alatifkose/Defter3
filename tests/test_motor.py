@@ -1841,3 +1841,136 @@ def test_tam_sinirda_butun_sutunlar_zorunluysa_acik_hata(
         _uygula(veritabani, yeni)
     with veritabani.islem() as oturum:
         assert oturum.execute(text("SELECT count(*) FROM fullwidth")).scalar_one() == 1
+
+
+# --- inceleme 1b6a849, bulgu 1: tablonun kendi adıyla nitelenmiş CHECK korunur ------
+
+
+@pytest.mark.parametrize(
+    ("sutun_ozellikleri", "kisitlar"),
+    [
+        (("INTEGER",), ("CHECK (qc.amount > 0)",)),
+        (("INTEGER", "CHECK (qc.amount > 0)"), ()),
+        (("INTEGER",), ('CHECK ("qc".amount > 0 AND QC . amount < 1000)',)),
+    ],
+    ids=["tablo_duzeyi", "sutun_ici", "tirnakli_ve_bosluklu"],
+)
+def test_kendi_adiyla_nitelenmis_check_yeniden_kurmada_korunur(
+    veritabani: vt.Veritabani,
+    sutun_ozellikleri: tuple[str, ...],
+    kisitlar: tuple[str, ...],
+) -> None:
+    _uygula(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "qc", (m.Sutun("amount", sutun_ozellikleri), m.Sutun("note")), kisitlar
+        ),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(
+            text("INSERT INTO qc (rowid, amount, note) VALUES (5, 10, 'kept')")
+        )
+    yeni = m.SutunOzelligiDegistirmeIstegi(
+        "qc",
+        (m.Sutun("amount", (*sutun_ozellikleri, "NOT NULL")), m.Sutun("note")),
+        kisitlar,
+    )
+    _uygula(veritabani, yeni)
+    # SQLite yeniden adlandırmada başvuruyu tırnaklı yazar; ikinci kurma da geçmeli
+    _uygula(veritabani, yeni)
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("SELECT rowid, amount, note FROM qc")).all() == [
+            (5, 10, "kept")
+        ]
+        with pytest.raises(IntegrityError, match="CHECK"):
+            oturum.execute(text("INSERT INTO qc (amount) VALUES (-1)"))
+    with veritabani.islem() as oturum:
+        with pytest.raises(IntegrityError, match="NOT NULL"):
+            oturum.execute(text("INSERT INTO qc (note) VALUES ('x')"))
+
+
+def test_kendi_adi_metin_icinde_gecerse_dokunulmaz(veritabani: vt.Veritabani) -> None:
+    _uygula(
+        veritabani,
+        m.TabloOlusturmaIstegi(
+            "qc",
+            (m.Sutun("amount", ("INTEGER",)), m.Sutun("note", ("TEXT",))),
+            ("CHECK (note <> 'qc.amount' AND qc.amount > 0)",),
+        ),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO qc VALUES (1, 'a')"))
+    _uygula(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "qc",
+            (m.Sutun("amount", ("INTEGER", "NOT NULL")), m.Sutun("note", ("TEXT",))),
+            ("CHECK (note <> 'qc.amount' AND qc.amount > 0)",),
+        ),
+    )
+    with veritabani.islem() as oturum:
+        tanim = str(
+            oturum.execute(
+                text("SELECT sql FROM sqlite_master WHERE name = 'qc'")
+            ).scalar_one()
+        )
+        with pytest.raises(IntegrityError, match="CHECK"):
+            oturum.execute(text("INSERT INTO qc VALUES (5, 'qc.amount')"))
+    assert "'qc.amount'" in tanim
+
+
+# --- inceleme 1b6a849, bulgu 2: ara kopya benzersiz ve varsayılanlı sütunu ertelemez -
+
+
+def test_tam_sinirda_benzersiz_varsayilanli_sutun_ilk_adimda_tasinir(
+    veritabani: vt.Veritabani,
+) -> None:
+    n = _sutun_siniri(veritabani)
+    son = f"c{n - 1}"
+    sutunlar = tuple(
+        m.Sutun(
+            f"c{i}",
+            ("INTEGER", "NOT NULL", "DEFAULT 0", "UNIQUE")
+            if i == n - 1
+            else ("INTEGER",),
+        )
+        for i in range(n)
+    )
+    _uygula(veritabani, m.TabloOlusturmaIstegi("wide_unique", sutunlar))
+    with veritabani.islem() as oturum:
+        for kimlik, a, b in ((5, 10, 11), (9, 20, 22)):
+            oturum.execute(
+                text(f"INSERT INTO wide_unique (rowid, c0, {son}) VALUES (:k, :a, :b)"),
+                {"k": kimlik, "a": a, "b": b},
+            )
+    yeni = tuple(
+        m.Sutun("c0", ("INTEGER", "NOT NULL")) if s.ad == "c0" else s for s in sutunlar
+    )
+    _uygula(veritabani, m.SutunOzelligiDegistirmeIstegi("wide_unique", yeni))
+    with veritabani.islem() as oturum:
+        satirlar = oturum.execute(
+            text(f"SELECT rowid, c0, {son} FROM wide_unique ORDER BY rowid")
+        ).all()
+        assert [tuple(s) for s in satirlar] == [(5, 10, 11), (9, 20, 22)]
+        with pytest.raises(IntegrityError, match="UNIQUE"):
+            oturum.execute(text(f"INSERT INTO wide_unique (c0, {son}) VALUES (1, 11)"))
+
+
+def test_tam_sinirda_ertelenebilir_sutun_yoksa_acik_hata(
+    veritabani: vt.Veritabani,
+) -> None:
+    n = _sutun_siniri(veritabani)
+    sutunlar = tuple(m.Sutun(f"c{i}", ("INTEGER", "DEFAULT 0")) for i in range(n))
+    _uygula(veritabani, m.TabloOlusturmaIstegi("varsayilanli", sutunlar))
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO varsayilanli (rowid, c0) VALUES (3, 1)"))
+    yeni = tuple(
+        m.Sutun("c0", ("INTEGER", "DEFAULT 0", "NOT NULL")) if s.ad == "c0" else s
+        for s in sutunlar
+    )
+    with pytest.raises(m.MotorHatasi, match="ertelenebilir"):
+        _uygula(veritabani, m.SutunOzelligiDegistirmeIstegi("varsayilanli", yeni))
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("SELECT rowid, c0 FROM varsayilanli")).all() == [
+            (3, 1)
+        ]

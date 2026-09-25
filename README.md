@@ -125,15 +125,32 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   kurulduktan sonra aynı sırayla aynı cümleyle geri açılır; kayıpsızdır.
   `AUTOINCREMENT` sayacı (`sqlite_sequence`) işten önce okunur, sonra geri
   yazılır; silinmiş kimlikler yeniden dağıtılmaz. Bu okumalar yalnız bu işe
-  özeldir.
+  özeldir. **Tablonun kendi adıyla nitelenmiş başvurular** (`CHECK
+  (qc.amount > 0)`, sütun içinde ya da tablo düzeyinde, `"qc".amount` ve
+  `QC . amount` biçimleri dahil) geçici tablo kurulurken geçici ada çevrilir
+  (`_kendi_adini_cevir`: tırnak ve kelime izleyen bir tarama, metin sabitine
+  ve başka adlara dokunmaz, ayrıştırma değil); son adımdaki `RENAME` SQLite'ın
+  kendi kuralıyla başvuruyu asıl ada geri yazar ve tırnaklı saklar
+  (`"qc".amount`). Kısıt karşılaştırması bu yüzden kendi adını sade biçime
+  indirgeyip karşılaştırır; ikinci ve sonraki yeniden kurmalar da geçer (dış
+  inceleme 1b6a849 bulgu 1; önce ters sıra, yani eski tabloyu taşıyıp yeniyi
+  asıl adla kurma denendi, `legacy_alter_table` açıkken SQLite kendi adına
+  başvuran tabloyu taşımayı reddediyor, kapalıyken başka tabloların yabancı
+  anahtarlarını yeniden yazıyor; vazgeçildi).
   **Sütun sınırı:** örtük rowid ile birlikte tek `INSERT ... SELECT` SQLite
   sonuç sütunu sınırını (`SQLITE_LIMIT_COLUMN`, bu makinede 2000) aşarsa
-  kopya iki aşamalı yapılır: ilk adım kimlik ve sınıra sığan sütunlar (boş
-  bırakılamayan, varsayılanı olmayanlar önce), kalan sütunlar aynı kimlik
-  üzerinden `UPDATE ... FROM` ile 500'lük gruplarla. Kimlik, değer ve kimlik
-  denetimi aynen; bütün sütunlar boş bırakılamaz ve varsayılansızsa sınırda
-  tek adımda taşınamaz, açık hatayla reddedilir (dış inceleme 84ced62 bulgu
-  2). **Onayda gösterilen SQL çalışacak SQL'dir:** istek bırakılırken
+  kopya iki aşamalı yapılır: sınırı aşan kadar sütun ertelenir, ilk adım
+  kimlik ve kalan sütunları taşır, ertelenenler aynı kimlik üzerinden
+  `UPDATE ... FROM` ile 500'lük gruplarla doldurulur. Ertelenen sütun ilk
+  adımda NULL kalır; bu yüzden yalnız boş bırakılabilen, varsayılanı olmayan
+  ve hiçbir benzersiz indekste (UNIQUE, birincil anahtar; `index_list` +
+  `index_info`) yer almayan sütunlar ertelenir: NULL, CHECK'i, UNIQUE'i ve
+  yabancı anahtarı geçer, varsayılan değer ise ara satırda UNIQUE ya da
+  CHECK'i bozabilirdi (dış inceleme 1b6a849 bulgu 2). Yeterince böyle sütun
+  yoksa açık hatayla reddedilir (84ced62 bulgu 2). Bilinen sınır: bir sütunu
+  fiilen zorunlu kılan tablo düzeyi `CHECK (c IS NOT NULL)` gibi bir kısıt
+  ayrıştırılmaz; böyle bir sütun ertelenirse iş SQLite hatasıyla geri alınır.
+  Kimlik, değer ve kimlik denetimi aynen. **Onayda gösterilen SQL çalışacak SQL'dir:** istek bırakılırken
   (`onay.istek_birak` → `motor.istek_sql_baglantida`) geçici tablo bir
   SAVEPOINT içinde kurulup okunur ve hemen geri alınır; kopya cümleleri
   gerçek bağlantının sütun sınırına, örtük rowid takma adına ve üretilen
@@ -275,6 +292,14 @@ döndürür oldu (`EklemeSonucu`: birincil anahtar sütunları ve değerleri,
 birincil anahtar yoksa `rowid`; `INSERT ... RETURNING` ile, WITHOUT ROWID
 ve bileşik anahtarda da). Bu, ekleme işleminin yanıtına bilgi ekler, yeni bir
 yetki getirmez; onay kuralları aynen kalır.
+
+**Ekleme sözleşmesi.** `EklemeSonucu.eklenen` yürütülen `INSERT` sayısıdır,
+işlem sonunda kalan yeni satır sayısı değil. Onaylanan şema `ON CONFLICT
+REPLACE` taşıyorsa SQLite önceki satırı, aynı çağrıda eklenen dahil, yenisiyle
+değiştirir; dönen kimliklerden biri çağrı sonunda mevcut olmayabilir (dış
+inceleme 1b6a849 gözlemi; testli). Kayıt modülü onaylanan şemanın anlamını
+değiştirmez; emin olmak için `satirlari_oku`. Mükerrerlik tasarımı
+konuşulurken bu politika yeniden ele alınır.
 
 `satirlari_oku(veritabani, tablo, kosul, parametreler, sinir, baslangic)`:
 koşul bir SQL `WHERE` ifadesidir, motorun parça kuralından geçer (üst düzeyde

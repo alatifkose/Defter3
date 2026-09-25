@@ -129,6 +129,51 @@ def _tirnakla(ad: str) -> str:
     return f'"{ad}"'
 
 
+def _kendi_adini_cevir(parca: str, kaynak: str, hedef: str, sade: bool = False) -> str:
+    # Tablonun kendi adıyla nitelenmiş başvuruları (qc.amount, "qc".amount) hedef
+    # ada çevirir; metin sabitlerine ve başka adlara dokunmaz. Ayrıştırma değil,
+    # tırnak/kelime izleme: parça zaten doğrulanmıştır (yorum yok, tırnaklar dengeli).
+    sonuc: list[str] = []
+    i, n = 0, len(parca)
+    aranan = kaynak.casefold()
+    while i < n:
+        c = parca[i]
+        if c == "'":
+            j = parca.find("'", i + 1)
+            j = n - 1 if j < 0 else j
+            sonuc.append(parca[i : j + 1])
+            i = j + 1
+        elif c in '"`[':
+            kapanis = "]" if c == "[" else c
+            j = parca.find(kapanis, i + 1)
+            j = n - 1 if j < 0 else j
+            if parca[i + 1 : j].casefold() == aranan and _noktayla_surer(parca, j + 1):
+                sonuc.append(hedef if sade else f'"{hedef}"')
+            else:
+                sonuc.append(parca[i : j + 1])
+            i = j + 1
+        elif c.isalpha() or c == "_":
+            j = i
+            while j < n and (parca[j].isalnum() or parca[j] == "_"):
+                j += 1
+            kelime = parca[i:j]
+            if kelime.casefold() == aranan and _noktayla_surer(parca, j):
+                sonuc.append(hedef)
+            else:
+                sonuc.append(kelime)
+            i = j
+        else:
+            sonuc.append(c)
+            i += 1
+    return "".join(sonuc)
+
+
+def _noktayla_surer(metin: str, k: int) -> bool:
+    while k < len(metin) and metin[k].isspace():
+        k += 1
+    return k < len(metin) and metin[k] == "."
+
+
 # --- SQL üretimi: veritabanına dokunmaz -------------------------------------------
 
 
@@ -184,8 +229,13 @@ def sutun_ozelligi_degistirme_sql(
     tablo = adi_dogrula(istek.tablo, "tablo")
     gecici = tablo + GECICI_AD_EKI
     adlar = tuple(adi_dogrula(s.ad, "sütun") for s in istek.sutunlar)
+    sutunlar = tuple(
+        Sutun(s.ad, tuple(_kendi_adini_cevir(p, tablo, gecici) for p in s.ozellikler))
+        for s in istek.sutunlar
+    )
+    kisitlar = tuple(_kendi_adini_cevir(k, tablo, gecici) for k in istek.kisitlar)
     return (
-        _tablo_tanimi(gecici, istek.sutunlar, istek.kisitlar, istek.secenekler),
+        _tablo_tanimi(gecici, sutunlar, kisitlar, istek.secenekler),
         _kopyalama_sql(gecici, tablo, adlar),
         f"DROP TABLE {_tirnakla(tablo)}",
         f"ALTER TABLE {_tirnakla(gecici)} RENAME TO {_tirnakla(tablo)}",
@@ -373,21 +423,23 @@ def _kopya_cumleleri(
     sinir = yapi.sutun_siniri(baglanti)
     if rowid_takma is None or len(adlar) + 1 <= sinir:
         return (_kopyalama_sql(gecici, tablo, adlar, rowid_takma),)
-    # Örtük kimlikle birlikte tek SELECT sütun sınırını aşar: ilk adımda kimlik
-    # ve sınıra sığan sütunlar (boş bırakılamayan, varsayılansız olanlar önce),
-    # kalanlar aynı kimlik üzerinden gruplar hâlinde güncellenir.
-    zorunlu = _zorunlu_varsayilansiz(baglanti, gecici)
-    once = [a for a in adlar if a in zorunlu]
-    if len(once) + 1 > sinir:
+    # Örtük kimlikle birlikte tek SELECT sütun sınırını aşar: sınırı aşan kadar
+    # sütun ertelenir ve aynı kimlik üzerinden gruplar hâlinde güncellenir.
+    # Ertelenen sütun ilk adımda NULL kalır; bu yüzden yalnız boş bırakılabilen,
+    # varsayılanı olmayan ve hiçbir benzersiz indekste yer almayan sütunlar
+    # ertelenir (NULL, CHECK'i, UNIQUE'i ve yabancı anahtarı geçer).
+    fazla = len(adlar) + 1 - sinir
+    ertelenebilir = _ertelenebilir_sutunlar(baglanti, gecici, adlar)
+    if len(ertelenebilir) < fazla:
         raise MotorHatasi(
             f"{tablo}: sütun sınırı ({sinir}) örtük satır kimliğiyle birlikte tek "
-            f"adımda kopyaya sığmıyor; boş bırakılamayan ve varsayılanı olmayan "
-            f"{len(once)} sütun ilk adımda taşınmak zorunda. İş reddedildi"
+            f"adımda kopyaya sığmıyor; {fazla} sütun ertelenmeli ama güvenle "
+            f"ertelenebilir (boş bırakılabilen, varsayılansız, benzersiz indekste "
+            f"olmayan) yalnız {len(ertelenebilir)} sütun var. İş reddedildi"
         )
-    digerleri = [a for a in adlar if a not in zorunlu]
-    bos = sinir - 1 - len(once)
-    once += digerleri[:bos]
-    kalan = digerleri[bos:]
+    kalan = ertelenebilir[-fazla:]
+    ertelenen = set(kalan)
+    once = [a for a in adlar if a not in ertelenen]
     cumleler = [_kopyalama_sql(gecici, tablo, tuple(once), rowid_takma)]
     hedef, kaynak = _tirnakla(gecici), _tirnakla(tablo)
     for i in range(0, len(kalan), GUNCELLEME_GRUP_BOYUTU):
@@ -400,9 +452,21 @@ def _kopya_cumleleri(
     return tuple(cumleler)
 
 
-def _zorunlu_varsayilansiz(baglanti: Connection, tablo: str) -> set[str]:
+def _ertelenebilir_sutunlar(
+    baglanti: Connection, tablo: str, adlar: tuple[str, ...]
+) -> list[str]:
     satirlar = baglanti.exec_driver_sql(f"PRAGMA table_xinfo({_tirnakla(tablo)})").all()
-    return {str(s[1]) for s in satirlar if int(s[3]) != 0 and s[4] is None}
+    uygun = {str(s[1]) for s in satirlar if int(s[3]) == 0 and s[4] is None}
+    for indeks in baglanti.exec_driver_sql(
+        f"PRAGMA index_list({_tirnakla(tablo)})"
+    ).all():
+        if int(indeks[2]) == 0:
+            continue
+        for sutun in baglanti.exec_driver_sql(
+            f"PRAGMA index_info({_tirnakla(str(indeks[1]))})"
+        ).all():
+            uygun.discard(str(sutun[2]))
+    return [a for a in adlar if a in uygun]
 
 
 def _sutun_bilgisi(baglanti: Connection, tablo: str) -> dict[str, bool]:
@@ -556,8 +620,14 @@ def _yeniden_kurma_on_denetimi(
         parcalar, kuyruk = _tanim_parcalari(tanim)
     except ValueError as hata:
         raise MotorHatasi(f"{tablo}: tanım metni okunamadı: {hata}") from None
-    mevcut_kisit = sorted(_sadelestir(k) for k in parcalar[len(mevcut) :])
-    istenen_kisit = sorted(_sadelestir(k) for k in istek.kisitlar)
+    mevcut_kisit = sorted(
+        _sadelestir(_kendi_adini_cevir(k, tablo, tablo, sade=True))
+        for k in parcalar[len(mevcut) :]
+    )
+    istenen_kisit = sorted(
+        _sadelestir(_kendi_adini_cevir(k, tablo, tablo, sade=True))
+        for k in istek.kisitlar
+    )
     if mevcut_kisit != istenen_kisit:
         raise KisitlarUyusmuyor(
             f"{tablo}: tablo düzeyi kısıtlar birebir aynı olmalı; mevcut "

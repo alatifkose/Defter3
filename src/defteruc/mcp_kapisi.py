@@ -133,7 +133,10 @@ ARAC_SATIR_EKLE_ACIKLAMASI = (
     '{"sayi": "inf"} ya da {"sayi": "-inf"} nesnesiyle verilir. Hepsi '
     "tek işlemde yazılır: biri reddedilirse hiçbiri yazılmaz. Yanıt her satırın "
     "anahtarını verir: her satırda dolu olması garanti birincil anahtar, yoksa "
-    "satır kimliği (rowid); ikili ve sonsuz değerler aynı nesnelerle döner."
+    "satır kimliği (rowid); ikili ve sonsuz değerler aynı nesnelerle döner. "
+    "eklenen, yürütülen ekleme sayısıdır: tablo ON CONFLICT REPLACE taşıyorsa "
+    "önceki satırlar (aynı çağrıdakiler dahil) yerlerini yeniye bırakır ve dönen "
+    "kimlik çağrı sonunda mevcut olmayabilir; emin olmak için satirlari_oku."
 )
 ARAC_SATIRLARI_OKU_ACIKLAMASI = (
     "Tablodan satır okur. kosul: SQL WHERE ifadesi (parametre yerleri ? ile, "

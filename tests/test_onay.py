@@ -504,7 +504,8 @@ def test_tam_sinirda_onizleme_iki_asamali_kopyayi_gosterir(
     sql = onay.kayit_getir(veritabani, kimlik).sql
     assert sql.count("INSERT OR ABORT") == 1
     assert sql.count("UPDATE") == 1 and 'FROM "fullwidth" AS e WHERE e.rowid' in sql
-    assert f'(rowid, "c{n - 1}", "c0"' in sql
+    assert '(rowid, "c0", "c1"' in sql
+    assert f'"c{n - 2}" = e."c{n - 2}"' in sql
     _onizleme_calisanla_ayni(veritabani, kimlik)
     with veritabani.islem() as oturum:
         satirlar = oturum.execute(
