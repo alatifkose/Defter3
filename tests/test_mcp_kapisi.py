@@ -14,6 +14,8 @@ import pytest
 
 from defteruc import ayarlar as ay
 from defteruc import gunluk, mcp_kapisi
+from defteruc.cekirdek import onay
+from defteruc.cekirdek import veritabani as vt
 
 DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
@@ -72,7 +74,7 @@ def test_sistem_durumu_beklenen_alanlari_tasir(test_koku: Path) -> None:
     durum = mcp_kapisi.sistem_durumu(ay.ayarlari_yukle())
 
     assert durum.ortam == "test"
-    assert durum.yetenekler == [mcp_kapisi.ARAC_SISTEM_DURUMU]
+    assert durum.yetenekler == list(mcp_kapisi.ARACLAR)
     assert durum.uygulama_surumu not in ("", mcp_kapisi.SURUM_BILINMIYOR)
 
 
@@ -101,9 +103,9 @@ def test_sunucu_yalniz_sistem_durumu_aracini_sunar(test_koku: Path) -> None:
 
     araclar = anyio.run(sunucu.list_tools)
 
-    assert [arac.name for arac in araclar] == [mcp_kapisi.ARAC_SISTEM_DURUMU]
+    assert [arac.name for arac in araclar] == list(mcp_kapisi.ARACLAR)
     assert sunucu.name == mcp_kapisi.SUNUCU_ADI
-    (arac,) = araclar
+    arac = araclar[0]
     assert arac.output_schema is not None
     assert set(arac.output_schema["required"]) == {
         "uygulama_surumu",
@@ -225,7 +227,7 @@ def test_stdio_uzerinden_baslatma_arac_listesi_ve_cagri(
     assert baslangic["protocolVersion"]
 
     araclar = yanitlar[2]["result"]["tools"]
-    assert [arac["name"] for arac in araclar] == [mcp_kapisi.ARAC_SISTEM_DURUMU]
+    assert [arac["name"] for arac in araclar] == list(mcp_kapisi.ARACLAR)
     assert araclar[0]["inputSchema"]["properties"] == {}
 
     cagri = yanitlar[3]["result"]
@@ -233,7 +235,7 @@ def test_stdio_uzerinden_baslatma_arac_listesi_ve_cagri(
     assert cagri["structuredContent"] == {
         "uygulama_surumu": mcp_kapisi.uygulama_surumu(),
         "ortam": "test",
-        "yetenekler": [mcp_kapisi.ARAC_SISTEM_DURUMU],
+        "yetenekler": list(mcp_kapisi.ARACLAR),
     }
     assert all(str(test_koku) not in satir for satir in sonuc.stdout_satirlari)
     assert not any(calisma.iterdir())
@@ -377,3 +379,171 @@ def test_stdio_istemci_metni_ve_yetenek_icerigi_gunluge_suzulerek_gecer(
 )
 def test_gunluk_icin_suzme(metin: str, beklenen: str) -> None:
     assert mcp_kapisi.gunluk_icin_suz(metin) == beklenen
+
+
+# --- süreç içi araç çağrıları: yapı isteği, onay, kayıt, yapı okuma ------------------
+
+KISILER_ARGUMANLARI: dict[str, Any] = {
+    "tablo": "kisiler",
+    "sutunlar": [
+        {"ad": "id", "ozellikler": ["INTEGER", "PRIMARY KEY"]},
+        {"ad": "ad_soyad", "ozellikler": ["TEXT", "NOT NULL"]},
+    ],
+}
+KISILER_SQL = (
+    'CREATE TABLE "kisiler" ("id" INTEGER PRIMARY KEY, "ad_soyad" TEXT NOT NULL)'
+)
+
+
+def _cagir(sunucu: Any, ad: str, argumanlar: dict[str, Any]) -> dict[str, Any]:
+    sonuc = anyio.run(sunucu.call_tool, ad, argumanlar)
+    assert not sonuc.is_error, sonuc
+    return dict(sonuc.structured_content)
+
+
+def _hata(sunucu: Any, ad: str, argumanlar: dict[str, Any]) -> str:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    with pytest.raises(ToolError) as hata:
+        anyio.run(sunucu.call_tool, ad, argumanlar)
+    return str(hata.value)
+
+
+def test_yapi_istegi_bekler_onay_sonrasi_kayit_yazilir_ve_yapi_okunur(
+    test_koku: Path,
+) -> None:
+    ayar = ay.ayarlari_yukle()
+    ay.dizinleri_hazirla(ayar)
+    gunluk.gunlugu_kur(ayar.log_dizini)
+    sunucu = mcp_kapisi.sunucu_kur(ayar)
+    assert not ayar.veritabani_yolu.exists()
+
+    assert _cagir(sunucu, mcp_kapisi.ARAC_YAPIYI_OKU, {}) == {"tablolar": []}
+    yanit = _cagir(sunucu, mcp_kapisi.ARAC_TABLO_OLUSTURMA_ISTEGI, KISILER_ARGUMANLARI)
+    assert yanit["talep_kimligi"] == 1
+    assert yanit["durum"] == "BEKLIYOR"
+    assert yanit["sql"] == KISILER_SQL
+    assert _cagir(sunucu, mcp_kapisi.ARAC_YAPIYI_OKU, {}) == {"tablolar": []}
+    bekleyen = _cagir(sunucu, mcp_kapisi.ARAC_BEKLEYEN_ISTEKLER, {})
+    assert [i["talep_kimligi"] for i in bekleyen["istekler"]] == [1]
+    assert "no such table" in _hata(
+        sunucu,
+        mcp_kapisi.ARAC_SATIR_EKLE,
+        {"tablo": "kisiler", "satirlar": [{"ad_soyad": "A"}]},
+    )
+
+    onaylayan = vt.Veritabani(ayar.veritabani_yolu)
+    try:
+        assert onay.onayla(onaylayan, 1).durum is onay.Durum.UYGULANDI
+    finally:
+        onaylayan.kapat()
+
+    durum = _cagir(sunucu, mcp_kapisi.ARAC_ISTEK_DURUMU, {"talep_kimligi": 1})
+    assert durum["durum"] == "UYGULANDI" and durum["sonuc"] is None
+    assert _cagir(sunucu, mcp_kapisi.ARAC_BEKLEYEN_ISTEKLER, {}) == {"istekler": []}
+    yazilan = _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIR_EKLE,
+        {"tablo": "kisiler", "satirlar": [{"ad_soyad": "Ayşe"}, {"ad_soyad": "Ali"}]},
+    )
+    assert yazilan == {"tablo": "kisiler", "eklenen": 2}
+    (tablo,) = _cagir(sunucu, mcp_kapisi.ARAC_YAPIYI_OKU, {})["tablolar"]
+    assert tablo["ad"] == "kisiler" and tablo["sql"] == KISILER_SQL
+    assert tablo["satir_sayisi"] == 2
+    assert [s["ad"] for s in tablo["sutunlar"]] == ["id", "ad_soyad"]
+
+    satirlar = (ayar.log_dizini / gunluk.GUNLUK_DOSYA_ADI).read_text("utf-8")
+    assert (
+        f"| {mcp_kapisi.OLAY_MCP_YAPI_ISTEGI} | talep=1 tur=tablo_olusturma" in satirlar
+    )
+    assert f"| {mcp_kapisi.OLAY_MCP_KAYIT} | tablo=kisiler eklenen=2" in satirlar
+    assert "Ayşe" not in satirlar
+
+
+def test_diger_istek_turleri_ve_hatalar_arac_hatasi_olur(test_koku: Path) -> None:
+    ayar = ay.ayarlari_yukle()
+    ay.dizinleri_hazirla(ayar)
+    gunluk.gunlugu_kur(ayar.log_dizini)
+    sunucu = mcp_kapisi.sunucu_kur(ayar)
+
+    kimlikler = [
+        _cagir(sunucu, ad, argumanlar)["talep_kimligi"]
+        for ad, argumanlar in (
+            (mcp_kapisi.ARAC_SUTUN_EKLEME_ISTEGI, {"tablo": "t", "sutun": {"ad": "c"}}),
+            (
+                mcp_kapisi.ARAC_SUTUN_OZELLIGI_DEGISTIRME_ISTEGI,
+                {"tablo": "t", "sutunlar": [{"ad": "a", "ozellikler": ["TEXT"]}]},
+            ),
+            (
+                mcp_kapisi.ARAC_INDEKS_OLUSTURMA_ISTEGI,
+                {"indeks": "ix", "tablo": "t", "sutunlar": ["a"], "benzersiz": True},
+            ),
+            (mcp_kapisi.ARAC_INDEKS_SILME_ISTEGI, {"indeks": "ix"}),
+        )
+    ]
+    assert kimlikler == [1, 2, 3, 4]
+    durum = _cagir(sunucu, mcp_kapisi.ARAC_ISTEK_DURUMU, {"talep_kimligi": 3})
+    assert durum["sql"] == 'CREATE UNIQUE INDEX "ix" ON "t" (a)'
+
+    assert "sade olmalı" in _hata(
+        sunucu, mcp_kapisi.ARAC_INDEKS_SILME_ISTEGI, {"indeks": "Türkçe"}
+    )
+    assert "üst düzeyde" in _hata(
+        sunucu,
+        mcp_kapisi.ARAC_TABLO_OLUSTURMA_ISTEGI,
+        {"tablo": "t", "sutunlar": [{"ad": "a", "ozellikler": ["TEXT, UNIQUE(a)"]}]},
+    )
+    assert "talep kimliği 9 yok" in _hata(
+        sunucu, mcp_kapisi.ARAC_ISTEK_DURUMU, {"talep_kimligi": 9}
+    )
+    assert "sade olmalı" in _hata(
+        sunucu,
+        mcp_kapisi.ARAC_SATIR_EKLE,
+        {"tablo": onay.SISTEM_TABLOSU, "satirlar": [{"a": 1}]},
+    )
+    assert "eklenecek satır yok" in _hata(
+        sunucu, mcp_kapisi.ARAC_SATIR_EKLE, {"tablo": "t", "satirlar": []}
+    )
+    bekleyen = _cagir(sunucu, mcp_kapisi.ARAC_BEKLEYEN_ISTEKLER, {})["istekler"]
+    assert [i["talep_kimligi"] for i in bekleyen] == [1, 2, 3, 4]
+
+
+def test_stdio_uzerinden_yapi_istegi_ve_sistem_durumu(tmp_path: Path) -> None:
+    kok = tmp_path / "kok"
+    mesajlar = (
+        *ILK_ISTEKLER,
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": mcp_kapisi.ARAC_TABLO_OLUSTURMA_ISTEGI,
+                "arguments": KISILER_ARGUMANLARI,
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": mcp_kapisi.ARAC_ISTEK_DURUMU,
+                "arguments": {"talep_kimligi": 1},
+            },
+        },
+    )
+    sonuc = _sunucuyla_konus(
+        tmp_path,
+        {ay.ORTAM_DEGISKENI: "test", ay.VERI_KOKU_DEGISKENI: str(kok)},
+        mesajlar,
+    )
+    assert sonuc.cikis_kodu == 0, sonuc.stderr
+    araclar = {a["name"] for a in sonuc.yanitlar[2]["result"]["tools"]}
+    assert araclar == set(mcp_kapisi.ARACLAR)
+    assert sonuc.yanitlar[3]["result"]["structuredContent"]["yetenekler"] == list(
+        mcp_kapisi.ARACLAR
+    )
+    istek = sonuc.yanitlar[4]["result"]
+    assert not istek.get("isError", False), istek
+    assert istek["structuredContent"]["durum"] == "BEKLIYOR"
+    assert istek["structuredContent"]["sql"] == KISILER_SQL
+    assert sonuc.yanitlar[5]["result"]["structuredContent"]["talep_kimligi"] == 1

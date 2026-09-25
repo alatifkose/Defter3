@@ -286,6 +286,29 @@ def test_iki_surec_ayni_istege_karar_verirse_ikincisi_bekler_ve_reddedilir(
     assert "kisiler" not in _tablolar(veritabani)
 
 
+def test_kilitli_veritabaninda_onay_bekler_sonra_mesgul_der_karar_yazmaz(
+    veritabani: vt.Veritabani,
+) -> None:
+    kimlik = onay.istek_birak(veritabani, KISILER)
+    ikinci = vt.Veritabani(veritabani.yol, bekleme_saniyesi=0.2)
+    try:
+        with veritabani.islem() as oturum:
+            oturum.execute(
+                text(
+                    f'UPDATE "{onay.SISTEM_TABLOSU}" SET sonuc = NULL WHERE kimlik = 1'
+                )
+            )
+            with pytest.raises(vt.VeritabaniMesgul, match="yeniden denenebilir"):
+                onay.onayla(ikinci, kimlik)
+            with pytest.raises(vt.VeritabaniMesgul):
+                onay.reddet(ikinci, kimlik)
+        kayit = onay.onayla(ikinci, kimlik)
+    finally:
+        ikinci.kapat()
+    assert kayit.durum is onay.Durum.UYGULANDI
+    assert "kisiler" in _tablolar(veritabani)
+
+
 # --- istek metni ----------------------------------------------------------------------
 
 

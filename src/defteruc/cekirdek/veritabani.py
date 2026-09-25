@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
 from sqlalchemy import Connection, Engine, create_engine, event, text
 from sqlalchemy.engine import URL
-from sqlalchemy.engine.interfaces import DBAPIConnection
+from sqlalchemy.engine.interfaces import DBAPIConnection, ExceptionContext
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import ConnectionPoolEntry
 
@@ -17,7 +18,9 @@ BAGLANTI_PRAGMALARI: tuple[tuple[str, str], ...] = (
     ("journal_mode", "WAL"),
 )
 
-BAGLANTI_ARGUMANLARI: dict[str, object] = {"autocommit": False}
+BEKLEME_SANIYESI = 10.0
+
+MESGUL_HATA_ADLARI = ("SQLITE_BUSY", "SQLITE_LOCKED")
 
 
 def veritabani_url(yol: Path) -> URL:
@@ -26,10 +29,26 @@ def veritabani_url(yol: Path) -> URL:
     return URL.create(SURUCU, database=str(yol))
 
 
-def motor_olustur(yol: Path) -> Engine:
-    motor = create_engine(veritabani_url(yol), connect_args=BAGLANTI_ARGUMANLARI)
+def motor_olustur(yol: Path, bekleme_saniyesi: float = BEKLEME_SANIYESI) -> Engine:
+    motor = create_engine(
+        veritabani_url(yol),
+        connect_args={"autocommit": False, "timeout": bekleme_saniyesi},
+    )
     event.listen(motor, "connect", _baglantiyi_ayarla)
+    event.listen(motor, "handle_error", _mesgul_hatasini_cevir)
     return motor
+
+
+def _mesgul_hatasini_cevir(baglam: ExceptionContext) -> None:
+    hata = baglam.original_exception
+    if (
+        isinstance(hata, sqlite3.OperationalError)
+        and getattr(hata, "sqlite_errorname", None) in MESGUL_HATA_ADLARI
+    ):
+        raise VeritabaniMesgul(
+            "veritabanı başka bir süreç tarafından yazılıyor, bekleme süresi doldu; "
+            "iş yapılmadı, yeniden denenebilir"
+        ) from hata
 
 
 def _baglantiyi_ayarla(
@@ -53,6 +72,9 @@ def _pragmalari_transaction_disinda_uygula(
         dbapi_baglantisi.autocommit = False
 
 
+class VeritabaniMesgul(Exception): ...
+
+
 class YabanciAnahtarIhlali(Exception): ...
 
 
@@ -60,9 +82,9 @@ class DenetimGeriAcilamadi(Exception): ...
 
 
 class Veritabani:
-    def __init__(self, yol: Path) -> None:
+    def __init__(self, yol: Path, bekleme_saniyesi: float = BEKLEME_SANIYESI) -> None:
         self.yol = yol
-        self.motor = motor_olustur(yol)
+        self.motor = motor_olustur(yol, bekleme_saniyesi)
         self._oturum_ac = sessionmaker(bind=self.motor, expire_on_commit=False)
 
     @contextmanager

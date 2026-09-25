@@ -136,8 +136,18 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   bekleyenler`, `defteruc onayla <kimlik>`, `defteruc reddet <kimlik>`.
   Ayrıntı "Başlatma" bölümünde.
 
-Henüz yok: onay penceresi, motoru Cowork'e açan MCP araçları, satır ekleme
-(kayıt), yapıyı okuma, yeni mükerrerlik tasarımı.
+* **MCP araçları** (`mcp_kapisi.py`, 2026-09-25): beş yapı isteği aracı,
+  `istek_durumu`, `bekleyen_istekler`, `yapiyi_oku`, `satir_ekle`. Ayrıntı
+  "MCP kapısı" bölümünde.
+* **Yapıyı okuma** (`cekirdek/yapi.py`) ve **satır ekleme = kayıt**
+  (`cekirdek/kayit.py`, onaysız, tek transaction). Motor yapıyı okumaz; okuma
+  ayrı modüldedir.
+* **Kilit hatası anlamlı** (`VeritabaniMesgul`, 2026-09-25): iki süreç aynı
+  anda yazınca bekleyen taraf 10 s bekler, sonra iş yapılmadan anlaşılır hata
+  alır. Ayrıntı "Veritabanı" bölümünde.
+
+Henüz yok: onay penceresi, yeni mükerrerlik tasarımı, Cowork ile uçtan uca
+gerçek deneme (Adım 6).
 
 ## Yapı istekleri ve onay
 
@@ -178,10 +188,10 @@ transaction'da durum `UYGULANAMADI` ve hata metni yazılır. Red motoru
 sunucusu ve komut satırı) aynı isteğe aynı anda karar vermeye kalkarsa
 ikincisi SQLite'ın yazma kilidinde bekler, ilk commit edince sıfır satır
 günceller ve `ZatenKararVerilmis` alır; bu davranış betikle doğrulandı ve
-iş parçacıklı testle kanıtlanır (`tests/test_onay.py`). Yazma kilidi
-bekleme süresi bugün `sqlite3` varsayılanıdır (5 s); süre dolunca ham
-`database is locked` hatası yükselir, anlamlı hataya çevrilmesi "Bilinen
-teknik borç" 1'dir ve MCP araçlarıyla birlikte ele alınacaktır.
+iş parçacıklı testle kanıtlanır (`tests/test_onay.py`). Bekleme süresi
+dolarsa `VeritabaniMesgul` yükselir ve karar yazılmamış olur (istek
+`BEKLIYOR` kalır, yeniden denenebilir); komut satırı bunu stderr'e yazar ve
+`1` ile çıkar, MCP aracı araç hatası döndürür.
 
 **Motorun arayüzü** (2026-09-25): iş fonksiyonları `Veritabani` yerine
 bağlantı alır. `islem_ac(veritabani, istek)` doğru transaction türünü açar
@@ -216,6 +226,16 @@ PRAGMA'lar transaction içinde çalışmadığından (`journal_mode` değiştiri
 `foreign_keys` sessizce yok sayılır) bağlantı olayında `autocommit` geçici
 olarak açılır, PRAGMA'lar uygulanır, sonra kapatılır. Motor için önemli
 sonuç: yarıda düşen bir yapı değişikliği de tamamen geri alınır.
+
+**Yazma kilidi ve meşgul hatası** (2026-09-25). SQLite'ta aynı anda tek
+yazar vardır; ikinci yazar `busy_timeout` kadar bekler. Bağlantı `timeout`
+değeri `Veritabani(yol, bekleme_saniyesi=...)` ile verilir, varsayılan 10 s
+(`BEKLEME_SANIYESI`). Süre dolunca SQLite'ın `SQLITE_BUSY` / `SQLITE_LOCKED`
+hatası SQLAlchemy'nin `handle_error` olayında yakalanır ve `VeritabaniMesgul`
+olarak yükselir (`SQLAlchemyError` değildir; motor ve kayıt modülünün
+"uygulanamadı" çevirileri bunu yakalamaz, hata olduğu gibi çağırana gider,
+çünkü iş yapılmamıştır ve yeniden denenebilir). Yeniden deneme otomatik
+değildir: komut satırında kullanıcı, MCP'de Cowork tekrar çağırır.
 
 **İşlem sınırı.** `Veritabani(yol).islem()` bağlam yöneticisi: bir iş = bir
 kısa ömürlü oturum = bir transaction. Normal çıkışta `commit`, istisnada
@@ -357,14 +377,10 @@ paketinin yeri henüz konuşulmadı.
 2026-09-19 incelemesinde tespit edildi; kararla ertelendi. Bu bölüm borç
 kapanınca silinir.
 
-**1. Eşzamanlı yazma eşlemesi yok.** SQLite iki bağlantı aynı anda yazmaya
-kalkınca birini durdurur; bu ham hata (`database is locked` / `busy`) bugün
-anlamlı bir hataya çevrilmez. Tek kullanıcılı masaüstünde kabul edilir. Çok
-istemci (uygulama açıkken Cowork yazıyor) gündeme gelince motor ve kayıt
-yazımı bir yazma sınırı ve yeniden deneme noktasıyla korunur. SQLite'a özgü
-SQL veritabanı katmanında kalır.
+(Eşzamanlı yazma maddesi 2026-09-25'te kapandı: bekleme süresi ve
+`VeritabaniMesgul`, bkz. "Veritabanı".)
 
-**2. Uzak kalite kapısı (CI) yok; engel GitHub hesabının kilidi.** Kontrol
+**1. Uzak kalite kapısı (CI) yok; engel GitHub hesabının kilidi.** Kontrol
 (`scripts/kontrol.py`) yalnız bu makinede, commit öncesi kancayla çalışır.
 Depoya dışarıdan bakan biri — örneğin bağımsız bir denetçi — testlerin
 geçtiğini göremez; kaynağı ve testleri okuyarak denetlemek zorunda kalır.
@@ -469,14 +485,40 @@ ardından MCP sunucusunu stdin/stdout üzerinde çalıştırır. İstemci bağla
 kapatınca `0` ile çıkar. Hazırlık düşerse hata stderr'e yazılır, çıkış kodu
 `1` olur; stdout'a hiçbir şey yazılmaz.
 
-Bu sürümde tek araç var: `sistem_durumu`. Uygulama sürümü, ortam adı ve
-yetenek listesini döndürür; yol, anahtar ya da ortam değişkeni içermez,
-veritabanına dokunmaz. Şema sürümü alanı 2026-09-24'te göç zinciriyle
-birlikte kaldırıldı. Motorun araçları henüz yoktur. Aşama 3'te kullanılan
-geçici deneme araçları (`dosya_dene`, `deneme_baslat`, `deneme_durumu`) kapı
-temizliğinde kaldırıldı; ne ölçtükleri "Cowork entegrasyonu" bölümünde.
-Gelen dizini ayarı (`DEFTERUC_GELEN_DIZINI`) kaldı: belge Cowork'ün bu dizine
-bıraktığı dosyanın yoluyla alınır.
+Araçlar (2026-09-25; adları `ARACLAR`):
+
+| Araç | Ne yapar | Onay |
+|---|---|---|
+| `sistem_durumu` | Sürüm, ortam, yetenek listesi. Veritabanına dokunmaz. | - |
+| `tablo_olusturma_istegi` | Yeni tablo (= nesne) için yapı isteği bırakır: sütunlar (ad + özellik parçaları), tablo düzeyi kısıtlar, seçenekler. | bekler |
+| `sutun_ekleme_istegi` | Mevcut tabloya sütun için yapı isteği bırakır. | bekler |
+| `sutun_ozelligi_degistirme_istegi` | Tablonun tam yeni tanımıyla sütun özelliği değiştirme isteği bırakır (motorun emniyet kuralları geçerli). | bekler |
+| `indeks_olusturma_istegi` / `indeks_silme_istegi` | İndeks için yapı isteği bırakır. | bekler |
+| `istek_durumu` | Talep kimliğiyle durum: `BEKLIYOR`, `UYGULANDI`, `REDDEDILDI`, `UYGULANAMADI` (+ sebep). | - |
+| `bekleyen_istekler` | Kullanıcının kararını bekleyen istekler. | - |
+| `yapiyi_oku` | Tablolar: ad, `CREATE TABLE` cümlesi, sütunlar (`table_xinfo`), indeksler, satır sayısı. Sistem tabloları (`_defteruc_*`) ve `sqlite_*` listede yoktur. | - |
+| `satir_ekle` | Mevcut tabloya satırlar yazar (kayıt); hepsi tek transaction, biri düşerse hiçbiri yazılmaz. | yok |
+
+Yapı isteği araçları isteği uygulamaz: motorun SQL üretimiyle doğrular
+(geçersiz ad ya da parça araç hatasıdır), `BEKLIYOR` yazar ve yanıtta talep
+kimliğini ve **çalışacak SQL cümlesini** döndürür. Onay uygulamanın kendi
+arayüzünden gelir (bugün `defteruc onayla`); Cowork aynı talep kimliğiyle
+`istek_durumu` sorar. Bu döngü Aşama 3.4'te Cowork'la ölçüldü. Sunucu
+talimatı (`SUNUCU_TALIMATI`) akışı ve ad kuralını Cowork'a anlatır. Araç
+girdileri pydantic ile şemalanır (`SutunGirdisi`: `ad`, `ozellikler`); satır
+değerleri metin, tam sayı, ondalık, doğru/yanlış ya da `null` olur ve SQL'e
+parametre olarak geçer, metne eklenmez. Tablo ve sütun adları motorun ad
+kuralından geçer; sistem tablosuna satır yazılamaz. Veritabanı nesnesi
+sunucu kurulurken açılır ama dosya ilk araç çağrısında oluşur; sistem tablosu
+istek araçlarında "yoksa oluştur" ile hazırlanır. Günlük: her yapı isteği
+`mcp_yapi_istegi` (talep, tür), her kayıt `mcp_kayit` (tablo, satır sayısı);
+değerler ve SQL metni günlüğe yazılmaz. `VeritabaniMesgul` ve onay hataları
+araç hatası (`isError`) olarak döner.
+
+Aşama 3'te kullanılan geçici deneme araçları (`dosya_dene`, `deneme_baslat`,
+`deneme_durumu`) kapı temizliğinde kaldırıldı; ne ölçtükleri "Cowork
+entegrasyonu" bölümünde. Gelen dizini ayarı (`DEFTERUC_GELEN_DIZINI`) kaldı:
+belge Cowork'ün bu dizine bıraktığı dosyanın yoluyla alınır.
 
 Kurallar:
 
@@ -486,7 +528,7 @@ Kurallar:
 * Bütün tanı çıktısı teknik günlüğe gider. SDK'nın `mcp` günlüğü de aynı
   dosyaya bağlanır (olay sütunu `-`), stderr'e düşmez.
 * Modül import edildiğinde sunucu kurulmaz, dosya oluşturulmaz.
-* Her araç çağrısında günlüğe `mcp_el_sikisma` satırı düşer: istemci adı ve
+* `sistem_durumu` çağrısında günlüğe `mcp_el_sikisma` satırı düşer: istemci adı ve
   sürümü, müzakere edilen protokol sürümü, istemci yeteneklerinin **adları**.
   İstemciden gelen her metin günlük için süzülür (`gunluk_icin_suz`):
   yazdırılamayan karakterler `?` olur, uzunluk sınırlanır; yetenek içerikleri
@@ -496,7 +538,9 @@ Kurallar:
 
 Test (`tests/test_mcp_kapisi.py`) sunucuyu ayrı süreçte başlatır; ham
 JSON-RPC ile `initialize`, `tools/list` ve `tools/call` yapar, her isteğin
-yanıtını bekler, sonra stdin'i kapatır.
+yanıtını bekler, sonra stdin'i kapatır. Araç akışı (istek → bekliyor → onay
+→ uygulandı → satır ekle → yapıyı oku) süreç içinde `call_tool` ile, yapı
+isteği ve durum sorgusu ayrıca stdio üzerinden sınanır.
 
 ## Cowork entegrasyonu
 
@@ -524,7 +568,7 @@ Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteruc.log`
 
 Her satır `zaman | seviye | olay | mesaj` biçimindedir; olay türleri
 şimdilik `baslangic`, `baslangic_hatasi`, `onay_karari`, `mcp_baslangic`,
-`mcp_el_sikisma`, `mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
+`mcp_el_sikisma`, `mcp_yapi_istegi`, `mcp_kayit`, `mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
 kayıtlarında olay `-` olur.
 
 Saklama sınırı: dosya 1.000.000 baytı aşınca döndürülür, en fazla 5 eski
@@ -588,7 +632,7 @@ Aynı kontrol her `git commit` öncesinde pre-commit kancasıyla otomatik
 bir adım düşerse commit yapılmaz. Kanca kaynak dosyalarını değiştirmez.
 
 **Uzak kalite kapısı (CI) yoktur** ve bunun sebebi yapılandırma değildir; bkz.
-"Bilinen teknik borç", madde 2. Kontrol yalnız bu makinede, commit öncesinde
+"Bilinen teknik borç", madde 1. Kontrol yalnız bu makinede, commit öncesinde
 çalışır; depoya dışarıdan bakan biri testlerin geçtiğini göremez, kaynağı
 okuyarak denetlemek zorundadır.
 
@@ -673,6 +717,8 @@ src/defteruc/    uygulama paketi
     veritabani.py   SQLite bağlantı politikası, işlem sınırı
     motor.py        yapı işleri: tablo, sütun, sütun özelliği, indeks; ham SQL
     onay.py         yapı istekleri: sistem tablosu, bekleyenler, onay ve ret
+    yapi.py         mevcut yapıyı okuma (tablolar, sütunlar, indeksler, satır sayısı)
+    kayit.py        satır ekleme (kayıt): onaysız, tek transaction
     arsiv.py        gelen dizini sınırı, akışla SHA-256, içerik adresli atomik arşiv, bütünlük
   finans/         finansal domain; çekirdeği kullanabilir (boş)
 tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi; test_arsiv.py: arşiv)

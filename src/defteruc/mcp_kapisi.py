@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import BaseModel
 
 from defteruc import gunluk
 from defteruc.ayarlar import Ayarlar
@@ -15,29 +17,119 @@ from defteruc.baslangic import (
     BaslangicHatasi,
     ortami_hazirla,
 )
+from defteruc.cekirdek import kayit, motor, onay, yapi
+from defteruc.cekirdek.veritabani import Veritabani, VeritabaniMesgul
 
 SUNUCU_ADI = "defteruc"
 PAKET_ADI = "defteruc"
 KUTUPHANE_GUNLUK_ADI = "mcp"
 
 ARAC_SISTEM_DURUMU = "sistem_durumu"
+ARAC_TABLO_OLUSTURMA_ISTEGI = "tablo_olusturma_istegi"
+ARAC_SUTUN_EKLEME_ISTEGI = "sutun_ekleme_istegi"
+ARAC_SUTUN_OZELLIGI_DEGISTIRME_ISTEGI = "sutun_ozelligi_degistirme_istegi"
+ARAC_INDEKS_OLUSTURMA_ISTEGI = "indeks_olusturma_istegi"
+ARAC_INDEKS_SILME_ISTEGI = "indeks_silme_istegi"
+ARAC_ISTEK_DURUMU = "istek_durumu"
+ARAC_BEKLEYEN_ISTEKLER = "bekleyen_istekler"
+ARAC_YAPIYI_OKU = "yapiyi_oku"
+ARAC_SATIR_EKLE = "satir_ekle"
+ARACLAR = (
+    ARAC_SISTEM_DURUMU,
+    ARAC_TABLO_OLUSTURMA_ISTEGI,
+    ARAC_SUTUN_EKLEME_ISTEGI,
+    ARAC_SUTUN_OZELLIGI_DEGISTIRME_ISTEGI,
+    ARAC_INDEKS_OLUSTURMA_ISTEGI,
+    ARAC_INDEKS_SILME_ISTEGI,
+    ARAC_ISTEK_DURUMU,
+    ARAC_BEKLEYEN_ISTEKLER,
+    ARAC_YAPIYI_OKU,
+    ARAC_SATIR_EKLE,
+)
 SURUM_BILINMIYOR = "bilinmiyor"
 
 OLAY_MCP_BASLANGIC = "mcp_baslangic"
 OLAY_MCP_KAPANIS = "mcp_kapanis"
 OLAY_MCP_HATASI = "mcp_hatasi"
 OLAY_MCP_EL_SIKISMA = "mcp_el_sikisma"
+OLAY_MCP_YAPI_ISTEGI = "mcp_yapi_istegi"
+OLAY_MCP_KAYIT = "mcp_kayit"
 ISTEMCI_BILINMIYOR = "bilinmiyor"
 
 SUNUCU_TALIMATI = (
-    "DEFTERUC kişisel finans kayıt sisteminin MCP kapısı. Bu sürümde yalnız "
-    "sistem_durumu aracı vardır; finansal kayıt yazılmaz."
+    "DEFTERUC kişisel finans kayıt sisteminin MCP kapısı. Veritabanında hazır "
+    "tablo yoktur; tablolar belgelerden çıkan nesnelere göre açılır. Akış: "
+    "önce yapiyi_oku ile mevcut tabloları gör. Yeni tablo, sütun, sütun "
+    "özelliği ya da indeks gerekiyorsa ilgili *_istegi aracıyla yapı isteği "
+    "bırak; istek hemen uygulanmaz, BEKLIYOR döner ve bir talep kimliği verir. "
+    "Kullanıcı isteği uygulamanın kendi arayüzünden onaylar ya da reddeder; sen "
+    "onay alamazsın ve onayı bekletemezsin. Aynı talep kimliğiyle istek_durumu "
+    "aracını sorarak sonucu öğren (UYGULANDI, REDDEDILDI, UYGULANAMADI). Tablo "
+    "hazır olduğunda satırları satir_ekle ile yaz; satır eklemek onay gerektirmez. "
+    "Adlar sade ve Türkçe karaktersizdir: küçük ASCII harfle başlar, harf, "
+    "rakam ve alt çizgi içerir. Sütun özellikleri, kısıtlar ve seçenekler "
+    "SQLite'ın CREATE TABLE söz dizimindeki parçalardır (örn. 'INTEGER', "
+    "'NOT NULL', 'REFERENCES kisiler(id)', 'UNIQUE (a, b)', 'STRICT')."
 )
 ARAC_SISTEM_DURUMU_ACIKLAMASI = (
     "DEFTERUC'ün durumunu döndürür: uygulama sürümü, çalışma ortamı ve bu "
     "sunucunun yetenek listesi. Yol, anahtar ya da ortam "
     "değişkeni içermez."
 )
+ISTEK_ACIKLAMA_KUYRUGU = (
+    " İstek hemen uygulanmaz: BEKLIYOR ve talep kimliği döner, çalışacak SQL "
+    "cümlesi yanıttadır. Kullanıcı onayladıktan sonra istek_durumu ile sor."
+)
+ARAC_TABLO_OLUSTURMA_ACIKLAMASI = (
+    "Yeni tablo (= yeni nesne) için yapı isteği bırakır. sutunlar: ad ve "
+    "özellik parçaları; kisitlar: tablo düzeyi kısıtlar; secenekler: "
+    "WITHOUT ROWID, STRICT." + ISTEK_ACIKLAMA_KUYRUGU
+)
+ARAC_SUTUN_EKLEME_ACIKLAMASI = (
+    "Mevcut tabloya yeni sütun için yapı isteği bırakır." + ISTEK_ACIKLAMA_KUYRUGU
+)
+ARAC_SUTUN_OZELLIGI_DEGISTIRME_ACIKLAMASI = (
+    "Mevcut sütunların özelliklerini değiştirmek için yapı isteği bırakır. "
+    "Tablonun TAM yeni tanımı verilir: bütün sütunlar aynı adla ve aynı "
+    "sırayla, tablo düzeyi kısıtlar ve seçenekler aynen. Sütun eklenemez, "
+    "silinemez, adı değiştirilemez; kısıt ve seçenek değiştirilemez. "
+    "deger_donusumu_izinli: tür değişimiyle değeri bilerek dönüşecek sütunlar "
+    "(kimlik sütunları olamaz)." + ISTEK_ACIKLAMA_KUYRUGU
+)
+ARAC_INDEKS_OLUSTURMA_ACIKLAMASI = (
+    "İndeks için yapı isteği bırakır. sutunlar: sütun adları ya da ifadeler; "
+    "benzersiz: UNIQUE; kosul: kısmi indeks WHERE koşulu." + ISTEK_ACIKLAMA_KUYRUGU
+)
+ARAC_INDEKS_SILME_ACIKLAMASI = (
+    "İndeks silmek için yapı isteği bırakır." + ISTEK_ACIKLAMA_KUYRUGU
+)
+ARAC_ISTEK_DURUMU_ACIKLAMASI = (
+    "Talep kimliğiyle yapı isteğinin durumunu döndürür: BEKLIYOR, UYGULANDI, "
+    "REDDEDILDI ya da UYGULANAMADI (sonuc alanında sebep). UYGULANAMADI ya da "
+    "REDDEDILDI olan istek yeniden onaylanamaz; gerekirse yeni istek bırakılır."
+)
+ARAC_BEKLEYEN_ISTEKLER_ACIKLAMASI = (
+    "Kullanıcının kararını bekleyen yapı isteklerini listeler."
+)
+ARAC_YAPIYI_OKU_ACIKLAMASI = (
+    "Veritabanındaki tabloları döndürür: ad, CREATE TABLE cümlesi, sütunlar "
+    "(ad, tür, zorunlu, varsayılan, anahtar sırası, üretilen), indeksler ve "
+    "satır sayısı. Uygulamanın kendi sistem tabloları listede yoktur."
+)
+ARAC_SATIR_EKLE_ACIKLAMASI = (
+    "Mevcut tabloya satır ekler (kayıt); onay gerektirmez. satirlar: her biri "
+    "sütun adı → değer sözlüğü; değer metin, tam sayı, ondalık, doğru/yanlış ya "
+    "da null olabilir. Hepsi tek işlemde yazılır: biri reddedilirse hiçbiri "
+    "yazılmaz."
+)
+
+
+class SutunGirdisi(BaseModel):
+    ad: str
+    ozellikler: tuple[str, ...] = ()
+
+    def sutun(self) -> motor.Sutun:
+        return motor.Sutun(self.ad, self.ozellikler)
 
 
 @dataclass(frozen=True)
@@ -58,7 +150,7 @@ def sistem_durumu(ayarlar: Ayarlar) -> SistemDurumu:
     return SistemDurumu(
         uygulama_surumu=uygulama_surumu(),
         ortam=ayarlar.ortam.value,
-        yetenekler=[ARAC_SISTEM_DURUMU],
+        yetenekler=list(ARACLAR),
     )
 
 
@@ -95,17 +187,142 @@ def el_sikisma_ozeti(baglam: Context[Any, Any]) -> str:
     return f"istemci={istemci} protokol={protokol} yetenekler={yetenek_metni}"
 
 
+def kayit_sozlugu(kayit_: onay.YapiIstegiKaydi) -> dict[str, object]:
+    return {
+        "talep_kimligi": kayit_.kimlik,
+        "tur": kayit_.tur,
+        "durum": kayit_.durum.value,
+        "sql": kayit_.sql,
+        "olusturma": kayit_.olusturma,
+        "karar": kayit_.karar,
+        "sonuc": kayit_.sonuc,
+    }
+
+
 def sunucu_kur(ayarlar: Ayarlar) -> MCPServer[None]:
     sunucu: MCPServer[None] = MCPServer(
         name=SUNUCU_ADI,
         version=uygulama_surumu(),
         instructions=SUNUCU_TALIMATI,
     )
+    veritabani = Veritabani(ayarlar.veritabani_yolu)
+
+    def istek_birak(istek: motor.YapiIstegi) -> dict[str, object]:
+        try:
+            onay.sistem_tablosunu_hazirla(veritabani)
+            kimlik = onay.istek_birak(veritabani, istek)
+            kayit_ = onay.kayit_getir(veritabani, kimlik)
+        except (motor.MotorHatasi, VeritabaniMesgul) as hata:
+            raise ToolError(str(hata)) from hata
+        gunluk.olay_kaydet(
+            OLAY_MCP_YAPI_ISTEGI, f"talep={kimlik} tur={kayit_.tur} durum=BEKLIYOR"
+        )
+        return kayit_sozlugu(kayit_)
 
     @sunucu.tool(name=ARAC_SISTEM_DURUMU, description=ARAC_SISTEM_DURUMU_ACIKLAMASI)
     def sistem_durumu_araci(baglam: Context[Any, Any]) -> SistemDurumu:
         gunluk.olay_kaydet(OLAY_MCP_EL_SIKISMA, el_sikisma_ozeti(baglam))
         return sistem_durumu(ayarlar)
+
+    @sunucu.tool(
+        name=ARAC_TABLO_OLUSTURMA_ISTEGI, description=ARAC_TABLO_OLUSTURMA_ACIKLAMASI
+    )
+    def tablo_olusturma_istegi(
+        tablo: str,
+        sutunlar: tuple[SutunGirdisi, ...],
+        kisitlar: tuple[str, ...] = (),
+        secenekler: tuple[str, ...] = (),
+    ) -> dict[str, object]:
+        return istek_birak(
+            motor.TabloOlusturmaIstegi(
+                tablo, tuple(s.sutun() for s in sutunlar), kisitlar, secenekler
+            )
+        )
+
+    @sunucu.tool(
+        name=ARAC_SUTUN_EKLEME_ISTEGI, description=ARAC_SUTUN_EKLEME_ACIKLAMASI
+    )
+    def sutun_ekleme_istegi(tablo: str, sutun: SutunGirdisi) -> dict[str, object]:
+        return istek_birak(motor.SutunEklemeIstegi(tablo, sutun.sutun()))
+
+    @sunucu.tool(
+        name=ARAC_SUTUN_OZELLIGI_DEGISTIRME_ISTEGI,
+        description=ARAC_SUTUN_OZELLIGI_DEGISTIRME_ACIKLAMASI,
+    )
+    def sutun_ozelligi_degistirme_istegi(
+        tablo: str,
+        sutunlar: tuple[SutunGirdisi, ...],
+        kisitlar: tuple[str, ...] = (),
+        secenekler: tuple[str, ...] = (),
+        deger_donusumu_izinli: tuple[str, ...] = (),
+    ) -> dict[str, object]:
+        return istek_birak(
+            motor.SutunOzelligiDegistirmeIstegi(
+                tablo,
+                tuple(s.sutun() for s in sutunlar),
+                kisitlar,
+                secenekler,
+                deger_donusumu_izinli,
+            )
+        )
+
+    @sunucu.tool(
+        name=ARAC_INDEKS_OLUSTURMA_ISTEGI, description=ARAC_INDEKS_OLUSTURMA_ACIKLAMASI
+    )
+    def indeks_olusturma_istegi(
+        indeks: str,
+        tablo: str,
+        sutunlar: tuple[str, ...],
+        benzersiz: bool = False,
+        kosul: str = "",
+    ) -> dict[str, object]:
+        return istek_birak(
+            motor.IndeksOlusturmaIstegi(indeks, tablo, sutunlar, benzersiz, kosul)
+        )
+
+    @sunucu.tool(
+        name=ARAC_INDEKS_SILME_ISTEGI, description=ARAC_INDEKS_SILME_ACIKLAMASI
+    )
+    def indeks_silme_istegi(indeks: str) -> dict[str, object]:
+        return istek_birak(motor.IndeksSilmeIstegi(indeks))
+
+    @sunucu.tool(name=ARAC_ISTEK_DURUMU, description=ARAC_ISTEK_DURUMU_ACIKLAMASI)
+    def istek_durumu(talep_kimligi: int) -> dict[str, object]:
+        try:
+            onay.sistem_tablosunu_hazirla(veritabani)
+            return kayit_sozlugu(onay.kayit_getir(veritabani, talep_kimligi))
+        except (onay.OnayHatasi, VeritabaniMesgul) as hata:
+            raise ToolError(str(hata)) from hata
+
+    @sunucu.tool(
+        name=ARAC_BEKLEYEN_ISTEKLER, description=ARAC_BEKLEYEN_ISTEKLER_ACIKLAMASI
+    )
+    def bekleyen_istekler() -> dict[str, object]:
+        try:
+            onay.sistem_tablosunu_hazirla(veritabani)
+            kayitlar = onay.bekleyenler(veritabani)
+        except VeritabaniMesgul as hata:
+            raise ToolError(str(hata)) from hata
+        return {"istekler": [kayit_sozlugu(k) for k in kayitlar]}
+
+    @sunucu.tool(name=ARAC_YAPIYI_OKU, description=ARAC_YAPIYI_OKU_ACIKLAMASI)
+    def yapiyi_oku() -> dict[str, object]:
+        try:
+            tablolar = yapi.yapiyi_oku(veritabani)
+        except VeritabaniMesgul as hata:
+            raise ToolError(str(hata)) from hata
+        return {"tablolar": [asdict(t) for t in tablolar]}
+
+    @sunucu.tool(name=ARAC_SATIR_EKLE, description=ARAC_SATIR_EKLE_ACIKLAMASI)
+    def satir_ekle(
+        tablo: str, satirlar: tuple[dict[str, kayit.Deger], ...]
+    ) -> dict[str, object]:
+        try:
+            eklenen = kayit.satirlar_ekle(veritabani, tablo, satirlar)
+        except (motor.GecersizAd, kayit.KayitHatasi, VeritabaniMesgul) as hata:
+            raise ToolError(str(hata)) from hata
+        gunluk.olay_kaydet(OLAY_MCP_KAYIT, f"tablo={tablo} eklenen={eklenen}")
+        return {"tablo": tablo, "eklenen": eklenen}
 
     return sunucu
 

@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from sqlalchemy import Connection
+
+from defteruc.cekirdek.veritabani import Veritabani
+
+SISTEM_ON_EKI = "_defteruc_"
+
+
+@dataclass(frozen=True, slots=True)
+class SutunBilgisi:
+    ad: str
+    tur: str
+    zorunlu: bool
+    varsayilan: str | None
+    anahtar_sirasi: int
+    uretilen: bool
+
+
+@dataclass(frozen=True, slots=True)
+class IndeksBilgisi:
+    ad: str
+    benzersiz: bool
+    sql: str
+
+
+@dataclass(frozen=True, slots=True)
+class TabloBilgisi:
+    ad: str
+    sql: str
+    sutunlar: tuple[SutunBilgisi, ...]
+    indeksler: tuple[IndeksBilgisi, ...]
+    satir_sayisi: int
+
+
+def yapiyi_oku(veritabani: Veritabani) -> tuple[TabloBilgisi, ...]:
+    with veritabani.islem() as oturum:
+        baglanti = oturum.connection()
+        tablolar = baglanti.exec_driver_sql(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'table' "
+            "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE ? ESCAPE '\\' "
+            "ORDER BY name",
+            (SISTEM_ON_EKI.replace("_", "\\_") + "%",),
+        ).all()
+        return tuple(_tablo(baglanti, str(t[0]), str(t[1])) for t in tablolar)
+
+
+def _tablo(baglanti: Connection, ad: str, sql: str) -> TabloBilgisi:
+    tirnakli = f'"{ad}"'
+    sutunlar = tuple(
+        SutunBilgisi(
+            ad=str(s[1]),
+            tur=str(s[2]),
+            zorunlu=int(s[3]) != 0,
+            varsayilan=None if s[4] is None else str(s[4]),
+            anahtar_sirasi=int(s[5]),
+            uretilen=int(s[6]) != 0,
+        )
+        for s in baglanti.exec_driver_sql(f"PRAGMA table_xinfo({tirnakli})").all()
+    )
+    indeksler = tuple(
+        IndeksBilgisi(ad=str(i[0]), benzersiz=" UNIQUE " in f" {i[1]} ", sql=str(i[1]))
+        for i in baglanti.exec_driver_sql(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'index' "
+            "AND tbl_name = ? AND sql IS NOT NULL ORDER BY name",
+            (ad,),
+        ).all()
+    )
+    satir_sayisi = int(
+        baglanti.exec_driver_sql(f"SELECT count(*) FROM {tirnakli}").scalar_one()
+    )
+    return TabloBilgisi(ad, sql, sutunlar, indeksler, satir_sayisi)

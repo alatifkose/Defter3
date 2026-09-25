@@ -8,7 +8,7 @@ from datetime import datetime
 from defteruc import gunluk
 from defteruc.ayarlar import Ayarlar
 from defteruc.cekirdek import onay
-from defteruc.cekirdek.veritabani import Veritabani
+from defteruc.cekirdek.veritabani import Veritabani, VeritabaniMesgul
 
 CIKIS_BASARILI = 0
 CIKIS_HATALI = 1
@@ -51,7 +51,7 @@ def onayla(ayarlar: Ayarlar, kimlik: int) -> int:
     try:
         with _veritabani(ayarlar) as veritabani:
             kayit = onay.onayla(veritabani, kimlik)
-    except onay.OnayHatasi as hata:
+    except (onay.OnayHatasi, VeritabaniMesgul) as hata:
         _hata_yaz(str(hata))
         return CIKIS_HATALI
     _karari_kaydet(kayit)
@@ -69,7 +69,7 @@ def reddet(ayarlar: Ayarlar, kimlik: int) -> int:
     try:
         with _veritabani(ayarlar) as veritabani:
             kayit = onay.reddet(veritabani, kimlik)
-    except onay.OnayHatasi as hata:
+    except (onay.OnayHatasi, VeritabaniMesgul) as hata:
         _hata_yaz(str(hata))
         return CIKIS_HATALI
     _karari_kaydet(kayit)
