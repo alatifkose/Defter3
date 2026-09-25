@@ -14,15 +14,7 @@ ROWID_TAKMA_ADLARI = ("rowid", "_rowid_", "oid")
 class KimlikYok(Exception): ...
 
 
-type Deger = str | int | float | bool | None
-
-
-def deger_json(deger: object) -> Deger:
-    if isinstance(deger, bytes):
-        return f"X'{deger.hex().upper()}'"
-    if deger is None or isinstance(deger, (str, int, float)):
-        return deger
-    return str(deger)
+type Deger = str | int | float | bool | bytes | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,11 +54,37 @@ def rowid_takma_adi(sutun_adlari: tuple[str, ...]) -> str | None:
     return next((t for t in ROWID_TAKMA_ADLARI if t not in golgeli), None)
 
 
+def rowidsiz(baglanti: Connection, tablo: str) -> bool:
+    satirlar = baglanti.exec_driver_sql(f'PRAGMA table_list("{tablo}")').all()
+    return any(
+        str(s[1]) == tablo and str(s[0]) == "main" and int(s[4]) != 0 for s in satirlar
+    )
+
+
+def _anahtar_otomatik_indeksli(baglanti: Connection, tablo: str) -> bool:
+    satirlar = baglanti.exec_driver_sql(f'PRAGMA index_list("{tablo}")').all()
+    return any(str(s[3]) == "pk" for s in satirlar)
+
+
 def satir_kimligi(baglanti: Connection, tablo: str) -> tuple[str, ...]:
     satirlar = baglanti.exec_driver_sql(f'PRAGMA table_xinfo("{tablo}")').all()
-    anahtar = sorted((int(s[5]), str(s[1])) for s in satirlar if int(s[5]) > 0)
+    anahtar = sorted(
+        (int(s[5]), str(s[1]), str(s[2]), int(s[3]) != 0)
+        for s in satirlar
+        if int(s[5]) > 0
+    )
     if anahtar:
-        return tuple(ad for _, ad in anahtar)
+        adlar = tuple(ad for _, ad, _, _ in anahtar)
+        if all(dolu for _, _, _, dolu in anahtar):
+            return adlar
+        (_, _, tur, _) = anahtar[0]
+        if (
+            len(anahtar) == 1
+            and tur.casefold() == "integer"
+            and not rowidsiz(baglanti, tablo)
+            and not _anahtar_otomatik_indeksli(baglanti, tablo)
+        ):
+            return adlar
     takma = rowid_takma_adi(tuple(str(s[1]) for s in satirlar))
     if takma is None:
         raise KimlikYok(

@@ -36,10 +36,7 @@ def satirlar_ekle(
             anahtar = yapi.satir_kimligi(baglanti, tablo)
             donus = " RETURNING " + ", ".join(yapi.sutun_adi(a) for a in anahtar)
             anahtarlar = tuple(
-                tuple(
-                    yapi.deger_json(d)
-                    for d in baglanti.exec_driver_sql(sql + donus, degerler).one()
-                )
+                tuple(baglanti.exec_driver_sql(sql + donus, degerler).one())
                 for sql, degerler in cumleler
             )
     except yapi.KimlikYok as hata:

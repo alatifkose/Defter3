@@ -67,7 +67,7 @@ def satirlari_oku(
                     (*degerler, sinir, baslangic),
                 )
                 sutunlar = tuple(str(k) for k in sonuc.keys())[len(kimlik) :]
-                ham = tuple(tuple(yapi.deger_json(d) for d in s) for s in sonuc.all())
+                ham = tuple(tuple(s) for s in sonuc.all())
                 anahtarlar = tuple(s[: len(kimlik)] for s in ham)
                 satirlar = tuple(s[len(kimlik) :] for s in ham)
     except yapi.KimlikYok as hata:

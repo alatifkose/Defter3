@@ -11,6 +11,7 @@ from typing import Any
 
 import anyio
 import pytest
+from sqlalchemy import text
 
 from defteruc import ayarlar as ay
 from defteruc import gunluk, mcp_kapisi
@@ -617,7 +618,12 @@ def test_blob_anahtarli_kayit_basarili_ve_tek_satir(test_koku: Path) -> None:
             "sutunlar": [
                 {
                     "ad": "id",
-                    "ozellikler": ["BLOB", "PRIMARY KEY", "DEFAULT (X'FF00')"],
+                    "ozellikler": [
+                        "BLOB",
+                        "PRIMARY KEY",
+                        "NOT NULL",
+                        "DEFAULT (X'FF00')",
+                    ],
                 },
                 {"ad": "ad", "ozellikler": ["TEXT"]},
             ],
@@ -633,13 +639,192 @@ def test_blob_anahtarli_kayit_basarili_ve_tek_satir(test_koku: Path) -> None:
         mcp_kapisi.ARAC_SATIR_EKLE,
         {"tablo": "binary_pk", "satirlar": [{"ad": "A"}]},
     )
-    assert yazilan["anahtarlar"] == [["X'FF00'"]]
+    assert yazilan["anahtarlar"] == [[{"blob": "FF00"}]]
     okunan = _cagir(sunucu, mcp_kapisi.ARAC_SATIRLARI_OKU, {"tablo": "binary_pk"})
-    assert okunan["satirlar"] == [["X'FF00'", "A"]]
+    assert okunan["satirlar"] == [[{"blob": "FF00"}, "A"]]
     assert okunan["eslesen_toplam"] == 1
     tekrar = _cagir(
         sunucu,
         mcp_kapisi.ARAC_SATIRLARI_OKU,
-        {"tablo": "binary_pk", "kosul": "id = X'FF00'"},
+        {"tablo": "binary_pk", "kosul": "id = ?", "parametreler": [{"blob": "FF00"}]},
     )
     assert tekrar["eslesen_toplam"] == 1
+
+
+# --- inceleme 7dba285, bulgu 1-3: etiketli değer taşıma ve kimlik sözleşmesi ----------
+
+
+def _hazir_sunucu(test_koku: Path) -> tuple[Any, ay.Ayarlar]:
+    ayar = ay.ayarlari_yukle()
+    ay.dizinleri_hazirla(ayar)
+    gunluk.gunlugu_kur(ayar.log_dizini)
+    return mcp_kapisi.sunucu_kur(ayar), ayar
+
+
+def _tablo_ac(sunucu: Any, ayar: ay.Ayarlar, argumanlar: dict[str, Any]) -> None:
+    kimlik = _cagir(sunucu, mcp_kapisi.ARAC_TABLO_OLUSTURMA_ISTEGI, argumanlar)[
+        "talep_kimligi"
+    ]
+    onaylayan = vt.Veritabani(ayar.veritabani_yolu)
+    try:
+        assert onay.onayla(onaylayan, kimlik).durum is onay.Durum.UYGULANDI
+    finally:
+        onaylayan.kapat()
+
+
+def test_blob_anahtar_ve_ayni_gorunuslu_metin_ayri_kalir(test_koku: Path) -> None:
+    sunucu, ayar = _hazir_sunucu(test_koku)
+    _tablo_ac(
+        sunucu,
+        ayar,
+        {
+            "tablo": "mixed",
+            "sutunlar": [
+                {
+                    "ad": "id",
+                    "ozellikler": [
+                        "BLOB",
+                        "PRIMARY KEY",
+                        "NOT NULL",
+                        "DEFAULT (X'FF00')",
+                    ],
+                },
+                {"ad": "ad", "ozellikler": ["TEXT"]},
+            ],
+        },
+    )
+    _tablo_ac(
+        sunucu,
+        ayar,
+        {
+            "tablo": "links",
+            "sutunlar": [
+                {"ad": "id", "ozellikler": ["INTEGER", "PRIMARY KEY"]},
+                {"ad": "target", "ozellikler": ["BLOB", "REFERENCES mixed(id)"]},
+            ],
+        },
+    )
+    ilk = _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIR_EKLE,
+        {"tablo": "mixed", "satirlar": [{"ad": "binary record"}]},
+    )
+    anahtar = ilk["anahtarlar"][0][0]
+    assert anahtar == {"blob": "FF00"}
+    bul = _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIRLARI_OKU,
+        {"tablo": "mixed", "kosul": "id = ?", "parametreler": [anahtar]},
+    )
+    assert bul["satirlar"] == [[{"blob": "FF00"}, "binary record"]]
+
+    ikinci = _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIR_EKLE,
+        {"tablo": "mixed", "satirlar": [{"id": "X'FF00'", "ad": "text record"}]},
+    )
+    assert ikinci["anahtarlar"] == [["X'FF00'"]]
+    yine = _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIRLARI_OKU,
+        {"tablo": "mixed", "kosul": "id = ?", "parametreler": [anahtar]},
+    )
+    assert yine["eslesen_toplam"] == 1 and yine["satirlar"][0][1] == "binary record"
+    hepsi = _cagir(sunucu, mcp_kapisi.ARAC_SATIRLARI_OKU, {"tablo": "mixed"})
+    assert sorted(str(a[0]) for a in hepsi["anahtarlar"]) == [
+        "X'FF00'",
+        "{'blob': 'FF00'}",
+    ]
+
+    _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIR_EKLE,
+        {"tablo": "links", "satirlar": [{"target": anahtar}]},
+    )
+    bakan = vt.Veritabani(ayar.veritabani_yolu)
+    try:
+        with bakan.islem() as oturum:
+            hedef = oturum.execute(
+                text(
+                    "SELECT mixed.ad, typeof(links.target) FROM links "
+                    "JOIN mixed ON links.target = mixed.id"
+                )
+            ).all()
+    finally:
+        bakan.kapat()
+    assert [tuple(h) for h in hedef] == [("binary record", "blob")]
+
+    assert "onaltılık" in _hata(
+        sunucu,
+        mcp_kapisi.ARAC_SATIR_EKLE,
+        {"tablo": "mixed", "satirlar": [{"id": {"blob": "FG"}}]},
+    )
+
+
+def test_null_kabul_eden_anahtar_kimlik_sayilmaz(test_koku: Path) -> None:
+    sunucu, ayar = _hazir_sunucu(test_koku)
+    _tablo_ac(
+        sunucu,
+        ayar,
+        {
+            "tablo": "nullable_pk",
+            "sutunlar": [
+                {"ad": "id", "ozellikler": ["TEXT", "PRIMARY KEY"]},
+                {"ad": "ad", "ozellikler": ["TEXT"]},
+            ],
+        },
+    )
+    yazilan = _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIR_EKLE,
+        {"tablo": "nullable_pk", "satirlar": [{"ad": "A"}, {"ad": "B"}]},
+    )
+    assert yazilan["anahtar_sutunlari"] == ["rowid"]
+    assert yazilan["anahtarlar"] == [[1], [2]]
+    okunan = _cagir(sunucu, mcp_kapisi.ARAC_SATIRLARI_OKU, {"tablo": "nullable_pk"})
+    assert okunan["anahtar_sutunlari"] == ["rowid"]
+    assert okunan["anahtarlar"] == [[1], [2]]
+
+
+def test_sonsuz_sayi_iki_icerikte_de_ayni_ve_geri_yazilabilir(
+    tmp_path: Path, test_koku: Path
+) -> None:
+    sunucu, ayar = _hazir_sunucu(test_koku)
+    _tablo_ac(
+        sunucu,
+        ayar,
+        {
+            "tablo": "nonfinite",
+            "sutunlar": [
+                {"ad": "id", "ozellikler": ["INTEGER", "PRIMARY KEY"]},
+                {"ad": "value", "ozellikler": ["REAL", "DEFAULT (1e999)"]},
+            ],
+        },
+    )
+    _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIR_EKLE,
+        {
+            "tablo": "nonfinite",
+            "satirlar": [{"id": 1}, {"id": 2, "value": {"sayi": "-inf"}}],
+        },
+    )
+    mesajlar = (
+        *ILK_ISTEKLER[:2],
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": mcp_kapisi.ARAC_SATIRLARI_OKU,
+                "arguments": {"tablo": "nonfinite"},
+            },
+        },
+    )
+    sonuc = _sunucuyla_konus(tmp_path, dict(os.environ), mesajlar)
+    assert sonuc.cikis_kodu == 0, sonuc.stderr
+    yanit = sonuc.yanitlar[2]["result"]
+    assert not yanit.get("isError", False), yanit
+    yapilandirilmis = yanit["structuredContent"]
+    assert yapilandirilmis["satirlar"] == [[1, {"sayi": "inf"}], [2, {"sayi": "-inf"}]]
+    assert json.loads(yanit["content"][0]["text"]) == yapilandirilmis

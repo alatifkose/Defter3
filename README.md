@@ -267,6 +267,33 @@ satırlar, **koşula uyan toplam** (`eslesen_toplam`), dönen sayı (`donen`),
 başlangıç ve devamı olup olmadığı (`devami_var`); devamı `baslangic + donen`
 ile alınır. Sistem tablosu adıyla çağrı daha bağlantı açılmadan reddedilir.
 
+**Satır kimliği sözleşmesi** (`yapi.satir_kimligi`; ekleme, okuma ve motorun
+yeniden kurması aynı yeri kullanır; dış inceleme 7dba285 bulgu 2). Tanımlı
+birincil anahtar yalnız her satırda dolu olması garantiyse kimliktir:
+WITHOUT ROWID tablo, bütün anahtar sütunları NOT NULL, ya da gerçek rowid
+takma adı olan tek `INTEGER PRIMARY KEY` (takma ad olup olmadığı `PRAGMA
+index_list` ile ayırt edilir: gerçek takma adın otomatik indeksi yoktur,
+`INTEGER PRIMARY KEY DESC` ve `INT PRIMARY KEY` ise vardır ve NULL kabul
+eder). Aksi hâlde gölgelenmemiş rowid takma adı (`rowid`, `_rowid_`, `oid`;
+üçü de sütunsa açık hata). Böylece `TEXT PRIMARY KEY` gibi NULL kabul eden
+anahtarlı tabloda farklı satırlar aynı boş kimlikle sunulmaz; tablo başına
+seçim tutarlıdır. Betikle doğrulandı, dokuz tanımla testli.
+
+**Değer taşıma** (dış inceleme 7dba285 bulgu 1 ve 3). Çekirdek değerleri
+SQLite'ın verdiği türde tutar (`yapi.Deger`: metin, tam sayı, ondalık, bayt,
+NULL). MCP sınırında (`mcp_kapisi.iceri` / `disari`) JSON'un taşıyamadığı iki
+tür etiketli nesneyle gider gelir: ikili veri `{"blob": "<hex>"}`, sonsuz
+sayı `{"sayi": "inf"}` / `{"sayi": "-inf"}`. Aynı nesne girişte de geçerlidir
+(satır değeri ve okuma parametresi) ve bayt / float olarak bağlanır; bozuk
+hex araç hatasıdır. Bir önceki düzeltmenin `X'..'` metni kayıpsız ama tek
+yönlüydü: geri verildiğinde metin olarak bağlanıyor, aynı görünüşlü TEXT
+anahtarla çakışıyor ve yanlış kayda bağlantı kuruluyordu; şimdi BLOB ve
+aynı görünüşlü TEXT anahtar ekleme → okuma → parametreli sorgu → yabancı
+anahtar yazma boyunca ayrı kalır (testli, anahtar SQL metnine yapıştırılmaz).
+Metin içerik ile yapılandırılmış içerik aynı değeri taşır; sonsuz artık
+sessizce NULL olmaz. SQLite NaN saklamaz (NULL'a çevirir), o yüzden yalnız
+iki sonsuz vardır.
+
 **Erişim sınırı, parça kuralıyla değil kancayla.** Parça kuralı alt sorguyu
 engellemez: koşulda `(SELECT sql FROM _defteruc_yapi_istekleri)` ya da
 `(SELECT sql FROM sqlite_master)` yazılabilir. Bu yüzden okuma, sayım ve

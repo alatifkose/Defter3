@@ -291,7 +291,7 @@ def _sutun_ozelligi_degistir(
     yeni_sutunlar = _sutunlari_dogrula(baglanti, gecici, tuple(eski_sutunlar))
     kopyalanacak = tuple(ad for ad, uretilen in yeni_sutunlar.items() if not uretilen)
     rowid_takma = None
-    if not _rowidsiz(baglanti, tablo) and not _rowidsiz(baglanti, gecici):
+    if not yapi.rowidsiz(baglanti, tablo) and not yapi.rowidsiz(baglanti, gecici):
         rowid_takma = yapi.rowid_takma_adi(tuple(eski_sutunlar))
         if rowid_takma is None:
             raise MotorHatasi(
@@ -417,13 +417,6 @@ def _dengeli_baglac(kosullar: list[str], baglac: str) -> str:
     sol = _dengeli_baglac(kosullar[:orta], baglac)
     sag = _dengeli_baglac(kosullar[orta:], baglac)
     return f"({sol} {baglac} {sag})"
-
-
-def _rowidsiz(baglanti: Connection, tablo: str) -> bool:
-    satirlar = baglanti.exec_driver_sql(f"PRAGMA table_list({_tirnakla(tablo)})").all()
-    return any(
-        str(s[1]) == tablo and str(s[0]) == "main" and int(s[4]) != 0 for s in satirlar
-    )
 
 
 def _satir_sayisi(baglanti: Connection, tablo: str) -> int:

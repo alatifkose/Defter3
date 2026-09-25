@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from dataclasses import asdict, dataclass
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from defteruc import gunluk
 from defteruc.ayarlar import Ayarlar
@@ -128,13 +129,16 @@ ARAC_YAPIYI_OKU_ACIKLAMASI = (
 ARAC_SATIR_EKLE_ACIKLAMASI = (
     "Mevcut tabloya satır ekler (kayıt); onay gerektirmez. satirlar: her biri "
     "sütun adı → değer sözlüğü; değer metin, tam sayı, ondalık, doğru/yanlış ya "
-    "da null olabilir. Hepsi tek işlemde yazılır: biri reddedilirse hiçbiri "
-    "yazılmaz. Yanıt her satırın anahtarını verir: birincil anahtar sütunları, "
-    "yoksa rowid."
+    'da null olabilir; ikili veri {"blob": "<hex>"}, sonsuz sayı '
+    '{"sayi": "inf"} ya da {"sayi": "-inf"} nesnesiyle verilir. Hepsi '
+    "tek işlemde yazılır: biri reddedilirse hiçbiri yazılmaz. Yanıt her satırın "
+    "anahtarını verir: her satırda dolu olması garanti birincil anahtar, yoksa "
+    "satır kimliği (rowid); ikili ve sonsuz değerler aynı nesnelerle döner."
 )
 ARAC_SATIRLARI_OKU_ACIKLAMASI = (
     "Tablodan satır okur. kosul: SQL WHERE ifadesi (parametre yerleri ? ile, "
-    "değerler parametreler listesinde; metne gömme); sinir: en çok satır "
+    'değerler parametreler listesinde; metne gömme; ikili değer {"blob": '
+    '"<hex>"}, sonsuz {"sayi": "inf"} nesnesi); sinir: en çok satır '
     "(varsayılan 100, en çok 1000); baslangic: atlanacak satır sayısı. Yanıt: "
     "sütun adları, satırlar, koşula uyan toplam (eslesen_toplam), dönen sayı "
     "(donen), her satırın anahtarı (anahtar_sutunlari, anahtarlar; satir_ekle "
@@ -142,6 +146,42 @@ ARAC_SATIRLARI_OKU_ACIKLAMASI = (
     "baslangic + donen ile yeniden çağır. Sıra birincil anahtara göredir. "
     "Yalnız okur; sistem tabloları okunamaz."
 )
+
+
+class IkiliDeger(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    blob: str
+
+
+class OzelSayi(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sayi: Literal["inf", "-inf"]
+
+
+GirdiDegeri = str | int | float | bool | None | IkiliDeger | OzelSayi
+
+
+def iceri(deger: GirdiDegeri) -> yapi.Deger:
+    if isinstance(deger, IkiliDeger):
+        try:
+            return bytes.fromhex(deger.blob)
+        except ValueError as hata:
+            raise ToolError(
+                f"blob alanı onaltılık (hex) olmalı, çift sayıda rakam: {deger.blob!r}"
+            ) from hata
+    if isinstance(deger, OzelSayi):
+        return float(deger.sayi)
+    return deger
+
+
+def disari(deger: yapi.Deger) -> object:
+    if isinstance(deger, bytes):
+        return {"blob": deger.hex().upper()}
+    if isinstance(deger, float) and not math.isfinite(deger):
+        return {
+            "sayi": "nan" if math.isnan(deger) else ("inf" if deger > 0 else "-inf")
+        }
+    return deger
 
 
 class SutunGirdisi(BaseModel):
@@ -337,10 +377,14 @@ def sunucu_kur(ayarlar: Ayarlar) -> MCPServer[None]:
 
     @sunucu.tool(name=ARAC_SATIR_EKLE, description=ARAC_SATIR_EKLE_ACIKLAMASI)
     def satir_ekle(
-        tablo: str, satirlar: tuple[dict[str, kayit.Deger], ...]
+        tablo: str, satirlar: tuple[dict[str, GirdiDegeri], ...]
     ) -> dict[str, object]:
         try:
-            sonuc = kayit.satirlar_ekle(veritabani, tablo, satirlar)
+            sonuc = kayit.satirlar_ekle(
+                veritabani,
+                tablo,
+                [{ad: iceri(d) for ad, d in satir.items()} for satir in satirlar],
+            )
         except (motor.GecersizAd, kayit.KayitHatasi, VeritabaniMesgul) as hata:
             raise ToolError(str(hata)) from hata
         gunluk.olay_kaydet(OLAY_MCP_KAYIT, f"tablo={tablo} eklenen={sonuc.eklenen}")
@@ -348,29 +392,34 @@ def sunucu_kur(ayarlar: Ayarlar) -> MCPServer[None]:
             "tablo": tablo,
             "eklenen": sonuc.eklenen,
             "anahtar_sutunlari": list(sonuc.anahtar_sutunlari),
-            "anahtarlar": [list(a) for a in sonuc.anahtarlar],
+            "anahtarlar": [[disari(d) for d in a] for a in sonuc.anahtarlar],
         }
 
     @sunucu.tool(name=ARAC_SATIRLARI_OKU, description=ARAC_SATIRLARI_OKU_ACIKLAMASI)
     def satirlari_oku(
         tablo: str,
         kosul: str = "",
-        parametreler: tuple[okuma.Deger, ...] = (),
+        parametreler: tuple[GirdiDegeri, ...] = (),
         sinir: int = okuma.SINIR_VARSAYILAN,
         baslangic: int = 0,
     ) -> dict[str, object]:
         try:
             sonuc = okuma.satirlari_oku(
-                veritabani, tablo, kosul, parametreler, sinir, baslangic
+                veritabani,
+                tablo,
+                kosul,
+                [iceri(d) for d in parametreler],
+                sinir,
+                baslangic,
             )
         except (motor.MotorHatasi, okuma.OkumaHatasi, VeritabaniMesgul) as hata:
             raise ToolError(str(hata)) from hata
         return {
             "tablo": tablo,
             "sutunlar": list(sonuc.sutunlar),
-            "satirlar": [list(s) for s in sonuc.satirlar],
+            "satirlar": [[disari(d) for d in s] for s in sonuc.satirlar],
             "anahtar_sutunlari": list(sonuc.anahtar_sutunlari),
-            "anahtarlar": [list(a) for a in sonuc.anahtarlar],
+            "anahtarlar": [[disari(d) for d in a] for a in sonuc.anahtarlar],
             "eslesen_toplam": sonuc.eslesen_toplam,
             "donen": sonuc.donen,
             "baslangic": sonuc.baslangic,

@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import text
 
 from defteruc import ayarlar as ay
-from defteruc.cekirdek import kayit, motor, onay, yapi
+from defteruc.cekirdek import kayit, motor, okuma, onay, yapi
 from defteruc.cekirdek import veritabani as vt
 
 DEFTERUC_DEGISKENLERI = (
@@ -131,7 +131,8 @@ def test_anahtar_turleri_metin_anahtar_rowid_ve_bilesik(
     _uygula(
         veritabani,
         motor.TabloOlusturmaIstegi(
-            "kodlar", (motor.Sutun("kod", ("TEXT", "PRIMARY KEY")), motor.Sutun("a"))
+            "kodlar",
+            (motor.Sutun("kod", ("TEXT", "PRIMARY KEY", "NOT NULL")), motor.Sutun("a")),
         ),
     )
     _uygula(veritabani, motor.TabloOlusturmaIstegi("serbest", (motor.Sutun("a"),)))
@@ -215,26 +216,32 @@ def test_degerler_parametre_olarak_gecer_sql_degil(veritabani: vt.Veritabani) ->
     assert _satirlar(veritabani, "SELECT ad_soyad FROM kisiler") == [(kotu,)]
 
 
-def test_blob_anahtar_kayipsiz_ve_json_uyumlu_doner(veritabani: vt.Veritabani) -> None:
-    import json
-    from dataclasses import asdict
-
+def test_blob_anahtar_cekirdekte_bayt_olarak_gidip_gelir(
+    veritabani: vt.Veritabani,
+) -> None:
     _uygula(
         veritabani,
         motor.TabloOlusturmaIstegi(
             "binary_pk",
             (
-                motor.Sutun("id", ("BLOB", "PRIMARY KEY", "DEFAULT (randomblob(8))")),
+                motor.Sutun(
+                    "id", ("BLOB", "PRIMARY KEY", "NOT NULL", "DEFAULT (randomblob(8))")
+                ),
                 motor.Sutun("ad", ("TEXT",)),
             ),
         ),
     )
     sonuc = kayit.satirlar_ekle(veritabani, "binary_pk", [{"ad": "A"}, {"ad": "B"}])
-    json.dumps(asdict(sonuc))
     (a,), (b,) = sonuc.anahtarlar
-    assert isinstance(a, str) and a.startswith("X'") and len(a) == 2 + 16 + 1
+    assert isinstance(a, bytes) and len(a) == 8
     assert a != b
-    assert _satirlar(veritabani, f"SELECT ad FROM binary_pk WHERE id = {a}") == [("A",)]
+    with veritabani.islem() as oturum:
+        bulunan = oturum.execute(
+            text("SELECT ad FROM binary_pk WHERE id = :k"), {"k": a}
+        ).all()
+    assert [tuple(s) for s in bulunan] == [("A",)]
+    okunan = okuma.satirlari_oku(veritabani, "binary_pk", "id = ?", (b,))
+    assert okunan.anahtarlar == ((b,),) and okunan.satirlar == ((b, "B"),)
 
 
 # --- inceleme 2026-09-25, bulgu 3: rowid adlı sütun anahtar sanılmaz ----------------
@@ -337,3 +344,67 @@ def test_kayit_okuma_ile_yazma_arasinda_baska_yazari_bekletir(
         ("mine",),
         ("other",),
     ]
+
+
+# --- inceleme 7dba285, bulgu 2: yalnız her satırda dolu anahtar kimliktir
+
+
+@pytest.mark.parametrize(
+    ("tanim", "beklenen"),
+    [
+        ('"id" INTEGER PRIMARY KEY, "ad" TEXT', ("id",)),
+        ('"id" INTEGER PRIMARY KEY DESC, "ad" TEXT', ("rowid",)),
+        ('"id" INT PRIMARY KEY, "ad" TEXT', ("rowid",)),
+        ('"id" TEXT PRIMARY KEY, "ad" TEXT', ("rowid",)),
+        ('"id" TEXT PRIMARY KEY NOT NULL, "ad" TEXT', ("id",)),
+        ('"yil" INTEGER, "no" INTEGER, PRIMARY KEY ("yil", "no")', ("rowid",)),
+        (
+            '"yil" INTEGER NOT NULL, "no" INTEGER, PRIMARY KEY ("yil", "no")',
+            ("rowid",),
+        ),
+        (
+            '"yil" INTEGER NOT NULL, "no" INTEGER NOT NULL, PRIMARY KEY ("yil", "no")',
+            ("yil", "no"),
+        ),
+        ('"rowid" TEXT PRIMARY KEY, "ad" TEXT', ("_rowid_",)),
+    ],
+)
+def test_satir_kimligi_yalniz_dolu_anahtari_secer(
+    veritabani: vt.Veritabani, tanim: str, beklenen: tuple[str, ...]
+) -> None:
+    with veritabani.islem() as oturum:
+        oturum.execute(text(f'CREATE TABLE "t" ({tanim})'))
+        assert yapi.satir_kimligi(oturum.connection(), "t") == beklenen
+
+
+def test_without_rowid_anahtari_her_zaman_kimliktir(veritabani: vt.Veritabani) -> None:
+    with veritabani.islem() as oturum:
+        oturum.execute(
+            text(
+                'CREATE TABLE "w" ("yil" INTEGER, "no" INTEGER, '
+                'PRIMARY KEY ("yil", "no")) WITHOUT ROWID'
+            )
+        )
+        assert yapi.satir_kimligi(oturum.connection(), "w") == ("yil", "no")
+
+
+def test_null_anahtarli_satirlar_rowid_ile_ayirt_edilir(
+    veritabani: vt.Veritabani,
+) -> None:
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "nullable_pk",
+            (motor.Sutun("id", ("TEXT", "PRIMARY KEY")), motor.Sutun("ad", ("TEXT",))),
+        ),
+    )
+    eklenen = kayit.satirlar_ekle(veritabani, "nullable_pk", [{"ad": "A"}, {"ad": "B"}])
+    assert eklenen.anahtar_sutunlari == ("rowid",) and eklenen.anahtarlar == (
+        (1,),
+        (2,),
+    )
+    okunan = okuma.satirlari_oku(veritabani, "nullable_pk")
+    assert okunan.anahtar_sutunlari == ("rowid",) and okunan.anahtarlar == ((1,), (2,))
+    assert okunan.satirlar == ((None, "A"), (None, "B"))
+    tek = okuma.satirlari_oku(veritabani, "nullable_pk", "rowid = ?", (2,))
+    assert tek.satirlar == ((None, "B"),)
