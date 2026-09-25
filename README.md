@@ -132,8 +132,12 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   saklanır ve talep kimliği döner; onayda motor çağrılır, redde çağrılmaz.
   Ayrıntı "Yapı istekleri ve onay" bölümünde.
 
-Henüz yok: komut satırından ve pencereden onay, motoru Cowork'e açan MCP
-araçları, satır ekleme (kayıt), yapıyı okuma, yeni mükerrerlik tasarımı.
+* **Komut satırından onay** (`komutlar.py`, 2026-09-25): `defteruc
+  bekleyenler`, `defteruc onayla <kimlik>`, `defteruc reddet <kimlik>`.
+  Ayrıntı "Başlatma" bölümünde.
+
+Henüz yok: onay penceresi, motoru Cowork'e açan MCP araçları, satır ekleme
+(kayıt), yapıyı okuma, yeni mükerrerlik tasarımı.
 
 ## Yapı istekleri ve onay
 
@@ -414,6 +418,40 @@ oluşturmaz; finansal iş yapmaz.
 Herhangi bir adım başarısızsa (`DEFTERUC_ORTAM` bilinmeyen değer, test
 ortamında veri kökü verilmemiş, dizin yerine dosya var, log dosyası
 açılamıyor...) anlaşılır bir hata stderr'e yazılır ve çıkış kodu `1` olur.
+
+### Onay komutları
+
+Aynı komutun alt komutları yapı isteklerini yönetir (`src/defteruc/komutlar.py`,
+2026-09-25). Hepsi önce aynı hazırlığı yapar, sonra veritabanını açar ve
+sistem tablosunu yoksa oluşturur.
+
+```bash
+uv run defteruc bekleyenler
+```
+
+Bekleyen yapı isteklerini talep kimliği, tür, bırakılma zamanı (yerel saat)
+ve **çalışacak SQL cümlesiyle** listeler. Onaylanan şey bu cümledir, bir
+özet değil. Bekleyen yoksa tek satır söyler.
+
+```bash
+uv run defteruc onayla 3
+```
+
+Talep 3'ü onaylar ve motoru çalıştırır. Uygulandıysa tek satır mesaj ve `0`.
+Motor düşerse (tablo zaten var, satırlar yeni özelliğe uymuyor, yabancı
+anahtar ihlali...) yapı değişmez, talep `UYGULANAMADI` olur, sebep stderr'e
+yazılır ve çıkış kodu `1` olur; aynı talep yeniden onaylanamaz, Cowork yeni
+istek bırakır.
+
+```bash
+uv run defteruc reddet 3
+```
+
+Talep 3'ü reddeder; motor çağrılmaz. Olmayan talep kimliği ya da karar
+verilmiş talep için stderr'e sebep, çıkış kodu `1`. Eksik ya da sayı olmayan
+kimlik ve bilinmeyen alt komut `argparse` kullanım hatasıdır (çıkış kodu `2`).
+Her karar günlüğe `onay_karari` olayıyla düşer: talep kimliği, tür, durum;
+SQL metni günlüğe yazılmaz.
 Günlük kurulamadıysa başarılı başlangıç mesajı verilmez. Yollar
 uygulamanın hangi dizinden başlatıldığına bağlı değildir; modüller import
 edildiğinde dizin ya da dosya oluşturulmaz.
@@ -485,8 +523,8 @@ Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteruc.log`
 `logging` modülü kullanılır; ek bağımlılık yoktur.
 
 Her satır `zaman | seviye | olay | mesaj` biçimindedir; olay türleri
-şimdilik `baslangic`, `baslangic_hatasi`, `mcp_baslangic`, `mcp_el_sikisma`,
-`mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
+şimdilik `baslangic`, `baslangic_hatasi`, `onay_karari`, `mcp_baslangic`,
+`mcp_el_sikisma`, `mcp_kapanis`, `mcp_hatasi`. Dosya günlüğüne bağlanan dış kütüphane
 kayıtlarında olay `-` olur.
 
 Saklama sınırı: dosya 1.000.000 baytı aşınca döndürülür, en fazla 5 eski
@@ -627,7 +665,8 @@ geçerlidir.
 ```
 src/defteruc/    uygulama paketi
   ayarlar.py      merkezi ayarlar (ortam, yollar)
-  baslangic.py    uv run defteruc giriş noktası; ortak hazırlık (ortami_hazirla)
+  baslangic.py    uv run defteruc giriş noktası; alt komutlar; ortak hazırlık (ortami_hazirla)
+  komutlar.py     bekleyenler / onayla / reddet alt komutları
   gunluk.py       teknik hata günlüğü
   mcp_kapisi.py   uv run defteruc-mcp; MCP sunucusu ve araçları
   cekirdek/       genel çekirdek; finansı tanımaz

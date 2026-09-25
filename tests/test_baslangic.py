@@ -47,7 +47,7 @@ def _log_satirlari(test_koku: Path) -> list[str]:
 def test_basarili_baslangic_sifir_doner_ve_mesaj_verir(
     test_koku: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    kod = baslangic.main()
+    kod = baslangic.main([])
 
     cikti = capsys.readouterr()
     assert kod == 0
@@ -58,7 +58,7 @@ def test_basarili_baslangic_sifir_doner_ve_mesaj_verir(
 
 
 def test_basarili_baslangic_dizinleri_hazirlar_ve_olay_yazar(test_koku: Path) -> None:
-    baslangic.main()
+    baslangic.main([])
 
     assert (test_koku / ay.BELGE_DIZIN_ADI).is_dir()
     assert (test_koku / ay.LOG_DIZIN_ADI).is_dir()
@@ -68,8 +68,8 @@ def test_basarili_baslangic_dizinleri_hazirlar_ve_olay_yazar(test_koku: Path) ->
 
 
 def test_tekrar_baslatma_her_seferinde_tek_satir_ekler(test_koku: Path) -> None:
-    assert baslangic.main() == 0
-    assert baslangic.main() == 0
+    assert baslangic.main([]) == 0
+    assert baslangic.main([]) == 0
 
     satirlar = _log_satirlari(test_koku)
     assert len(satirlar) == 2
@@ -88,10 +88,10 @@ def test_farkli_calisma_dizinlerinden_ayni_yollar(
     ikinci.mkdir()
 
     monkeypatch.chdir(birinci)
-    assert baslangic.main() == 0
+    assert baslangic.main([]) == 0
     cikti_1 = capsys.readouterr().out
     monkeypatch.chdir(ikinci)
-    assert baslangic.main() == 0
+    assert baslangic.main([]) == 0
     cikti_2 = capsys.readouterr().out
 
     assert cikti_1 == cikti_2
@@ -110,7 +110,7 @@ def test_ayar_hatasi_stderr_e_yazilir_ve_sifirdan_farkli_doner(
     monkeypatch.setenv(ay.ORTAM_DEGISKENI, "uretim")
     monkeypatch.setenv(ay.VERI_KOKU_DEGISKENI, str(tmp_path / "kok"))
 
-    kod = baslangic.main()
+    kod = baslangic.main([])
 
     cikti = capsys.readouterr()
     assert kod != 0
@@ -128,7 +128,7 @@ def test_dizin_hatasi_stderr_e_yazilir(
     test_koku.mkdir(parents=True)
     (test_koku / ay.LOG_DIZIN_ADI).write_text("dosya", encoding="utf-8")
 
-    kod = baslangic.main()
+    kod = baslangic.main([])
 
     cikti = capsys.readouterr()
     assert kod != 0
@@ -143,7 +143,7 @@ def test_gunluk_kurulamazsa_basari_mesaji_verilmez(
 ) -> None:
     (test_koku / ay.LOG_DIZIN_ADI / gunluk.GUNLUK_DOSYA_ADI).mkdir(parents=True)
 
-    kod = baslangic.main()
+    kod = baslangic.main([])
 
     cikti = capsys.readouterr()
     assert kod != 0
@@ -162,7 +162,7 @@ def test_beklenmeyen_hata_gunluge_yalniz_turuyle_gecer(
 
     monkeypatch.setattr(baslangic, "_basariyi_bildir", patlat)
 
-    kod = baslangic.main()
+    kod = baslangic.main([])
 
     cikti = capsys.readouterr()
     assert kod != 0
@@ -182,7 +182,7 @@ def test_gunluk_kurulmadan_olusan_beklenmeyen_hata_stderr_e_gider(
 
     monkeypatch.setattr(baslangic, "ayarlari_yukle", patlat)
 
-    kod = baslangic.main()
+    kod = baslangic.main([])
 
     cikti = capsys.readouterr()
     assert kod != 0
