@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from defteruc import ayarlar as ay
 from defteruc.cekirdek import motor as m
 from defteruc.cekirdek import veritabani as vt
+from defteruc.cekirdek import yapi
 
 DEFTERUC_DEGISKENLERI = (
     ay.ORTAM_DEGISKENI,
@@ -1214,7 +1215,7 @@ def test_rowid_adli_sutun_varsa_ortuk_kimlik_baska_takma_adla_tasinir(
 
 
 def test_rowid_takma_adi_secimi() -> None:
-    takma = m._rowid_takma_adi  # pyright: ignore[reportPrivateUsage]
+    takma = yapi.rowid_takma_adi
     assert takma(("id", "ad")) == "rowid"
     assert takma(("rowid", "ad")) == "_rowid_"
     assert takma(("ROWID", "_rowid_")) == "oid"

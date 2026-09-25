@@ -461,6 +461,8 @@ def test_yapi_istegi_bekler_onay_sonrasi_kayit_yazilir_ve_yapi_okunur(
         "tablo": "kisiler",
         "sutunlar": ["id", "ad_soyad"],
         "satirlar": [[2, "Ali"]],
+        "anahtar_sutunlari": ["id"],
+        "anahtarlar": [[2]],
         "eslesen_toplam": 1,
         "donen": 1,
         "baslangic": 0,

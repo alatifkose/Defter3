@@ -137,7 +137,8 @@ ARAC_SATIRLARI_OKU_ACIKLAMASI = (
     "değerler parametreler listesinde; metne gömme); sinir: en çok satır "
     "(varsayılan 100, en çok 1000); baslangic: atlanacak satır sayısı. Yanıt: "
     "sütun adları, satırlar, koşula uyan toplam (eslesen_toplam), dönen sayı "
-    "(donen) ve devamı olup olmadığı (devami_var); devamı için baslangic = "
+    "(donen), her satırın anahtarı (anahtar_sutunlari, anahtarlar; satir_ekle "
+    "ile aynı sözleşme) ve devamı olup olmadığı (devami_var); devamı için baslangic = "
     "baslangic + donen ile yeniden çağır. Sıra birincil anahtara göredir. "
     "Yalnız okur; sistem tabloları okunamaz."
 )
@@ -368,6 +369,8 @@ def sunucu_kur(ayarlar: Ayarlar) -> MCPServer[None]:
             "tablo": tablo,
             "sutunlar": list(sonuc.sutunlar),
             "satirlar": [list(s) for s in sonuc.satirlar],
+            "anahtar_sutunlari": list(sonuc.anahtar_sutunlari),
+            "anahtarlar": [list(a) for a in sonuc.anahtarlar],
             "eslesen_toplam": sonuc.eslesen_toplam,
             "donen": sonuc.donen,
             "baslangic": sonuc.baslangic,

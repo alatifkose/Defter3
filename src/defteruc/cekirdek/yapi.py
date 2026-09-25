@@ -8,7 +8,11 @@ from defteruc.cekirdek.veritabani import Veritabani
 
 SISTEM_ON_EKI = "_defteruc_"
 
-ROWID = "rowid"
+ROWID_TAKMA_ADLARI = ("rowid", "_rowid_", "oid")
+
+
+class KimlikYok(Exception): ...
+
 
 type Deger = str | int | float | bool | None
 
@@ -53,8 +57,27 @@ def anahtar_sutunlari(baglanti: Connection, tablo: str) -> tuple[str, ...]:
     return tuple(ad for _, ad in anahtar)
 
 
+def rowid_takma_adi(sutun_adlari: tuple[str, ...]) -> str | None:
+    golgeli = {ad.casefold() for ad in sutun_adlari}
+    return next((t for t in ROWID_TAKMA_ADLARI if t not in golgeli), None)
+
+
+def satir_kimligi(baglanti: Connection, tablo: str) -> tuple[str, ...]:
+    satirlar = baglanti.exec_driver_sql(f'PRAGMA table_xinfo("{tablo}")').all()
+    anahtar = sorted((int(s[5]), str(s[1])) for s in satirlar if int(s[5]) > 0)
+    if anahtar:
+        return tuple(ad for _, ad in anahtar)
+    takma = rowid_takma_adi(tuple(str(s[1]) for s in satirlar))
+    if takma is None:
+        raise KimlikYok(
+            f"{tablo}: rowid, _rowid_ ve oid adlarının üçü de sütun; örtük satır "
+            "kimliği güvenle okunamaz"
+        )
+    return (takma,)
+
+
 def sutun_adi(ad: str) -> str:
-    return ad if ad == ROWID else f'"{ad}"'
+    return ad if ad in ROWID_TAKMA_ADLARI else f'"{ad}"'
 
 
 def yapiyi_oku(veritabani: Veritabani) -> tuple[TabloBilgisi, ...]:

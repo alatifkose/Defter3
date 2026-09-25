@@ -29,6 +29,8 @@ class OkumaSonucu:
     donen: int
     baslangic: int
     devami_var: bool
+    anahtar_sutunlari: tuple[str, ...]
+    anahtarlar: tuple[tuple[Deger, ...], ...]
 
 
 def satirlari_oku(
@@ -51,8 +53,8 @@ def satirlari_oku(
     try:
         with veritabani.islem() as oturum:
             baglanti = oturum.connection()
-            siralama = yapi.anahtar_sutunlari(baglanti, tablo) or (yapi.ROWID,)
-            sirala = ", ".join(yapi.sutun_adi(a) for a in siralama)
+            kimlik = yapi.satir_kimligi(baglanti, tablo)
+            kimlik_secimi = ", ".join(yapi.sutun_adi(a) for a in kimlik)
             with _yalniz_okuma(baglanti):
                 toplam = int(
                     baglanti.exec_driver_sql(
@@ -60,14 +62,16 @@ def satirlari_oku(
                     ).scalar_one()
                 )
                 sonuc = baglanti.exec_driver_sql(
-                    f'SELECT * FROM "{tablo}"{nerede} ORDER BY {sirala} '
-                    "LIMIT ? OFFSET ?",
+                    f'SELECT {kimlik_secimi}, * FROM "{tablo}"{nerede} '
+                    f"ORDER BY {kimlik_secimi} LIMIT ? OFFSET ?",
                     (*degerler, sinir, baslangic),
                 )
-                sutunlar = tuple(str(k) for k in sonuc.keys())
-                satirlar = tuple(
-                    tuple(yapi.deger_json(d) for d in s) for s in sonuc.all()
-                )
+                sutunlar = tuple(str(k) for k in sonuc.keys())[len(kimlik) :]
+                ham = tuple(tuple(yapi.deger_json(d) for d in s) for s in sonuc.all())
+                anahtarlar = tuple(s[: len(kimlik)] for s in ham)
+                satirlar = tuple(s[len(kimlik) :] for s in ham)
+    except yapi.KimlikYok as hata:
+        raise OkumaHatasi(f"{tablo}: okunamadı: {hata}") from hata
     except SQLAlchemyError as hata:
         neden = hata.orig if isinstance(hata, DBAPIError) else hata
         raise OkumaHatasi(f"{tablo}: okunamadı: {neden}") from hata
@@ -78,6 +82,8 @@ def satirlari_oku(
         donen=len(satirlar),
         baslangic=baslangic,
         devami_var=baslangic + len(satirlar) < toplam,
+        anahtar_sutunlari=kimlik,
+        anahtarlar=anahtarlar,
     )
 
 

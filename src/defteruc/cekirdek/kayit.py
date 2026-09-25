@@ -32,7 +32,7 @@ def satirlar_ekle(
     try:
         with veritabani.islem() as oturum:
             baglanti = oturum.connection()
-            anahtar = yapi.anahtar_sutunlari(baglanti, tablo) or (yapi.ROWID,)
+            anahtar = yapi.satir_kimligi(baglanti, tablo)
             donus = " RETURNING " + ", ".join(yapi.sutun_adi(a) for a in anahtar)
             anahtarlar = tuple(
                 tuple(
@@ -41,6 +41,10 @@ def satirlar_ekle(
                 )
                 for sql, degerler in cumleler
             )
+    except yapi.KimlikYok as hata:
+        raise KayitHatasi(
+            f"satır kimliği belirlenemedi, hiçbiri yazılmadı: {hata}"
+        ) from hata
     except SQLAlchemyError as hata:
         neden = hata.orig if isinstance(hata, DBAPIError) else hata
         raise KayitHatasi(

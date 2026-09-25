@@ -16,8 +16,6 @@ AD_BICIMI = re.compile(r"^[a-z][a-z0-9_]*$")
 
 GECICI_AD_EKI = "__yeniden_kurma"
 
-ROWID_TAKMA_ADLARI = ("rowid", "_rowid_", "oid")
-
 
 class MotorHatasi(Exception): ...
 
@@ -292,7 +290,7 @@ def _sutun_ozelligi_degistir(
     kopyalanacak = tuple(ad for ad, uretilen in yeni_sutunlar.items() if not uretilen)
     rowid_takma = None
     if not _rowidsiz(baglanti, tablo) and not _rowidsiz(baglanti, gecici):
-        rowid_takma = _rowid_takma_adi(tuple(eski_sutunlar))
+        rowid_takma = yapi.rowid_takma_adi(tuple(eski_sutunlar))
         if rowid_takma is None:
             raise MotorHatasi(
                 f"{tablo}: rowid, _rowid_ ve oid adlarının üçü de sütun; örtük "
@@ -328,11 +326,6 @@ def _sutun_ozelligi_degistir(
 def _sutun_bilgisi(baglanti: Connection, tablo: str) -> dict[str, bool]:
     satirlar = baglanti.exec_driver_sql(f"PRAGMA table_xinfo({_tirnakla(tablo)})").all()
     return {str(s[1]): int(s[6]) != 0 for s in satirlar}
-
-
-def _rowid_takma_adi(sutun_adlari: tuple[str, ...]) -> str | None:
-    golgeli = {ad.casefold() for ad in sutun_adlari}
-    return next((t for t in ROWID_TAKMA_ADLARI if t not in golgeli), None)
 
 
 def _sutunlari_dogrula(

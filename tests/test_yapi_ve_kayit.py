@@ -235,3 +235,37 @@ def test_blob_anahtar_kayipsiz_ve_json_uyumlu_doner(veritabani: vt.Veritabani) -
     assert isinstance(a, str) and a.startswith("X'") and len(a) == 2 + 16 + 1
     assert a != b
     assert _satirlar(veritabani, f"SELECT ad FROM binary_pk WHERE id = {a}") == [("A",)]
+
+
+# --- inceleme 2026-09-25, bulgu 3: rowid adlı sütun anahtar sanılmaz ----------------
+
+
+def test_rowid_adli_sutun_golgelerse_gercek_kimlik_doner(
+    veritabani: vt.Veritabani,
+) -> None:
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "shadow", (motor.Sutun("rowid", ("TEXT",)), motor.Sutun("ad", ("TEXT",)))
+        ),
+    )
+    sonuc = kayit.satirlar_ekle(
+        veritabani,
+        "shadow",
+        [{"rowid": "same", "ad": "A"}, {"rowid": "same", "ad": "B"}],
+    )
+    assert sonuc.anahtar_sutunlari == ("_rowid_",)
+    assert sonuc.anahtarlar == ((1,), (2,))
+    assert _satirlar(veritabani, "SELECT rowid, ad FROM shadow ORDER BY _rowid_") == [
+        ("same", "A"),
+        ("same", "B"),
+    ]
+
+
+def test_uc_takma_ad_da_golgeliyse_kayit_reddedilir(veritabani: vt.Veritabani) -> None:
+    # Motor alt çizgiyle başlayan ad açmaz; böyle bir tablo ancak dışarıdan gelir.
+    with veritabani.islem() as oturum:
+        oturum.execute(text('CREATE TABLE "golge" ("rowid", "_rowid_", "oid")'))
+    with pytest.raises(kayit.KayitHatasi, match="satır kimliği"):
+        kayit.satirlar_ekle(veritabani, "golge", [{"rowid": 1}])
+    assert _satirlar(veritabani, "SELECT count(*) FROM golge") == [(0,)]

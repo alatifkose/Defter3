@@ -70,7 +70,9 @@ def dolu(veritabani: vt.Veritabani) -> vt.Veritabani:
 def test_bos_tablo(veritabani: vt.Veritabani) -> None:
     _uygula(veritabani, KISILER)
     sonuc = okuma.satirlari_oku(veritabani, "kisiler")
-    assert sonuc == okuma.OkumaSonucu(("id", "ad", "puan"), (), 0, 0, 0, False)
+    assert sonuc == okuma.OkumaSonucu(
+        ("id", "ad", "puan"), (), 0, 0, 0, False, ("id",), ()
+    )
 
 
 def test_varsayilan_sinir_ve_devami(dolu: vt.Veritabani) -> None:
@@ -199,3 +201,61 @@ def test_okuma_sonrasi_baglanti_yeniden_yazabilir(dolu: vt.Veritabani) -> None:
     with dolu.islem() as oturum:
         assert oturum.execute(text("PRAGMA table_info(kisiler)")).all()
     assert okuma.satirlari_oku(dolu, "kisiler").eslesen_toplam == 251
+
+
+# --- inceleme 2026-09-25, bulgu 3 ve 4: okuma, ekleme ile aynı kimlik sözleşmesi
+
+
+def test_anahtarsiz_tabloda_okuma_satir_kimligi_verir(
+    veritabani: vt.Veritabani,
+) -> None:
+    _uygula(
+        veritabani, motor.TabloOlusturmaIstegi("no_pk", (motor.Sutun("ad", ("TEXT",)),))
+    )
+    eklenen = kayit.satirlar_ekle(veritabani, "no_pk", [{"ad": "A"}, {"ad": "A"}])
+    sonuc = okuma.satirlari_oku(veritabani, "no_pk")
+    assert sonuc.sutunlar == ("ad",)
+    assert sonuc.satirlar == (("A",), ("A",))
+    assert sonuc.anahtar_sutunlari == eklenen.anahtar_sutunlari == ("rowid",)
+    assert sonuc.anahtarlar == eklenen.anahtarlar == ((1,), (2,))
+
+
+def test_okuma_rowid_golgesinde_gercek_kimligi_verir(veritabani: vt.Veritabani) -> None:
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "shadow", (motor.Sutun("rowid", ("TEXT",)), motor.Sutun("ad", ("TEXT",)))
+        ),
+    )
+    kayit.satirlar_ekle(
+        veritabani,
+        "shadow",
+        [{"rowid": "same", "ad": "B"}, {"rowid": "same", "ad": "A"}],
+    )
+    sonuc = okuma.satirlari_oku(veritabani, "shadow")
+    assert sonuc.sutunlar == ("rowid", "ad")
+    assert sonuc.satirlar == (("same", "B"), ("same", "A"))
+    assert sonuc.anahtar_sutunlari == ("_rowid_",)
+    assert sonuc.anahtarlar == ((1,), (2,))
+    sayfa = okuma.satirlari_oku(veritabani, "shadow", "ad = ?", ("A",))
+    assert sayfa.anahtarlar == ((2,),)
+
+
+def test_acik_anahtar_ve_bilesik_anahtar_okumada(veritabani: vt.Veritabani) -> None:
+    _uygula(veritabani, KISILER)
+    kayit.satirlar_ekle(veritabani, "kisiler", [{"ad": "A"}, {"ad": "B"}])
+    sonuc = okuma.satirlari_oku(veritabani, "kisiler", "ad = ?", ("B",))
+    assert sonuc.anahtar_sutunlari == ("id",) and sonuc.anahtarlar == ((2,),)
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "bilesik",
+            (motor.Sutun("yil", ("INTEGER",)), motor.Sutun("no", ("INTEGER",))),
+            kisitlar=("PRIMARY KEY (yil, no)",),
+            secenekler=("WITHOUT ROWID",),
+        ),
+    )
+    kayit.satirlar_ekle(veritabani, "bilesik", [{"yil": 2026, "no": 7}])
+    sonuc = okuma.satirlari_oku(veritabani, "bilesik")
+    assert sonuc.anahtar_sutunlari == ("yil", "no") and sonuc.anahtarlar == ((2026, 7),)
+    assert sonuc.satirlar == ((2026, 7),)
