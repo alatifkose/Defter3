@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -76,6 +77,15 @@ class IndeksOlusturmaIstegi:
 @dataclass(frozen=True, slots=True)
 class IndeksSilmeIstegi:
     indeks: str
+
+
+type YapiIstegi = (
+    TabloOlusturmaIstegi
+    | SutunEklemeIstegi
+    | SutunOzelligiDegistirmeIstegi
+    | IndeksOlusturmaIstegi
+    | IndeksSilmeIstegi
+)
 
 
 # --- ad ve parça sınırı: SQL'e güvenle yazılabilmek için ---------------------------
@@ -201,84 +211,114 @@ def indeks_silme_sql(istek: IndeksSilmeIstegi) -> str:
     return f"DROP INDEX {_tirnakla(adi_dogrula(istek.indeks, 'indeks'))}"
 
 
-# --- işler: her biri tek transaction -------------------------------------------------
+# --- işler: tek transaction, bağlantı çağırandan gelir ---------------------------
 
 
-def tablo_olustur(veritabani: Veritabani, istek: TabloOlusturmaIstegi) -> None:
-    ddl = tablo_olusturma_sql(istek)
-    beklenen = tuple(s.ad for s in istek.sutunlar)
-    _uygula(veritabani, ddl, lambda b: _sutunlari_dogrula(b, istek.tablo, beklenen))
+def istek_sql(istek: YapiIstegi) -> str:
+    match istek:
+        case TabloOlusturmaIstegi():
+            return tablo_olusturma_sql(istek)
+        case SutunEklemeIstegi():
+            return sutun_ekleme_sql(istek)
+        case SutunOzelligiDegistirmeIstegi():
+            return ";\n".join(sutun_ozelligi_degistirme_sql(istek))
+        case IndeksOlusturmaIstegi():
+            return indeks_olusturma_sql(istek)
+        case IndeksSilmeIstegi():
+            return indeks_silme_sql(istek)
 
 
-def sutun_ekle(veritabani: Veritabani, istek: SutunEklemeIstegi) -> None:
-    ddl = sutun_ekleme_sql(istek)
-    _uygula(
-        veritabani, ddl, lambda b: _son_sutunu_dogrula(b, istek.tablo, istek.sutun.ad)
-    )
+def yeniden_kurma_gerekir(istek: YapiIstegi) -> bool:
+    return isinstance(istek, SutunOzelligiDegistirmeIstegi)
 
 
-def indeks_olustur(veritabani: Veritabani, istek: IndeksOlusturmaIstegi) -> None:
-    _uygula(veritabani, indeks_olusturma_sql(istek))
+@contextmanager
+def islem_ac(
+    veritabani: Veritabani, istek: YapiIstegi
+) -> Generator[Connection, None, None]:
+    istek_sql(istek)
+    try:
+        if yeniden_kurma_gerekir(istek):
+            with veritabani.islem_yabanci_anahtar_denetimsiz() as baglanti:
+                yield baglanti
+        else:
+            with veritabani.islem() as oturum:
+                yield oturum.connection()
+    except YabanciAnahtarIhlali as hata:
+        raise MotorHatasi(f"istek uygulanamadı, geri alındı: {hata}") from hata
 
 
-def indeks_sil(veritabani: Veritabani, istek: IndeksSilmeIstegi) -> None:
-    _uygula(veritabani, indeks_silme_sql(istek))
+def uygula_baglantida(baglanti: Connection, istek: YapiIstegi) -> None:
+    try:
+        match istek:
+            case TabloOlusturmaIstegi():
+                _tablo_olustur(baglanti, istek)
+            case SutunEklemeIstegi():
+                _sutun_ekle(baglanti, istek)
+            case SutunOzelligiDegistirmeIstegi():
+                _sutun_ozelligi_degistir(baglanti, istek)
+            case IndeksOlusturmaIstegi():
+                baglanti.exec_driver_sql(indeks_olusturma_sql(istek))
+            case IndeksSilmeIstegi():
+                baglanti.exec_driver_sql(indeks_silme_sql(istek))
+    except SQLAlchemyError as hata:
+        raise _motor_hatasi(hata) from hata
 
 
-def sutun_ozelligi_degistir(
-    veritabani: Veritabani, istek: SutunOzelligiDegistirmeIstegi
+def _tablo_olustur(baglanti: Connection, istek: TabloOlusturmaIstegi) -> None:
+    baglanti.exec_driver_sql(tablo_olusturma_sql(istek))
+    _sutunlari_dogrula(baglanti, istek.tablo, tuple(s.ad for s in istek.sutunlar))
+
+
+def _sutun_ekle(baglanti: Connection, istek: SutunEklemeIstegi) -> None:
+    baglanti.exec_driver_sql(sutun_ekleme_sql(istek))
+    _son_sutunu_dogrula(baglanti, istek.tablo, istek.sutun.ad)
+
+
+def _sutun_ozelligi_degistir(
+    baglanti: Connection, istek: SutunOzelligiDegistirmeIstegi
 ) -> None:
     kurma, _, silme, adlandirma = sutun_ozelligi_degistirme_sql(istek)
     tablo, gecici = istek.tablo, istek.tablo + GECICI_AD_EKI
-    try:
-        with veritabani.islem_yabanci_anahtar_denetimsiz() as baglanti:
-            eski_sutunlar = _yeniden_kurma_on_denetimi(baglanti, istek)
-            bagli = _bagli_nesneler(baglanti, tablo)
-            sayac = _sayaci_oku(baglanti, tablo)
+    eski_sutunlar = _yeniden_kurma_on_denetimi(baglanti, istek)
+    bagli = _bagli_nesneler(baglanti, tablo)
+    sayac = _sayaci_oku(baglanti, tablo)
 
-            for ddl in bagli.once_silinecek:
-                baglanti.exec_driver_sql(ddl)
-            baglanti.exec_driver_sql(kurma)
-            yeni_sutunlar = _sutunlari_dogrula(baglanti, gecici, tuple(eski_sutunlar))
-            kopyalanacak = tuple(
-                ad for ad, uretilen in yeni_sutunlar.items() if not uretilen
+    for ddl in bagli.once_silinecek:
+        baglanti.exec_driver_sql(ddl)
+    baglanti.exec_driver_sql(kurma)
+    yeni_sutunlar = _sutunlari_dogrula(baglanti, gecici, tuple(eski_sutunlar))
+    kopyalanacak = tuple(ad for ad, uretilen in yeni_sutunlar.items() if not uretilen)
+    rowid_takma = None
+    if not _rowidsiz(baglanti, tablo) and not _rowidsiz(baglanti, gecici):
+        rowid_takma = _rowid_takma_adi(tuple(eski_sutunlar))
+        if rowid_takma is None:
+            raise MotorHatasi(
+                f"{tablo}: rowid, _rowid_ ve oid adlarının üçü de sütun; örtük "
+                "satır kimliği güvenle okunamaz, iş reddedildi"
             )
-            rowid_takma = None
-            if not _rowidsiz(baglanti, tablo) and not _rowidsiz(baglanti, gecici):
-                rowid_takma = _rowid_takma_adi(tuple(eski_sutunlar))
-                if rowid_takma is None:
-                    raise MotorHatasi(
-                        f"{tablo}: rowid, _rowid_ ve oid adlarının üçü de sütun; örtük "
-                        "satır kimliği güvenle okunamaz, iş reddedildi"
-                    )
-            baglanti.exec_driver_sql(
-                _kopyalama_sql(gecici, tablo, kopyalanacak, rowid_takma)
-            )
-            eski_sayi, yeni_sayi = (_satir_sayisi(baglanti, t) for t in (tablo, gecici))
-            if eski_sayi != yeni_sayi:
-                raise MotorHatasi(
-                    f"{tablo}: kopyalama eksik ({eski_sayi} satırdan {yeni_sayi}); "
-                    "iş geri alındı"
-                )
-            _kopyayi_dogrula(
-                baglanti,
-                tablo,
-                gecici,
-                eski_sayi,
-                kopyalanacak,
-                rowid_takma,
-                istek.deger_donusumu_izinli,
-            )
-            baglanti.exec_driver_sql(silme)
-            baglanti.exec_driver_sql(adlandirma)
-            for ddl in bagli.sonra_kurulacak:
-                baglanti.exec_driver_sql(ddl)
-            if sayac is not None:
-                _sayaci_yaz(baglanti, tablo, sayac)
-    except YabanciAnahtarIhlali as hata:
-        raise MotorHatasi(f"istek uygulanamadı, geri alındı: {hata}") from hata
-    except SQLAlchemyError as hata:
-        raise _motor_hatasi(hata) from hata
+    baglanti.exec_driver_sql(_kopyalama_sql(gecici, tablo, kopyalanacak, rowid_takma))
+    eski_sayi, yeni_sayi = (_satir_sayisi(baglanti, t) for t in (tablo, gecici))
+    if eski_sayi != yeni_sayi:
+        raise MotorHatasi(
+            f"{tablo}: kopyalama eksik ({eski_sayi} satırdan {yeni_sayi}); "
+            "iş geri alındı"
+        )
+    _kopyayi_dogrula(
+        baglanti,
+        tablo,
+        gecici,
+        eski_sayi,
+        kopyalanacak,
+        rowid_takma,
+        istek.deger_donusumu_izinli,
+    )
+    baglanti.exec_driver_sql(silme)
+    baglanti.exec_driver_sql(adlandirma)
+    for ddl in bagli.sonra_kurulacak:
+        baglanti.exec_driver_sql(ddl)
+    if sayac is not None:
+        _sayaci_yaz(baglanti, tablo, sayac)
 
 
 # --- yeniden kurmanın okumaları: yalnız bu işe özel ---------------------------------
@@ -629,22 +669,7 @@ def _ust_duzey_parcalar(metin: str) -> list[str]:
     return [p.strip() for p in parcalar if p.strip()]
 
 
-# --- ortak uygulama ----------------------------------------------------------------
-
-
-def _uygula(
-    veritabani: Veritabani,
-    ddl: str,
-    sonra: Callable[[Connection], object] | None = None,
-) -> None:
-    try:
-        with veritabani.islem() as oturum:
-            baglanti = oturum.connection()
-            baglanti.exec_driver_sql(ddl)
-            if sonra is not None:
-                sonra(baglanti)
-    except SQLAlchemyError as hata:
-        raise _motor_hatasi(hata) from hata
+# --- hata çevirisi ----------------------------------------------------------------
 
 
 def _motor_hatasi(hata: SQLAlchemyError) -> MotorHatasi:

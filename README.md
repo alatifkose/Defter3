@@ -127,8 +127,64 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   yazılır; silinmiş kimlikler yeniden dağıtılmaz. Bu okumalar yalnız bu işe
   özeldir.
 
-Henüz yok: uygulamanın onay penceresi, motoru Cowork'e açan MCP araçları,
-yeni mükerrerlik tasarımı.
+* **Yapı istekleri ve onay** (`cekirdek/onay.py`, 2026-09-25): bir yapı
+  isteği bırakıldığında uygulanmaz, sistem tablosunda "bekliyor" olarak
+  saklanır ve talep kimliği döner; onayda motor çağrılır, redde çağrılmaz.
+  Ayrıntı "Yapı istekleri ve onay" bölümünde.
+
+Henüz yok: komut satırından ve pencereden onay, motoru Cowork'e açan MCP
+araçları, satır ekleme (kayıt), yapıyı okuma, yeni mükerrerlik tasarımı.
+
+## Yapı istekleri ve onay
+
+`src/defteruc/cekirdek/onay.py` (2026-09-25). Sözlükteki kural: yapıyı
+değiştiren her şey kullanıcı onayına bağlıdır, onayı uygulama alır. Bu modül
+onayın kaydını tutar ve kararı uygular; kullanıcıya soran arayüz (komut
+satırı, pencere) ve Cowork'a açan MCP araçları bu modülü çağırır.
+
+**Sistem tablosu.** İstekler `_defteruc_yapi_istekleri` tablosunda durur
+(`STRICT`). Bu bir nesne değildir; uygulamanın kendi defteridir (sözlük:
+"Sistem tablosu"). Adı bilerek motorun ad kuralına (`AD_BICIMI`) uymaz:
+Cowork motorla bu tabloyu açamaz, değiştiremez, indeksleyemez. Sütunlar:
+`kimlik` (talep kimliği, `AUTOINCREMENT`, yeniden kullanılmaz), `tur`,
+`istek` (isteğin JSON'u), `sql` (motorun üreteceği cümle, olduğu gibi),
+`durum` (`BEKLIYOR`, `UYGULANDI`, `REDDEDILDI`, `UYGULANAMADI`; `CHECK` ile
+sınırlı), `olusturma`, `karar` (UTC, ISO 8601), `sonuc` (uygulanamadıysa
+hata metni). `sistem_tablosunu_hazirla` "yoksa oluştur"dur; tablo şeması
+değişirse göç politikası ayrıca kararlaştırılır (henüz yok).
+
+**İstek bırakma** (`istek_birak`). Beş istek türü motorun istek
+sınıflarıdır (`m.YapiIstegi`). Motorun SQL üretimi (`istek_sql`) istek
+bırakılırken çalışır: geçersiz ad ya da parça (`GecersizAd`,
+`GecersizParca`) daha kayıt yazılmadan reddedilir, veritabanına dokunulmaz.
+Kabul edilen istek `BEKLIYOR` yazılır, talep kimliği döner. Kullanıcıya
+gösterilecek şey `sql` sütunudur: onaylanan bir özet değil, çalışacak
+cümlenin kendisidir (yeniden kurmada dört cümle; indeks, trigger ve görünüm
+taşıması motorun kendi işidir, metne girmez).
+
+**Karar** (`onayla`, `reddet`). Onay ile motor çağrısı tek transaction'dadır:
+motorun `islem_ac` bağlamı istek türüne göre normal ya da yabancı anahtar
+denetimsiz transaction açar; içinde önce durum satırı `BEKLIYOR → UYGULANDI`
+olarak güncellenir (`WHERE durum = 'BEKLIYOR'` koşuluyla, tek satır
+etkilenmezse `ZatenKararVerilmis`), sonra `uygula_baglantida` çalışır. Motor
+düşerse (tablo zaten var, kopyada değer değişti, yabancı anahtar ihlali...)
+transaction bütünüyle geri alınır, yapı değişmez; ardından ayrı bir
+transaction'da durum `UYGULANAMADI` ve hata metni yazılır. Red motoru
+çağırmaz. Karar verilmiş isteğe ikinci karar yoktur. İki süreç (Cowork'un
+sunucusu ve komut satırı) aynı isteğe aynı anda karar vermeye kalkarsa
+ikincisi SQLite'ın yazma kilidinde bekler, ilk commit edince sıfır satır
+günceller ve `ZatenKararVerilmis` alır; bu davranış betikle doğrulandı ve
+iş parçacıklı testle kanıtlanır (`tests/test_onay.py`). Yazma kilidi
+bekleme süresi bugün `sqlite3` varsayılanıdır (5 s); süre dolunca ham
+`database is locked` hatası yükselir, anlamlı hataya çevrilmesi "Bilinen
+teknik borç" 1'dir ve MCP araçlarıyla birlikte ele alınacaktır.
+
+**Motorun arayüzü** (2026-09-25): iş fonksiyonları `Veritabani` yerine
+bağlantı alır. `islem_ac(veritabani, istek)` doğru transaction türünü açar
+ve isteği açmadan önce doğrular; `uygula_baglantida(baglanti, istek)` işi o
+bağlantıda yapar; `istek_sql(istek)` çalışacak cümleyi üretir. Yapıya
+dokunan tek üretim çağıranı onay modülüdür; motor testleri de aynı iki
+çağrıyla çalışır.
 
 ## Veritabanı
 
@@ -576,6 +632,8 @@ src/defteruc/    uygulama paketi
   mcp_kapisi.py   uv run defteruc-mcp; MCP sunucusu ve araçları
   cekirdek/       genel çekirdek; finansı tanımaz
     veritabani.py   SQLite bağlantı politikası, işlem sınırı
+    motor.py        yapı işleri: tablo, sütun, sütun özelliği, indeks; ham SQL
+    onay.py         yapı istekleri: sistem tablosu, bekleyenler, onay ve ret
     arsiv.py        gelen dizini sınırı, akışla SHA-256, içerik adresli atomik arşiv, bütünlük
   finans/         finansal domain; çekirdeği kullanabilir (boş)
 tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi; test_arsiv.py: arşiv)

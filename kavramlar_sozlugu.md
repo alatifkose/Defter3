@@ -26,6 +26,24 @@ Veritabanının yapısını değiştiren her şeydir: tablo oluşturmak, tabloya
 
 _(Abdüllatif'in onayıyla eklendi, 2026-09-24.)_
 
+### Yapı isteği
+
+Yapı isteği, Cowork'un motora yaptırmak istediği bir yapı değişikliğinin (tablo oluşturma, sütun ekleme, sütun özelliği değiştirme, indeks oluşturma, indeks silme) uygulanmadan önce kaydedilmiş hâlidir. İstek bırakıldığında uygulanmaz, "bekliyor" durumunda saklanır; kullanıcı onaylayınca uygulama motoru çağırır, reddedince hiçbir şey yapılmaz. Bir isteğin durumu şunlardan biridir: bekliyor, uygulandı, reddedildi, uygulanamadı.
+
+_(Abdüllatif'in onayıyla eklendi, 2026-09-25.)_
+
+### Talep kimliği
+
+Talep kimliği, bir yapı isteğine bırakıldığı anda verilen ve o isteği hep aynı şekilde gösteren numaradır. Cowork bu numarayla isteğin durumunu sorar; kullanıcı bu numarayla onaylar ya da reddeder. Numara yeniden kullanılmaz.
+
+_(Abdüllatif'in onayıyla eklendi, 2026-09-25.)_
+
+### Sistem tablosu
+
+Sistem tablosu, uygulamanın kendi işini yürütmek için tuttuğu tablodur; ilk örneği yapı isteklerinin tutulduğu tablodur. Nesne değildir, kullanıcı verisi taşımaz, Cowork tarafından açılmaz ve motorla değiştirilemez (adı motorun ad kuralına bilerek uymaz). "Hazır kalıp tablo yok" kuralı nesneler içindir; sistem tablosu bu kuralın dışındadır.
+
+_(Abdüllatif'in onayıyla eklendi, 2026-09-25.)_
+
 ### Mükerrerlik protokolü
 
 > **2026-09-24:** Aşağıdaki protokol eski tasarıma aittir ve bu haliyle geçerli değildir. Mükerrerlik modülü olacak, tasarımı ayrıca konuşulacak.
