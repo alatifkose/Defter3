@@ -39,6 +39,8 @@ class OnayPenceresi(QMainWindow):
         self.bekleyenler = QListWidget()
         self.sql = QPlainTextEdit()
         self.sql.setReadOnly(True)
+        self.aciklama = QLabel("")
+        self.aciklama.setWordWrap(True)
         self.onayla_dugmesi = QPushButton("Onayla ve uygula")
         self.reddet_dugmesi = QPushButton("Reddet")
         self.yenile_dugmesi = QPushButton("Yenile")
@@ -57,6 +59,7 @@ class OnayPenceresi(QMainWindow):
         sag_duzen = QVBoxLayout(sag)
         sag_duzen.addWidget(QLabel("Onaylanınca çalışacak SQL"))
         sag_duzen.addWidget(self.sql)
+        sag_duzen.addWidget(self.aciklama)
         dugmeler = QHBoxLayout()
         dugmeler.addWidget(self.onayla_dugmesi)
         dugmeler.addWidget(self.reddet_dugmesi)
@@ -152,6 +155,7 @@ class OnayPenceresi(QMainWindow):
         kimlik = self.secili_kimlik()
         kayit = self._kayitlar.get(kimlik) if kimlik is not None else None
         self.sql.setPlainText(kayit.sql if kayit else "")
+        self.aciklama.setText(onay.istek_aciklamasi(kayit) if kayit else "")
         var = kayit is not None
         self.onayla_dugmesi.setEnabled(var)
         self.reddet_dugmesi.setEnabled(var)

@@ -238,3 +238,22 @@ def test_pencere_komutu_pencereyi_calistirir(
     monkeypatch.setattr(pencere, "calistir", sahte)
     assert baslangic.main([komutlar.KOMUT_PENCERE]) == 0
     assert cagrilar == [ayar]
+
+
+def test_donusum_izni_pencerede_sql_yaninda_gorunur(
+    pencere_: pencere.OnayPenceresi, veritabani: vt.Veritabani
+) -> None:
+    onay.istek_birak(veritabani, KISILER)
+    onay.istek_birak(
+        veritabani,
+        m.SutunOzelligiDegistirmeIstegi(
+            "money",
+            (m.Sutun("id", ("INTEGER", "PRIMARY KEY")), m.Sutun("value", ("REAL",))),
+            deger_donusumu_izinli=("value",),
+        ),
+    )
+    pencere_.yenile()
+    assert pencere_.aciklama.text() == ""
+    pencere_.bekleyenler.setCurrentRow(1)
+    assert "value" in pencere_.aciklama.text()
+    assert "değer dönüşümü" in pencere_.aciklama.text().casefold()

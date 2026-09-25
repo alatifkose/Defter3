@@ -170,6 +170,22 @@ def _karari_yaz(
         )
 
 
+def istek_aciklamasi(kayit: YapiIstegiKaydi) -> str:
+    istek = kayit.istek
+    if (
+        isinstance(istek, m.SutunOzelligiDegistirmeIstegi)
+        and istek.deger_donusumu_izinli
+    ):
+        sutunlar = ", ".join(istek.deger_donusumu_izinli)
+        return (
+            f"Değer dönüşümüne izin verilen sütunlar: {sutunlar}. Bu sütunlarda "
+            "kopyalanan değerin ve saklama sınıfının aynı kaldığı denetlenmez; tür "
+            "değişimiyle gelen hassasiyet kaybı geri alınmaz. Diğer sütunlar ve "
+            "kimlik her zaman aynen korunur."
+        )
+    return ""
+
+
 def _simdi() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 

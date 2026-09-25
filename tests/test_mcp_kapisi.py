@@ -574,3 +574,70 @@ def test_stdio_uzerinden_yapi_istegi_ve_sistem_durumu(tmp_path: Path) -> None:
     assert istek["structuredContent"]["durum"] == "BEKLIYOR"
     assert istek["structuredContent"]["sql"] == KISILER_SQL
     assert sonuc.yanitlar[5]["result"]["structuredContent"]["talep_kimligi"] == 1
+
+
+def test_istek_yaniti_sql_disi_alanlari_da_tasir(test_koku: Path) -> None:
+    ayar = ay.ayarlari_yukle()
+    ay.dizinleri_hazirla(ayar)
+    gunluk.gunlugu_kur(ayar.log_dizini)
+    sunucu = mcp_kapisi.sunucu_kur(ayar)
+    yanit = _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SUTUN_OZELLIGI_DEGISTIRME_ISTEGI,
+        {
+            "tablo": "money",
+            "sutunlar": [
+                {"ad": "id", "ozellikler": ["INTEGER", "PRIMARY KEY"]},
+                {"ad": "value", "ozellikler": ["REAL"]},
+            ],
+            "deger_donusumu_izinli": ["value"],
+        },
+    )
+    assert yanit["istek"]["deger_donusumu_izinli"] == ["value"]
+    assert "value" in yanit["aciklama"]
+    durum = _cagir(sunucu, mcp_kapisi.ARAC_ISTEK_DURUMU, {"talep_kimligi": 1})
+    assert durum["istek"] == yanit["istek"] and durum["aciklama"] == yanit["aciklama"]
+
+
+# --- inceleme 2026-09-25, bulgu 2: BLOB anahtar yazılır ve yanıt doğru döner ---------
+
+
+def test_blob_anahtarli_kayit_basarili_ve_tek_satir(test_koku: Path) -> None:
+    ayar = ay.ayarlari_yukle()
+    ay.dizinleri_hazirla(ayar)
+    gunluk.gunlugu_kur(ayar.log_dizini)
+    sunucu = mcp_kapisi.sunucu_kur(ayar)
+    _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_TABLO_OLUSTURMA_ISTEGI,
+        {
+            "tablo": "binary_pk",
+            "sutunlar": [
+                {
+                    "ad": "id",
+                    "ozellikler": ["BLOB", "PRIMARY KEY", "DEFAULT (X'FF00')"],
+                },
+                {"ad": "ad", "ozellikler": ["TEXT"]},
+            ],
+        },
+    )
+    onaylayan = vt.Veritabani(ayar.veritabani_yolu)
+    try:
+        assert onay.onayla(onaylayan, 1).durum is onay.Durum.UYGULANDI
+    finally:
+        onaylayan.kapat()
+    yazilan = _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIR_EKLE,
+        {"tablo": "binary_pk", "satirlar": [{"ad": "A"}]},
+    )
+    assert yazilan["anahtarlar"] == [["X'FF00'"]]
+    okunan = _cagir(sunucu, mcp_kapisi.ARAC_SATIRLARI_OKU, {"tablo": "binary_pk"})
+    assert okunan["satirlar"] == [["X'FF00'", "A"]]
+    assert okunan["eslesen_toplam"] == 1
+    tekrar = _cagir(
+        sunucu,
+        mcp_kapisi.ARAC_SATIRLARI_OKU,
+        {"tablo": "binary_pk", "kosul": "id = X'FF00'"},
+    )
+    assert tekrar["eslesen_toplam"] == 1

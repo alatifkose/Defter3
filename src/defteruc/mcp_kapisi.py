@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import asdict, dataclass
 from importlib.metadata import PackageNotFoundError, version
@@ -211,6 +212,8 @@ def kayit_sozlugu(kayit_: onay.YapiIstegiKaydi) -> dict[str, object]:
         "tur": kayit_.tur,
         "durum": kayit_.durum.value,
         "sql": kayit_.sql,
+        "istek": json.loads(onay.istek_json(kayit_.istek)),
+        "aciklama": onay.istek_aciklamasi(kayit_),
         "olusturma": kayit_.olusturma,
         "karar": kayit_.karar,
         "sonuc": kayit_.sonuc,

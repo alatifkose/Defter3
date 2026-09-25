@@ -11,7 +11,7 @@ from defteruc.cekirdek import yapi
 from defteruc.cekirdek.motor import adi_dogrula, parcayi_dogrula
 from defteruc.cekirdek.veritabani import Veritabani
 
-type Deger = str | int | float | bool | None
+Deger = yapi.Deger
 
 SINIR_VARSAYILAN = 100
 SINIR_AZAMI = 1000
@@ -65,7 +65,9 @@ def satirlari_oku(
                     (*degerler, sinir, baslangic),
                 )
                 sutunlar = tuple(str(k) for k in sonuc.keys())
-                satirlar = tuple(tuple(_deger(d) for d in s) for s in sonuc.all())
+                satirlar = tuple(
+                    tuple(yapi.deger_json(d) for d in s) for s in sonuc.all()
+                )
     except SQLAlchemyError as hata:
         neden = hata.orig if isinstance(hata, DBAPIError) else hata
         raise OkumaHatasi(f"{tablo}: okunamadı: {neden}") from hata
@@ -109,11 +111,3 @@ def _yetki(eylem: int, birinci: str | None, ikinci: str | None, *_: object) -> i
     if eylem == sqlite3.SQLITE_FUNCTION:
         return sqlite3.SQLITE_DENY if ikinci in YASAK_ISLEVLER else sqlite3.SQLITE_OK
     return sqlite3.SQLITE_DENY
-
-
-def _deger(deger: object) -> Deger:
-    if isinstance(deger, bytes):
-        return f"<{len(deger)} baytlık ikili veri>"
-    if deger is None or isinstance(deger, (str, int, float)):
-        return deger
-    return str(deger)

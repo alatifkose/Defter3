@@ -213,3 +213,25 @@ def test_degerler_parametre_olarak_gecer_sql_degil(veritabani: vt.Veritabani) ->
     kotu = "x'); DROP TABLE kisiler; --"
     kayit.satirlar_ekle(veritabani, "kisiler", [{"ad_soyad": kotu}])
     assert _satirlar(veritabani, "SELECT ad_soyad FROM kisiler") == [(kotu,)]
+
+
+def test_blob_anahtar_kayipsiz_ve_json_uyumlu_doner(veritabani: vt.Veritabani) -> None:
+    import json
+    from dataclasses import asdict
+
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "binary_pk",
+            (
+                motor.Sutun("id", ("BLOB", "PRIMARY KEY", "DEFAULT (randomblob(8))")),
+                motor.Sutun("ad", ("TEXT",)),
+            ),
+        ),
+    )
+    sonuc = kayit.satirlar_ekle(veritabani, "binary_pk", [{"ad": "A"}, {"ad": "B"}])
+    json.dumps(asdict(sonuc))
+    (a,), (b,) = sonuc.anahtarlar
+    assert isinstance(a, str) and a.startswith("X'") and len(a) == 2 + 16 + 1
+    assert a != b
+    assert _satirlar(veritabani, f"SELECT ad FROM binary_pk WHERE id = {a}") == [("A",)]

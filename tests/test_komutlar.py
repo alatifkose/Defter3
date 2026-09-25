@@ -208,3 +208,19 @@ def test_gercek_komut_satirindan_bekleyenler(ayar: ay.Ayarlar) -> None:
     assert sonuc.returncode == 0, sonuc.stderr
     assert "Bekleyen yapı istekleri: 1" in sonuc.stdout
     assert m.tablo_olusturma_sql(KISILER) in sonuc.stdout
+
+
+def test_bekleyenler_donusum_iznini_sql_altinda_gosterir(
+    ayar: ay.Ayarlar, capsys: pytest.CaptureFixture[str]
+) -> None:
+    istek = m.SutunOzelligiDegistirmeIstegi(
+        "money",
+        (m.Sutun("id", ("INTEGER", "PRIMARY KEY")), m.Sutun("value", ("REAL",))),
+        deger_donusumu_izinli=("value",),
+    )
+    _birak(ayar, istek)
+    assert baslangic.main([komutlar.KOMUT_BEKLEYENLER]) == 0
+    cikti = capsys.readouterr().out
+    sql_sonu = cikti.index('RENAME TO "money"')
+    assert "value" in cikti[sql_sonu:]
+    assert "değer dönüşümü" in cikti[sql_sonu:].casefold()

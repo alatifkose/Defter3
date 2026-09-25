@@ -329,3 +329,54 @@ def test_her_istek_turu_kaydedilip_geri_okunur(veritabani: vt.Veritabani) -> Non
 def test_bilinmeyen_tur_cozulmez() -> None:
     with pytest.raises(ValueError):
         onay.istek_coz("baska", "{}")
+
+
+# --- inceleme 2026-09-25, bulgu 1: SQL dışı alanlar onayda görünür ------------------
+
+DONUSUMLU = m.SutunOzelligiDegistirmeIstegi(
+    "money",
+    (m.Sutun("id", ("INTEGER", "PRIMARY KEY")), m.Sutun("value", ("REAL",))),
+    deger_donusumu_izinli=("value",),
+)
+DONUSUMSUZ = m.SutunOzelligiDegistirmeIstegi(
+    "money",
+    (m.Sutun("id", ("INTEGER", "PRIMARY KEY")), m.Sutun("value", ("REAL",))),
+)
+
+
+def test_ayni_sql_farkli_izin_aciklamayla_ayirt_edilir(
+    veritabani: vt.Veritabani,
+) -> None:
+    assert m.istek_sql(DONUSUMLU) == m.istek_sql(DONUSUMSUZ)
+    a = onay.kayit_getir(veritabani, onay.istek_birak(veritabani, DONUSUMLU))
+    b = onay.kayit_getir(veritabani, onay.istek_birak(veritabani, DONUSUMSUZ))
+    assert "value" in onay.istek_aciklamasi(a)
+    assert "değer dönüşümü" in onay.istek_aciklamasi(a).casefold()
+    assert onay.istek_aciklamasi(b) == ""
+    assert (
+        onay.istek_aciklamasi(
+            onay.kayit_getir(veritabani, onay.istek_birak(veritabani, KISILER))
+        )
+        == ""
+    )
+
+
+def test_izinsiz_donusum_yine_geri_alinir(veritabani: vt.Veritabani) -> None:
+    onay.onayla(
+        veritabani,
+        onay.istek_birak(
+            veritabani,
+            m.TabloOlusturmaIstegi(
+                "money",
+                (
+                    m.Sutun("id", ("INTEGER", "PRIMARY KEY")),
+                    m.Sutun("value", ("TEXT",)),
+                ),
+            ),
+        ),
+    )
+    with veritabani.islem() as oturum:
+        oturum.execute(text("INSERT INTO money VALUES (1, '9007199254740993')"))
+    kayit = onay.onayla(veritabani, onay.istek_birak(veritabani, DONUSUMSUZ))
+    assert kayit.durum is onay.Durum.UYGULANAMADI
+    assert kayit.sonuc is not None and "deger_donusumu_izinli" in kayit.sonuc

@@ -10,6 +10,16 @@ SISTEM_ON_EKI = "_defteruc_"
 
 ROWID = "rowid"
 
+type Deger = str | int | float | bool | None
+
+
+def deger_json(deger: object) -> Deger:
+    if isinstance(deger, bytes):
+        return f"X'{deger.hex().upper()}'"
+    if deger is None or isinstance(deger, (str, int, float)):
+        return deger
+    return str(deger)
+
 
 @dataclass(frozen=True, slots=True)
 class SutunBilgisi:

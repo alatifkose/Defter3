@@ -9,7 +9,7 @@ from defteruc.cekirdek import yapi
 from defteruc.cekirdek.motor import adi_dogrula
 from defteruc.cekirdek.veritabani import Veritabani
 
-type Deger = str | int | float | bool | None
+Deger = yapi.Deger
 
 
 class KayitHatasi(Exception): ...
@@ -35,7 +35,10 @@ def satirlar_ekle(
             anahtar = yapi.anahtar_sutunlari(baglanti, tablo) or (yapi.ROWID,)
             donus = " RETURNING " + ", ".join(yapi.sutun_adi(a) for a in anahtar)
             anahtarlar = tuple(
-                tuple(baglanti.exec_driver_sql(sql + donus, degerler).one())
+                tuple(
+                    yapi.deger_json(d)
+                    for d in baglanti.exec_driver_sql(sql + donus, degerler).one()
+                )
                 for sql, degerler in cumleler
             )
     except SQLAlchemyError as hata:
