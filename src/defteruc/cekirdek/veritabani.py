@@ -4,21 +4,13 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import Connection, Engine, MetaData, create_engine, event, text
+from sqlalchemy import Connection, Engine, create_engine, event, text
 from sqlalchemy.engine import URL
 from sqlalchemy.engine.interfaces import DBAPIConnection
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import ConnectionPoolEntry
 
 SURUCU = "sqlite+pysqlite"
-
-KISIT_ADLANDIRMA = {
-    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
-    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
-    "ck": "ck_%(table_name)s_%(constraint_name)s",
-    "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
-    "pk": "pk_%(table_name)s",
-}
 
 BAGLANTI_PRAGMALARI: tuple[tuple[str, str], ...] = (
     ("foreign_keys", "ON"),
@@ -26,10 +18,6 @@ BAGLANTI_PRAGMALARI: tuple[tuple[str, str], ...] = (
 )
 
 BAGLANTI_ARGUMANLARI: dict[str, object] = {"autocommit": False}
-
-
-class TabloTabani(DeclarativeBase):
-    metadata = MetaData(naming_convention=KISIT_ADLANDIRMA)
 
 
 def veritabani_url(yol: Path) -> URL:

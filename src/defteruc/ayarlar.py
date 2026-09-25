@@ -36,12 +36,10 @@ class DizinHazirlamaHatasi(OSError): ...
 class Ayarlar:
     ortam: Ortam
     veri_koku: Path
-    """Seçilen ortama ait kök: ``<ortak kök>/<ortam>``."""
     veritabani_yolu: Path
     belge_dizini: Path
     log_dizini: Path
     gelen_dizini: Path
-    """Cowork'un dosya bıraktığı, MCP araçlarının okumaya izinli olduğu dizin."""
 
     def gerekli_dizinler(self) -> tuple[Path, ...]:
         return (

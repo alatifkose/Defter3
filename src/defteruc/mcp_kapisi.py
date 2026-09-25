@@ -45,7 +45,6 @@ class SistemDurumu:
     uygulama_surumu: str
     ortam: str
     yetenekler: list[str]
-    """Bu sunucunun sunduğu araç adları."""
 
 
 def uygulama_surumu() -> str:

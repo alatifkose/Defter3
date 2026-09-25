@@ -54,23 +54,16 @@ class ArsivlenenDosya:
     boyut: int
     mime: str
     kaynak_uzantisi: str
-    """Kaynak adındaki küçük harfli uzantı (``.pdf``); yoksa boş. Metadata."""
     kaynak_adi: str
-    """Gelen dizinindeki dosya adı; arşiv yolunu etkilemez. Metadata."""
     goreli_yol: str
-    """Arşiv dizinine göre POSIX yol: ``<ilk iki hex>/<sha256>``; uzantısız."""
     diskte_zaten_vardi: bool
-    """Aynı içerik arşivde zaten vardı ve özetle doğrulandı; yeni dosya yazılmadı."""
 
 
 @dataclass(frozen=True, slots=True)
 class ArsivTaramasi:
     adresli: tuple[str, ...]
-    """``<2hex>/<sha256>`` biçimine uyan göreli yollar (veritabanı bilinmez)."""
     yarim: tuple[str, ...]
-    """``gecici/`` altında kalmış artıklar."""
     taninmayan: tuple[str, ...]
-    """Arşiv düzenine uymayan başka dosyalar."""
 
 
 # --- gelen dizini sınırı --------------------------------------------------------------

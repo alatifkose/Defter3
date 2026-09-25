@@ -21,7 +21,6 @@ class Adim:
 class AdimSonucu:
     adim: Adim
     cikis_kodu: int | None
-    """Aracın çıkış kodu; araç başlatılamadıysa ``None``."""
     aciklama: str = ""
 
     @property

@@ -143,8 +143,9 @@ bakmaz. Adres metin birleştirilerek değil SQLAlchemy `URL.create` ile üretili
 modül importunda değil `motor_olustur(yol)` ile açıkça kurulur ve kurulmak
 diske dokunmaz; dosya ilk bağlantıda oluşur. Bağlantı politikası tek yerde,
 her yeni bağlantıda uygulanır: `PRAGMA foreign_keys=ON` (bağlantı başına
-zorunlu) ve `PRAGMA journal_mode=WAL`. `TabloTabani` bütün tabloların ortak
-tabanıdır; tek `metadata`, isimli kısıt kalıbı.
+zorunlu) ve `PRAGMA journal_mode=WAL`. ORM tablo tabanı yoktur; tablolar
+motorla ham SQL olarak açılır (2026-09-25'te kullanılmayan `TabloTabani`
+kaldırıldı).
 
 **Transaction kontrolü.** Bağlantılar `sqlite3` modülünün Python 3.12+
 `autocommit=False` kipiyle açılır (`connect_args`). Eski kipte `sqlite3`
@@ -193,7 +194,7 @@ anlamındadır (2026-09-24 düzeltmesi; `os.replace` Windows'ta eşzamanlı
 doğrulamayla çakışıyordu). Not: bu garanti yalnız Windows'ta vardır;
 Linux/macOS'ta `os.rename` mevcut hedefin üstüne yazar. Proje bugün yalnız
 Windows'tur; ileride Linux/macOS desteği düşünülürse platformlar arası atomik
-bir "üstüne yazmadan taşı" yöntemi gerekir (ayrıntı modül docstring'inde).
+bir "üstüne yazmadan taşı" yöntemi gerekir.
 Doğrulama ile açılış arasındaki yarış (dış inceleme, 2026-09-24): yol
 denetimi `Path` döndürüp dosya sonra aynı yoldan yeniden açılıyordu; arada
 yol dışarıya giden bağlantıya çevrilirse dışarıdaki baytlar arşivleniyordu.
@@ -205,7 +206,7 @@ aralık (denetimler arasına giren iki ardışık değişiklik) Python'da Window
 için tanıtıcıya göreli açma olmadığından kapatılamaz; gelen dizinine
 eşzamanlı yazan başka süreç yoksa söz konusu değildir. Windows açık dosyanın
 yolunu değiştirmeye zaten izin vermez. Veritabanına dokunmaz; ayrıntılı
-kurallar modülün docstring'indedir, testler `tests/test_arsiv.py`.
+kurallar bu bölümdedir, testler `tests/test_arsiv.py`.
 
 ## Mimari sınır: çekirdek ve finans
 
@@ -288,7 +289,7 @@ sonraki aşamalarda ayrıca denetlenir.
 
 Aşama 4.0'da iki paket de boş açıldı. 2026-09-24'ten beri `cekirdek/`
 `veritabani.py` ve `arsiv.py` modüllerini içerir; `finans/` boştur
-(`__init__.py` yalnız docstring taşır). Dinamik tablo yönünde finans
+(`__init__.py` boş). Dinamik tablo yönünde finans
 paketinin yeri henüz konuşulmadı.
 
 ## Bilinen teknik borç
@@ -493,7 +494,7 @@ Aynı kontrol her `git commit` öncesinde pre-commit kancasıyla otomatik
 bir adım düşerse commit yapılmaz. Kanca kaynak dosyalarını değiştirmez.
 
 **Uzak kalite kapısı (CI) yoktur** ve bunun sebebi yapılandırma değildir; bkz.
-"Bilinen teknik borç", madde 3. Kontrol yalnız bu makinede, commit öncesinde
+"Bilinen teknik borç", madde 2. Kontrol yalnız bu makinede, commit öncesinde
 çalışır; depoya dışarıdan bakan biri testlerin geçtiğini göremez, kaynağı
 okuyarak denetlemek zorundadır.
 
@@ -574,7 +575,7 @@ src/defteruc/    uygulama paketi
   gunluk.py       teknik hata günlüğü
   mcp_kapisi.py   uv run defteruc-mcp; MCP sunucusu ve araçları
   cekirdek/       genel çekirdek; finansı tanımaz
-    veritabani.py   SQLite bağlantı politikası, TabloTabani, işlem sınırı
+    veritabani.py   SQLite bağlantı politikası, işlem sınırı
     arsiv.py        gelen dizini sınırı, akışla SHA-256, içerik adresli atomik arşiv, bütünlük
   finans/         finansal domain; çekirdeği kullanabilir (boş)
 tests/            pytest testleri (test_mimari_sinir.py: çekirdek → finans yasağı ve finansal ad denetimi; test_arsiv.py: arşiv)
