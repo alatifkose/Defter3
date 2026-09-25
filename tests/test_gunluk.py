@@ -1,4 +1,7 @@
 import logging
+import re
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -116,7 +119,10 @@ def test_boyut_siniri_asilinca_dondurulur_ve_yedek_sayisi_sinirlidir(
     for i in range(200):
         gunluk.olay_kaydet("deneme", f"satır {i} " + "x" * 50)
 
-    dosyalar = sorted(yol.name for yol in log_dizini.iterdir())
+    adlar = sorted(yol.name for yol in log_dizini.iterdir())
+    kilit = dosya.name + gunluk.KILIT_UZANTISI
+    assert kilit in adlar
+    dosyalar = [ad for ad in adlar if ad != kilit]
     assert dosyalar == [dosya.name, f"{dosya.name}.1", f"{dosya.name}.2"]
     assert all((log_dizini / ad).stat().st_size <= 300 for ad in dosyalar)
 
@@ -281,3 +287,59 @@ def test_kutuphane_parametre_suzgeci_ortak_kaydi_degistirmez(log_dizini: Path) -
     assert kayit.msg == "Tool %r failed: %r"
     assert kayit.args == ("sistem_durumu", GIZLI_METIN)
     assert kayit.getMessage() == f"Tool 'sistem_durumu' failed: {GIZLI_METIN!r}"
+
+
+# --- inceleme 43db970, bulgu 3: üç süreç aynı günlüğe döndürerek yazar, olay kaybolmaz
+
+
+YAZICI = """
+import sys
+from pathlib import Path
+from defteruc import gunluk
+dizin, etiket, n = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
+gunluk.gunlugu_kur(dizin)
+print("HAZIR", flush=True)
+sys.stdin.readline()
+for i in range(n):
+    gunluk.olay_kaydet("deneme", f"surec={etiket} sira={i:05d} " + "x" * 120)
+gunluk.gunlugu_kapat()
+"""
+
+
+def test_uc_surec_ayni_gunluge_dondurerek_yazar_olay_kaybolmaz(
+    log_dizini: Path,
+) -> None:
+    surec_sayisi, olay_sayisi = 3, 3000
+    surecler = [
+        subprocess.Popen(
+            [sys.executable, "-c", YAZICI, str(log_dizini), str(i), str(olay_sayisi)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        for i in range(surec_sayisi)
+    ]
+    for surec in surecler:
+        assert surec.stdout is not None and surec.stdout.readline().strip() == "HAZIR"
+    for surec in surecler:
+        assert surec.stdin is not None
+        surec.stdin.write("basla\n")
+        surec.stdin.flush()
+    hatalar = [surec.communicate(timeout=120)[1] for surec in surecler]
+    assert [surec.returncode for surec in surecler] == [0] * surec_sayisi
+    assert all(h == "" for h in hatalar), hatalar
+    dosyalar = sorted(
+        f for f in log_dizini.iterdir() if f.name.startswith("defteruc.log")
+    )
+    metin = "\n".join(
+        f.read_text(encoding="utf-8") for f in dosyalar if not f.name.endswith(".lock")
+    )
+    bulunan = re.findall(r"surec=(\d) sira=(\d+)", metin)
+    assert len(bulunan) == len(set(bulunan)) == surec_sayisi * olay_sayisi
+    assert any(f.name == "defteruc.log.1" for f in dosyalar), "döndürme olmadı"
+    assert (
+        len([f for f in dosyalar if not f.name.endswith(".lock")])
+        <= gunluk.YEDEK_SAYISI + 1
+    )

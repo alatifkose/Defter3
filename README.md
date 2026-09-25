@@ -709,7 +709,7 @@ yöntemi Cowork'la çalışır, talep durumu veritabanında tutulur.
 
 Günlük yalnızca ayarlardaki log dizinine yazar: `<log dizini>/defteruc.log`
 (varsayılan `<veri kökü>/<ortam>/logs/defteruc.log`). Standart kütüphanenin
-`logging` modülü kullanılır; ek bağımlılık yoktur.
+`logging` modülü kullanılır; ek bağımlılık yoktur (yazıcı özel, aşağıda).
 
 Her satır `zaman | seviye | olay | mesaj` biçimindedir; olay türleri
 şimdilik `baslangic`, `baslangic_hatasi`, `onay_karari`, `mcp_baslangic`,
@@ -720,6 +720,23 @@ Saklama sınırı: dosya 1.000.000 baytı aşınca döndürülür, en fazla 5 es
 dosya (`defteruc.log.1` ... `.5`) tutulur; toplam en çok ~6 MB. Kurulum
 tekrar çağrılırsa önceki handler kapatılıp kaldırılır, aynı olay birden
 fazla yazılmaz.
+
+**Çok süreçli yazma** (dış inceleme 43db970 bulgu 3, 2026-09-25). Aynı veri
+köküyle çalışan MCP sunucuları, komut satırı ve pencere aynı dosyaya yazar.
+Standart `RotatingFileHandler` süreçler arasında eşgüdümsüzdür: biri
+döndürürken diğerinin açık dosyası taşınır, olay kaybolur, stderr'e
+"Logging error" düşer; Windows'ta açık dosya yeniden adlandırılamadığından
+döndürme zaten düşer (bu makinede üç süreçle 9.000 olayın 7.325'i kaldı).
+Bunun yerine kendi yazıcımız `_KilitliDonduren` kullanılır: her kayıt,
+günlüğün yanındaki `defteruc.log.lock` dosyası üzerinden alınan süreçler
+arası kilit altında (Windows `msvcrt.locking`, diğerlerinde `fcntl.flock`)
+aç-yaz-kapat ile yazılır; döndürme de aynı kilit altında, boyut o anda
+ölçülerek yapılır. Hiçbir süreç dosyayı açık tutmaz, bu yüzden taşıma her
+platformda güvenlidir. Günlük hacmi küçük olduğundan her kayıtta dosya
+açmanın maliyeti önemsizdir (üç süreç × 5.000 olay ~3 s). Kilit dosyası boş
+kalır ve silinmez. Test (`tests/test_gunluk.py`) üç gerçek süreçle,
+döndürme eşiğinin üstünde, her olayın tam bir kez korunduğunu ve stderr'in
+temiz kaldığını doğrular.
 
 Gizlilik: belge içeriği, finansal kayıt içeriği, IBAN, kimlik bilgileri,
 sırlar ve ortam değişkenleri günlüğe yazılmaz. Hatalar yalnızca türüyle

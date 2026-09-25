@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import copy
 import logging
+import sys
+import time
 from collections.abc import Iterable, Mapping
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import IO
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 GUNLUK_ADI = "defteruc"
 GUNLUK_DOSYA_ADI = "defteruc.log"
@@ -13,6 +20,8 @@ KUTUPHANE_ISLEYICI_ADI = "defteruc.kutuphane"
 HATA_TURU_BILINMIYOR = "bilinmiyor"
 AZAMI_DOSYA_BOYUTU = 1_000_000
 YEDEK_SAYISI = 5
+KILIT_UZANTISI = ".lock"
+KILIT_BEKLEME_SANIYESI = 0.002
 SATIR_BICIMI = "%(asctime)s | %(levelname)s | %(olay)s | %(message)s"
 OLAY_YOKSA = "-"
 
@@ -26,6 +35,76 @@ class _OlayAlaniniTamamla(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.__dict__.setdefault("olay", OLAY_YOKSA)
         return True
+
+
+class _KilitliDonduren(logging.Handler):
+    def __init__(self, dosya: Path, azami_boyut: int, yedek_sayisi: int) -> None:
+        super().__init__()
+        self.dosya = dosya
+        self.azami_boyut = azami_boyut
+        self.yedek_sayisi = yedek_sayisi
+        self._kilit: IO[bytes] = open(
+            dosya.with_name(dosya.name + KILIT_UZANTISI), "a+b"
+        )
+        with open(dosya, "a", encoding="utf-8"):
+            pass
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            satir = self.format(record) + "\n"
+            self.acquire()
+            try:
+                self._surecler_arasi_kilitle()
+                try:
+                    self._gerekirse_dondur()
+                    with open(self.dosya, "a", encoding="utf-8") as f:
+                        f.write(satir)
+                finally:
+                    self._surecler_arasi_ac()
+            finally:
+                self.release()
+        except Exception:
+            self.handleError(record)
+
+    def close(self) -> None:
+        try:
+            self._kilit.close()
+        finally:
+            super().close()
+
+    def _gerekirse_dondur(self) -> None:
+        if not self.dosya.exists() or self.dosya.stat().st_size < self.azami_boyut:
+            return
+        for i in range(self.yedek_sayisi - 1, 0, -1):
+            kaynak = self._yedek(i)
+            if kaynak.exists():
+                kaynak.replace(self._yedek(i + 1))
+        if self.yedek_sayisi > 0:
+            self.dosya.replace(self._yedek(1))
+        else:
+            self.dosya.unlink()
+
+    def _yedek(self, sira: int) -> Path:
+        return self.dosya.with_name(f"{self.dosya.name}.{sira}")
+
+    def _surecler_arasi_kilitle(self) -> None:
+        if sys.platform == "win32":
+            while True:
+                try:
+                    self._kilit.seek(0)
+                    msvcrt.locking(self._kilit.fileno(), msvcrt.LK_NBLCK, 1)
+                    return
+                except OSError:
+                    time.sleep(KILIT_BEKLEME_SANIYESI)
+        else:
+            fcntl.flock(self._kilit.fileno(), fcntl.LOCK_EX)
+
+    def _surecler_arasi_ac(self) -> None:
+        if sys.platform == "win32":
+            self._kilit.seek(0)
+            msvcrt.locking(self._kilit.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(self._kilit.fileno(), fcntl.LOCK_UN)
 
 
 class _KutuphaneIsleyicisi(logging.Handler):
@@ -77,12 +156,7 @@ def gunlugu_kur(log_dizini: Path) -> Path:
     gunluk = logging.getLogger(GUNLUK_ADI)
     gunlugu_kapat()
     try:
-        isleyici = RotatingFileHandler(
-            dosya,
-            maxBytes=AZAMI_DOSYA_BOYUTU,
-            backupCount=YEDEK_SAYISI,
-            encoding="utf-8",
-        )
+        isleyici = _KilitliDonduren(dosya, AZAMI_DOSYA_BOYUTU, YEDEK_SAYISI)
     except OSError as hata:
         raise GunlukKurulumHatasi(
             f"Log dosyası açılamadı: {dosya} ({hata.strerror or type(hata).__name__})"
