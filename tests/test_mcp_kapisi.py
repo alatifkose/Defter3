@@ -435,7 +435,13 @@ def test_yapi_istegi_bekler_onay_sonrasi_kayit_yazilir_ve_yapi_okunur(
 
     onaylayan = vt.Veritabani(ayar.veritabani_yolu)
     try:
-        assert onay.onayla(onaylayan, 1).durum is onay.Durum.UYGULANDI
+        gorulen = onay.kayit_getir(onaylayan, 1)
+        assert (
+            onay.onayla(
+                onaylayan, 1, gorulen_onizleme=onay.onizleme_kodu(gorulen)
+            ).durum
+            is onay.Durum.UYGULANDI
+        )
     finally:
         onaylayan.kapat()
 
@@ -631,7 +637,13 @@ def test_blob_anahtarli_kayit_basarili_ve_tek_satir(test_koku: Path) -> None:
     )
     onaylayan = vt.Veritabani(ayar.veritabani_yolu)
     try:
-        assert onay.onayla(onaylayan, 1).durum is onay.Durum.UYGULANDI
+        gorulen = onay.kayit_getir(onaylayan, 1)
+        assert (
+            onay.onayla(
+                onaylayan, 1, gorulen_onizleme=onay.onizleme_kodu(gorulen)
+            ).durum
+            is onay.Durum.UYGULANDI
+        )
     finally:
         onaylayan.kapat()
     yazilan = _cagir(
@@ -667,7 +679,13 @@ def _tablo_ac(sunucu: Any, ayar: ay.Ayarlar, argumanlar: dict[str, Any]) -> None
     ]
     onaylayan = vt.Veritabani(ayar.veritabani_yolu)
     try:
-        assert onay.onayla(onaylayan, kimlik).durum is onay.Durum.UYGULANDI
+        gorulen = onay.kayit_getir(onaylayan, kimlik)
+        assert (
+            onay.onayla(
+                onaylayan, kimlik, gorulen_onizleme=onay.onizleme_kodu(gorulen)
+            ).durum
+            is onay.Durum.UYGULANDI
+        )
     finally:
         onaylayan.kapat()
 

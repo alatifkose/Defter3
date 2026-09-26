@@ -44,16 +44,19 @@ def bekleyenleri_goster(ayarlar: Ayarlar) -> int:
         _yaz(kayit.sql)
         if aciklama := onay.istek_aciklamasi(kayit):
             _yaz(f"DİKKAT: {aciklama}")
+        _yaz(
+            f"Onaylamak için: defteruc {KOMUT_ONAYLA} {kayit.kimlik} "
+            f"--onizleme {onay.onizleme_kodu(kayit)}"
+        )
     _yaz("")
-    _yaz(f"Onaylamak için: defteruc {KOMUT_ONAYLA} <kimlik>")
     _yaz(f"Reddetmek için: defteruc {KOMUT_REDDET} <kimlik>")
     return CIKIS_BASARILI
 
 
-def onayla(ayarlar: Ayarlar, kimlik: int) -> int:
+def onayla(ayarlar: Ayarlar, kimlik: int, *, gorulen_onizleme: str) -> int:
     try:
         with _veritabani(ayarlar) as veritabani:
-            kayit = onay.onayla(veritabani, kimlik)
+            kayit = onay.onayla(veritabani, kimlik, gorulen_onizleme=gorulen_onizleme)
     except (onay.OnayHatasi, VeritabaniMesgul) as hata:
         _hata_yaz(str(hata))
         return CIKIS_HATALI

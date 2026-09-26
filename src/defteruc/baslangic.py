@@ -68,6 +68,12 @@ def _ayristirici() -> argparse.ArgumentParser:
     ):
         alt = komut.add_parser(ad, help=aciklama)
         alt.add_argument("kimlik", type=int, help="talep kimliği")
+        if ad == komutlar.KOMUT_ONAYLA:
+            alt.add_argument(
+                "--onizleme",
+                required=True,
+                help="bekleyenler çıktısında gösterilen önizleme kodu",
+            )
     return ayristirici
 
 
@@ -83,7 +89,11 @@ def _calistir(argv: Sequence[str] | None) -> int:
         case komutlar.KOMUT_BEKLEYENLER:
             return komutlar.bekleyenleri_goster(ayarlar)
         case komutlar.KOMUT_ONAYLA:
-            return komutlar.onayla(ayarlar, int(secenekler.kimlik))
+            return komutlar.onayla(
+                ayarlar,
+                int(secenekler.kimlik),
+                gorulen_onizleme=secenekler.onizleme,
+            )
         case komutlar.KOMUT_REDDET:
             return komutlar.reddet(ayarlar, int(secenekler.kimlik))
         case komutlar.KOMUT_PENCERE:

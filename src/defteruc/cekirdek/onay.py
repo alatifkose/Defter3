@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
@@ -152,27 +153,58 @@ def kayit_getir(veritabani: Veritabani, kimlik: int) -> YapiIstegiKaydi:
     return _kayit(tuple(satir))
 
 
-def onayla(veritabani: Veritabani, kimlik: int) -> YapiIstegiKaydi:
+def onizleme_kodu(kayit: YapiIstegiKaydi) -> str:
+    """Gösterilen SQL'i ve isteği bağlar; yetkilendirme anahtarı değildir."""
+    metin = json.dumps(
+        [kayit.kimlik, kayit.tur, istek_json(kayit.istek), kayit.sql],
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(metin.encode("utf-8")).hexdigest()
+
+
+def onayla(
+    veritabani: Veritabani, kimlik: int, *, gorulen_onizleme: str
+) -> YapiIstegiKaydi:
     kayit = _bekleyen_kayit(veritabani, kimlik)
-    degisen: str | None = None
+    degisti = False
+    onizleme_hatasi = OnizlemeDegisti(
+        f"talep {kimlik} için önizleme değişti veya görülen önizleme kodu "
+        "eşleşmiyor; karar verilmedi. Güncel SQL'i yeniden görüntüleyip "
+        "onaylayın (komut satırı: defteruc bekleyenler)"
+    )
     try:
         with m.islem_ac(veritabani, kayit.istek) as baglanti:
-            # Onaylanan metin çalışacak metin olmalı: saklı önizleme bu bağlantıda
-            # yeniden üretilenden farklıysa karar verilmez, yeni metin saklanır ve
-            # kullanıcıya yeniden bakması söylenir (inceleme a9efca2 bulgu 1).
-            degisen = _guncel_onizleme(baglanti, kayit)
-            if degisen is None:
+            # Önizleme kontrolü ile uygulama arasında başka yazar giremez.
+            # Durumu değiştirmeden kilit al; arada verilmiş kararı da koru.
+            if (
+                baglanti.exec_driver_sql(
+                    f'UPDATE "{SISTEM_TABLOSU}" SET kimlik = kimlik '
+                    "WHERE kimlik = ? AND durum = ?",
+                    (kimlik, Durum.BEKLIYOR.value),
+                ).rowcount
+                != 1
+            ):
+                raise ZatenKararVerilmis(
+                    f"talep {kimlik} bu arada başka bir yerden karara bağlandı"
+                )
+            guncel = _guncel_onizleme(baglanti, kayit)
+            if guncel is not None:
+                kayit = replace(kayit, sql=guncel)
+            # Saklı metin başka okuyucuyla yenilenmiş olsa da çağıranın gerçekten
+            # gösterdiği önizleme esas alınır; eksik kod için otomatik okuma yoktur.
+            degisti = gorulen_onizleme != onizleme_kodu(kayit)
+            if not degisti:
                 _karari_yaz(baglanti, kimlik, Durum.UYGULANDI, None)
                 m.uygula_baglantida(baglanti, kayit.istek)
     except m.MotorHatasi as hata:
+        # Eski onay zaten durdurulduysa, transaction çıkışındaki FK denetimi
+        # hatası da bunu UYGULANAMADI kararına çeviremez.
+        if degisti:
+            raise onizleme_hatasi from hata
         with veritabani.islem() as oturum:
             _karari_yaz(oturum.connection(), kimlik, Durum.UYGULANAMADI, str(hata))
-    if degisen is not None:
-        raise OnizlemeDegisti(
-            f"talep {kimlik} için çalışacak SQL, istek bırakıldığından beri değişti "
-            "(tablo bu arada oluştu ya da değişti); karar verilmedi, yeni önizleme "
-            "kaydedildi, bakıp yeniden karar verin"
-        )
+    if degisti:
+        raise onizleme_hatasi
     return kayit_getir(veritabani, kimlik)
 
 

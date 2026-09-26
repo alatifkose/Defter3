@@ -165,11 +165,15 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   (`onay.bekleyenler`: pencere, komut satırı, MCP `bekleyen_istekler`)
   yeniden kurma isteklerinin önizlemesi güncel şemayla yeniden üretilir ve
   değiştiyse saklanır; **onay anında** aynı bağlantıda bir kez daha
-  üretilir ve saklı metinden farklıysa karar verilmez, yeni metin saklanır ve
+  üretilir ve **kullanıcının gördüğü önizlemenin koduyla** eşleşmiyorsa karar
+  verilmez, yeni metin saklanır ve
   `OnizlemeDegisti` yükselir (pencere mesaj gösterip SQL kutusunu yeniler,
   komut satırı stderr'e yazıp `1` ile çıkar; istek `BEKLIYOR` kalır, günlüğe
-  karar düşmez). Böylece kullanıcının onayladığı metin her zaman çalışan
-  metindir (dış inceleme a9efca2 bulgu 1). Tanım hiç kurulamıyorsa onay o
+  karar düşmez). Kod talep kimliği, istek türü, tam istek ve SQL'in SHA-256
+  özetidir; onay çağrısında zorunludur. Başka pencere veya MCP okuyucusu
+  saklı önizlemeyi güncellese bile eski ekrandaki kod geçerli olmaz.
+  Böylece kullanıcının onayladığı metin çalışan metne bağlanır
+  (2026-09-26 düzeltmesi). Tanım hiç kurulamıyorsa onay o
   hatayı `UYGULANAMADI` olarak verir. Test, onayda çalışan cümleleri yakalayıp
   önizlemedeki her cümlenin birebir çalıştığını doğrular (sıradan tablo, tam
   sınır, tablonun talep ile onay arasında oluştuğu sıra ve pencere
@@ -180,8 +184,9 @@ Git geçmişinde durur (son hâli `e77a222`). Kalanlar:
   saklanır ve talep kimliği döner; onayda motor çağrılır, redde çağrılmaz.
   Ayrıntı "Yapı istekleri ve onay" bölümünde.
 
-* **Komut satırından onay** (`komutlar.py`, 2026-09-25): `defteruc
-  bekleyenler`, `defteruc onayla <kimlik>`, `defteruc reddet <kimlik>`.
+* **Komut satırından onay** (`komutlar.py`, 2026-09-26): `defteruc
+  bekleyenler`, `defteruc onayla <kimlik> --onizleme <kod>`,
+  `defteruc reddet <kimlik>`.
   Ayrıntı "Başlatma" bölümünde.
 
 * **MCP araçları** (`mcp_kapisi.py`, 2026-09-25): beş yapı isteği aracı,
@@ -241,8 +246,10 @@ metne girmez).
 
 **Karar** (`onayla`, `reddet`). Onay ile motor çağrısı tek transaction'dadır:
 motorun `islem_ac` bağlamı istek türüne göre normal ya da yabancı anahtar
-denetimsiz transaction açar; içinde önce saklı önizleme güncel şemayla
-üretilenle karşılaştırılır (farklıysa karar verilmez, yeni önizleme saklanır,
+denetimsiz transaction açar; içinde önce bekleyen satır için durumu
+değiştirmeyen bir UPDATE ile yazma kilidi alınır. Güncel şemayla üretilen
+önizlemenin kodu, çağıranın gösterdiği kayıttan aldığı `gorulen_onizleme`
+ile karşılaştırılır (farklıysa karar verilmez, yeni önizleme saklanır,
 `OnizlemeDegisti`; bkz. motor "Onayda gösterilen SQL"), sonra durum satırı
 `BEKLIYOR → UYGULANDI`
 olarak güncellenir (`WHERE durum = 'BEKLIYOR'` koşuluyla, tek satır
@@ -285,7 +292,9 @@ yeniden eskiye, `onay.son_kararlar`); sağda seçili isteğin **çalışacak SQL
 cümlesi** (salt okunur), "Onayla ve uygula", "Reddet", "Yenile" düğmeleri ve
 son işlemin mesajı. Seçim yokken karar düğmeleri kapalıdır. Her beş saniyede
 bir liste kendiliğinden yenilenir (Cowork'un yeni bıraktığı istek görünür),
-seçim korunur. Onay ve red aynı çekirdek işlevleri çağırır (`onay.onayla`,
+seçim korunur. Onay, pencerede gösterilen kaydın önizleme kodunu taşır;
+düğmeye basarken veritabanından yeni kod alıp kullanıcı görmüş saymaz.
+Onay ve red aynı çekirdek işlevleri çağırır (`onay.onayla`,
 `onay.reddet`), sonuç aynı biçimde günlüğe düşer (`onay_karari`);
 uygulanamayan onay sebebiyle, başka yerden karar verilmiş istek
 (`ZatenKararVerilmis`), pencere yenilenmeden basıldığında bu arada değişmiş
@@ -301,6 +310,33 @@ kutusunu, mesajı, veritabanını ve günlüğü doğrular; olay döngüsü
 çalıştırılmaz, zamanlayıcı testte kapalıdır (`yenileme_ms=0`) ve yenileme
 doğrudan çağrılır. `defteruc pencere` komutu `pencere.calistir`'ı
 çağırdığıyla sınanır.
+
+### Teslim kaydı — 2026-09-26: görülen önizlemeye bağlı onay
+
+Başlangıç: yerel ve uzak `yeniden-insa` dalı
+`639c821a6476193608a845ea6393210e92087021`, temiz çalışma ağacı.
+Çalışma dalı: `fix/onay-onizleme-bagi`.
+
+* **Sorun:** ikinci pencere veya MCP bekleyenleri okuyup saklı SQL'i
+  yenileyince ilk pencerenin eski onayı uygulanıyordu. Düzeltmeden önce
+  gerçek pencere/MCP çağrılı regresyon koşusu: **2 başarısız, 1 başarılı**.
+* **Çözüm:** çağıranın gösterdiği isteğe ve SQL'e bağlı önizleme kodu
+  zorunlu; aynı transaction'da yazma kilidi altında güncel kodla karşılaştırılır.
+  Uyumsuzlukta istek bekler, karar yazılmaz. Pencere güncel SQL'i gösterir;
+  CLI yeni görüntülemedeki kodla yeniden onay ister. Şema göçü gerekmez,
+  MCP araçlarına onay/red yetkisi eklenmedi.
+* **Doğrulama:** `python -m pytest tests/test_onay.py tests/test_pencere.py
+  tests/test_komutlar.py tests/test_mcp_kapisi.py -q -rs`: **89 başarılı**.
+  `.venv/Scripts/python.exe scripts/kontrol.py`: **4/4 başarılı**;
+  Ruff biçim/statik temiz, Pyright 0 hata, pytest **487 başarılı, 5 atlandı**.
+  Eski kodun tekrar kullanılması, başka talebin kodu, kodsuz onay,
+  güncel onay, satırların korunması, onay/red yarışları ve uygulama hataları
+  kapsanır. Qt pencere testleri ekransız çalıştırıldı.
+* **Sınır:** dört simgesel bağlantı testi Windows `WinError 1314` nedeniyle
+  çalışmadı; bir dosya yolu değiştirme yarışı testi Windows'ta koşullu atlandı.
+  Önizleme kodu yalnız gösterilen istek/SQL'i bağlar; veritabanının bütün
+  şemasının veya satırlarının değişmediğini garanti etmez. Mevcut motor
+  doğrulamaları ve geri alma davranışı geçerlidir.
 
 ## Satır okuma
 
@@ -428,7 +464,9 @@ eskimiştir, bekleme bunu çözmez, iş baştan denenir. Bu durumu doğuran
 transaction'ının ilk cümlesi sıfır satırlık bir `DELETE ... WHERE 0`'dır
 (`yapi.yazma_kilidi_al`), SQLite yazma kilidini o anda verir, sonraki
 okumalar ve `INSERT` aynı görüntüde kalır, ikinci yazar bekler; onayda ilk
-cümle zaten durum güncellemesidir. Python'un `autocommit=False` kipinde
+cümle bekleyen istek satırında durumu değiştirmeyen UPDATE'dir. Böylece
+önizleme denetimi ve uygulama aynı yazma kilidi altında yapılır.
+Python'un `autocommit=False` kipinde
 `isolation_level="IMMEDIATE"` etkisizdir (betikle doğrulandı), bu yüzden
 `BEGIN IMMEDIATE` yerine bu yol seçildi (`SQLAlchemyError` değildir; motor ve kayıt modülünün
 "uygulanamadı" çevirileri bunu yakalamaz, hata olduğu gibi çağırana gider,
@@ -653,13 +691,24 @@ uv run defteruc bekleyenler
 
 Bekleyen yapı isteklerini talep kimliği, tür, bırakılma zamanı (yerel saat)
 ve **çalışacak SQL cümlesiyle** listeler. Onaylanan şey bu cümledir, bir
-özet değil. Bekleyen yoksa tek satır söyler.
+özet değil. Her SQL'in altında o önizlemeye ait kodu içeren hazır onay
+komutu gösterilir. Bekleyen yoksa tek satır söyler.
 
 ```bash
-uv run defteruc onayla 3
+uv run defteruc onayla 3 --onizleme <bekleyenler-ciktisindaki-kod>
 ```
 
-Talep 3'ü onaylar ve motoru çalıştırır. Uygulandıysa tek satır mesaj ve `0`.
+`<bekleyenler-ciktisindaki-kod>` yerine SQL'in altında verilen 64 karakterlik
+kodu kullanın; en kolayı gösterilen hazır komutu kopyalamaktır.
+Talep 3'ü **görüntülenen önizleme hâlâ geçerliyse** onaylar ve motoru
+çalıştırır. Uygulandıysa tek satır mesaj ve `0`.
+Kod verilmezse kullanım hatası (`2`), eski veya yanlış kod verilirse hata
+(`1`) olur; istek `BEKLIYOR` kalır, karar kaydı yazılmaz. İkinci pencere
+veya MCP'nin bekleyenleri okuması eski kodu geçerli kılamaz. Önizleme
+değiştiğinde `bekleyenler` komutuyla yeni SQL'i inceleyip yeni komutu
+kullanın; eski komutu tekrar çalıştırmak onay vermez. `onayla` komutu
+kendiliğinden güncel kod almaz. Önizleme kodu bir parola ya da ajana onay
+yetkisi değildir; MCP'de onay/red aracı yoktur.
 Motor düşerse (tablo zaten var, satırlar yeni özelliğe uymuyor, yabancı
 anahtar ihlali...) yapı değişmez, talep `UYGULANAMADI` olur, sebep stderr'e
 yazılır ve çıkış kodu `1` olur; aynı talep yeniden onaylanamaz, Cowork yeni

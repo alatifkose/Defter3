@@ -41,6 +41,12 @@ def veritabani(
     v.kapat()
 
 
+def _gorup_onayla(veritabani: vt.Veritabani, kimlik: int) -> onay.YapiIstegiKaydi:
+    """Test kullanıcısı saklı önizlemeyi okur, sonra o metne karar verir."""
+    gorulen = onay.kayit_getir(veritabani, kimlik)
+    return onay.onayla(veritabani, kimlik, gorulen_onizleme=onay.onizleme_kodu(gorulen))
+
+
 def _tablolar(v: vt.Veritabani) -> set[str]:
     with v.islem() as oturum:
         satirlar = oturum.execute(
@@ -158,7 +164,7 @@ def test_olmayan_talep_kimligi(veritabani: vt.Veritabani) -> None:
     with pytest.raises(onay.IstekYok):
         onay.kayit_getir(veritabani, 7)
     with pytest.raises(onay.IstekYok):
-        onay.onayla(veritabani, 7)
+        onay.onayla(veritabani, 7, gorulen_onizleme="yok")
     with pytest.raises(onay.IstekYok):
         onay.reddet(veritabani, 7)
 
@@ -168,7 +174,7 @@ def test_olmayan_talep_kimligi(veritabani: vt.Veritabani) -> None:
 
 def test_onay_motoru_calistirir_ve_uygulandi_yazar(veritabani: vt.Veritabani) -> None:
     kimlik = onay.istek_birak(veritabani, KISILER)
-    kayit = onay.onayla(veritabani, kimlik)
+    kayit = _gorup_onayla(veritabani, kimlik)
     assert "kisiler" in _tablolar(veritabani)
     assert kayit.durum is onay.Durum.UYGULANDI
     assert kayit.karar is not None and kayit.sonuc is None
@@ -176,10 +182,10 @@ def test_onay_motoru_calistirir_ve_uygulandi_yazar(veritabani: vt.Veritabani) ->
 
 
 def test_onay_yeniden_kurma_isini_de_uygular(veritabani: vt.Veritabani) -> None:
-    onay.onayla(veritabani, onay.istek_birak(veritabani, KISILER))
+    _gorup_onayla(veritabani, onay.istek_birak(veritabani, KISILER))
     with veritabani.islem() as oturum:
         oturum.execute(text("INSERT INTO kisiler (ad_soyad) VALUES ('A')"))
-    kayit = onay.onayla(veritabani, onay.istek_birak(veritabani, KISILER_YENI))
+    kayit = _gorup_onayla(veritabani, onay.istek_birak(veritabani, KISILER_YENI))
     assert kayit.durum is onay.Durum.UYGULANDI
     with veritabani.islem() as oturum:
         oturum.execute(text("INSERT INTO kisiler (id) VALUES (5)"))
@@ -199,9 +205,9 @@ def test_red_motoru_calistirmaz(veritabani: vt.Veritabani) -> None:
 def test_motor_hatasi_uygulanamadi_olur_ve_yapi_degismez(
     veritabani: vt.Veritabani,
 ) -> None:
-    onay.onayla(veritabani, onay.istek_birak(veritabani, KISILER))
+    _gorup_onayla(veritabani, onay.istek_birak(veritabani, KISILER))
     kimlik = onay.istek_birak(veritabani, KISILER)
-    kayit = onay.onayla(veritabani, kimlik)
+    kayit = _gorup_onayla(veritabani, kimlik)
     assert kayit.durum is onay.Durum.UYGULANAMADI
     assert kayit.sonuc is not None and "already exists" in kayit.sonuc
     assert kayit.karar is not None
@@ -213,12 +219,12 @@ def test_motor_hatasi_uygulanamadi_olur_ve_yapi_degismez(
 
 
 def test_yabanci_anahtar_ihlali_uygulanamadi_olur(veritabani: vt.Veritabani) -> None:
-    onay.onayla(veritabani, onay.istek_birak(veritabani, KISILER))
+    _gorup_onayla(veritabani, onay.istek_birak(veritabani, KISILER))
     notlar = m.TabloOlusturmaIstegi(
         "notlar",
         (m.Sutun("id", ("INTEGER", "PRIMARY KEY")), m.Sutun("kisi", ("INTEGER",))),
     )
-    onay.onayla(veritabani, onay.istek_birak(veritabani, notlar))
+    _gorup_onayla(veritabani, onay.istek_birak(veritabani, notlar))
     with veritabani.islem() as oturum:
         oturum.execute(text("INSERT INTO notlar (kisi) VALUES (99)"))
     istek = m.SutunOzelligiDegistirmeIstegi(
@@ -228,7 +234,7 @@ def test_yabanci_anahtar_ihlali_uygulanamadi_olur(veritabani: vt.Veritabani) -> 
             m.Sutun("kisi", ("INTEGER", "REFERENCES kisiler(id)")),
         ),
     )
-    kayit = onay.onayla(veritabani, onay.istek_birak(veritabani, istek))
+    kayit = _gorup_onayla(veritabani, onay.istek_birak(veritabani, istek))
     assert kayit.durum is onay.Durum.UYGULANAMADI
     assert kayit.sonuc is not None and "yabancı anahtar ihlali" in kayit.sonuc
     with veritabani.islem() as oturum:
@@ -240,15 +246,15 @@ def test_yabanci_anahtar_ihlali_uygulanamadi_olur(veritabani: vt.Veritabani) -> 
 
 def test_karar_verilmis_istege_ikinci_karar_yok(veritabani: vt.Veritabani) -> None:
     kimlik = onay.istek_birak(veritabani, KISILER)
-    onay.onayla(veritabani, kimlik)
+    _gorup_onayla(veritabani, kimlik)
     with pytest.raises(onay.ZatenKararVerilmis):
-        onay.onayla(veritabani, kimlik)
+        _gorup_onayla(veritabani, kimlik)
     with pytest.raises(onay.ZatenKararVerilmis):
         onay.reddet(veritabani, kimlik)
     kimlik = onay.istek_birak(veritabani, m.IndeksSilmeIstegi("ix"))
     onay.reddet(veritabani, kimlik)
     with pytest.raises(onay.ZatenKararVerilmis):
-        onay.onayla(veritabani, kimlik)
+        _gorup_onayla(veritabani, kimlik)
 
 
 def test_iki_surec_ayni_istege_karar_verirse_ikincisi_bekler_ve_reddedilir(
@@ -263,7 +269,7 @@ def test_iki_surec_ayni_istege_karar_verirse_ikincisi_bekler_ve_reddedilir(
     def ikinci_onaylar() -> None:
         ilk_yazdi.wait()
         try:
-            onay.onayla(ikinci, kimlik)
+            _gorup_onayla(ikinci, kimlik)
         except Exception as hata:
             sonuc.append(hata)
         else:
@@ -300,10 +306,10 @@ def test_kilitli_veritabaninda_onay_bekler_sonra_mesgul_der_karar_yazmaz(
                 )
             )
             with pytest.raises(vt.VeritabaniMesgul, match="yeniden denenebilir"):
-                onay.onayla(ikinci, kimlik)
+                _gorup_onayla(ikinci, kimlik)
             with pytest.raises(vt.VeritabaniMesgul):
                 onay.reddet(ikinci, kimlik)
-        kayit = onay.onayla(ikinci, kimlik)
+        kayit = _gorup_onayla(ikinci, kimlik)
     finally:
         ikinci.kapat()
     assert kayit.durum is onay.Durum.UYGULANDI
@@ -363,7 +369,7 @@ def test_ayni_sql_farkli_izin_aciklamayla_ayirt_edilir(
 
 
 def test_izinsiz_donusum_yine_geri_alinir(veritabani: vt.Veritabani) -> None:
-    onay.onayla(
+    _gorup_onayla(
         veritabani,
         onay.istek_birak(
             veritabani,
@@ -378,7 +384,7 @@ def test_izinsiz_donusum_yine_geri_alinir(veritabani: vt.Veritabani) -> None:
     )
     with veritabani.islem() as oturum:
         oturum.execute(text("INSERT INTO money VALUES (1, '9007199254740993')"))
-    kayit = onay.onayla(veritabani, onay.istek_birak(veritabani, DONUSUMSUZ))
+    kayit = _gorup_onayla(veritabani, onay.istek_birak(veritabani, DONUSUMSUZ))
     assert kayit.durum is onay.Durum.UYGULANAMADI
     assert kayit.sonuc is not None and "deger_donusumu_izinli" in kayit.sonuc
 
@@ -387,7 +393,7 @@ def test_izinsiz_donusum_yine_geri_alinir(veritabani: vt.Veritabani) -> None:
 
 
 def _parent_child(veritabani: vt.Veritabani) -> None:
-    onay.onayla(
+    _gorup_onayla(
         veritabani,
         onay.istek_birak(
             veritabani,
@@ -396,7 +402,7 @@ def _parent_child(veritabani: vt.Veritabani) -> None:
             ),
         ),
     )
-    onay.onayla(
+    _gorup_onayla(
         veritabani,
         onay.istek_birak(
             veritabani,
@@ -416,7 +422,7 @@ def test_yabanci_anahtar_sema_hatasi_uygulanamadi_olur(
 ) -> None:
     _parent_child(veritabani)
     istek = m.SutunOzelligiDegistirmeIstegi("parent", (m.Sutun("id", ("INTEGER",)),))
-    kayit = onay.onayla(veritabani, onay.istek_birak(veritabani, istek))
+    kayit = _gorup_onayla(veritabani, onay.istek_birak(veritabani, istek))
     assert kayit.durum is onay.Durum.UYGULANAMADI
     assert kayit.sonuc is not None and "foreign key mismatch" in kayit.sonuc
     assert onay.bekleyenler(veritabani) == ()
@@ -447,24 +453,25 @@ def _calisanlari_yakala(
 
     event.listen(veritabani.motor, "before_cursor_execute", kaydet)
     try:
-        kayit = onay.onayla(veritabani, kimlik)
+        kayit = _gorup_onayla(veritabani, kimlik)
     finally:
         event.remove(veritabani.motor, "before_cursor_execute", kaydet)
     return kayit, calisanlar
 
 
 def _onizleme_calisanla_ayni(veritabani: vt.Veritabani, kimlik: int) -> None:
-    kayit = onay.kayit_getir(veritabani, kimlik)
+    gorulen_sql = onay.kayit_getir(veritabani, kimlik).sql
     kayit, calisanlar = _calisanlari_yakala(veritabani, kimlik)
     assert kayit.durum is onay.Durum.UYGULANDI, kayit.sonuc
-    for cumle in kayit.sql.split(";\n"):
+    assert kayit.sql == gorulen_sql
+    for cumle in gorulen_sql.split(";\n"):
         assert cumle in calisanlar, cumle[:120]
 
 
 def test_yeniden_kurma_onizlemesi_ortuk_kimligi_ve_calisan_cumleleri_gosterir(
     veritabani: vt.Veritabani,
 ) -> None:
-    onay.onayla(veritabani, onay.istek_birak(veritabani, KISILER))
+    _gorup_onayla(veritabani, onay.istek_birak(veritabani, KISILER))
     kimlik = onay.istek_birak(veritabani, KISILER_YENI)
     sql = onay.kayit_getir(veritabani, kimlik).sql
     assert 'SELECT rowid, "id", "ad_soyad" FROM "kisiler"' in sql
@@ -481,7 +488,7 @@ def test_tam_sinirda_onizleme_iki_asamali_kopyayi_gosterir(
         ham = oturum.connection().connection.dbapi_connection
         assert isinstance(ham, sqlite3.Connection)
         n = ham.getlimit(sqlite3.SQLITE_LIMIT_COLUMN)
-    onay.onayla(
+    _gorup_onayla(
         veritabani,
         onay.istek_birak(
             veritabani,
@@ -520,7 +527,7 @@ def test_onizleme_gecici_tablo_birakmaz_ve_olmayan_tabloda_tek_bicimdir(
 ) -> None:
     kimlik = onay.istek_birak(veritabani, KISILER_YENI)
     assert onay.kayit_getir(veritabani, kimlik).sql == m.istek_sql(KISILER_YENI)
-    onay.onayla(veritabani, onay.istek_birak(veritabani, KISILER))
+    _gorup_onayla(veritabani, onay.istek_birak(veritabani, KISILER))
     bozuk = m.SutunOzelligiDegistirmeIstegi(
         "kisiler",
         (
@@ -532,7 +539,7 @@ def test_onizleme_gecici_tablo_birakmaz_ve_olmayan_tabloda_tek_bicimdir(
     assert onay.kayit_getir(veritabani, kimlik).sql == m.istek_sql(bozuk)
     assert "kisiler" in _tablolar(veritabani)
     assert not any(ad.endswith(m.GECICI_AD_EKI) for ad in _tablolar(veritabani))
-    kayit = onay.onayla(veritabani, kimlik)
+    kayit = _gorup_onayla(veritabani, kimlik)
     assert kayit.durum is onay.Durum.UYGULANAMADI
 
 
@@ -551,7 +558,7 @@ ORTUK_KIMLIKLI_KOPYA = (
 def _tablo_sonradan_olusur(veritabani: vt.Veritabani) -> int:
     kimlik = onay.istek_birak(veritabani, KUYRUK_YENI)
     assert onay.kayit_getir(veritabani, kimlik).sql == m.istek_sql(KUYRUK_YENI)
-    onay.onayla(veritabani, onay.istek_birak(veritabani, KUYRUK))
+    _gorup_onayla(veritabani, onay.istek_birak(veritabani, KUYRUK))
     with veritabani.islem() as oturum:
         oturum.execute(text("INSERT INTO kuyruk (rowid, deger) VALUES (7, 3)"))
     return kimlik
@@ -576,7 +583,7 @@ def test_bayat_onizlemeyle_onay_uygulanmaz_yeni_onizleme_kaydedilir(
 ) -> None:
     kimlik = _tablo_sonradan_olusur(veritabani)
     with pytest.raises(onay.OnizlemeDegisti, match="değişti"):
-        onay.onayla(veritabani, kimlik)
+        _gorup_onayla(veritabani, kimlik)
     kayit = onay.kayit_getir(veritabani, kimlik)
     assert kayit.durum is onay.Durum.BEKLIYOR and kayit.karar is None
     assert ORTUK_KIMLIKLI_KOPYA in kayit.sql
@@ -589,3 +596,66 @@ def test_bayat_onizlemeyle_onay_uygulanmaz_yeni_onizleme_kaydedilir(
         assert oturum.execute(text("SELECT rowid, deger FROM kuyruk")).all() == [(7, 3)]
         with pytest.raises(IntegrityError, match="NOT NULL"):
             oturum.execute(text("INSERT INTO kuyruk (deger) VALUES (NULL)"))
+
+
+@pytest.mark.parametrize("baska_okuyucu", [False, True])
+def test_gorulen_onizleme_baska_okuyucudan_bagimsizdir(
+    veritabani: vt.Veritabani, baska_okuyucu: bool
+) -> None:
+    kimlik = _tablo_sonradan_olusur(veritabani)
+    gorulen = onay.kayit_getir(veritabani, kimlik)
+    eski_kod = onay.onizleme_kodu(gorulen)
+    if baska_okuyucu:
+        onay.bekleyenler(veritabani)
+    # İlk ret saklı önizlemeyi güncellese de aynı eski onay tekrar kullanılamaz.
+    for _ in range(2):
+        with pytest.raises(onay.OnizlemeDegisti):
+            onay.onayla(veritabani, kimlik, gorulen_onizleme=eski_kod)
+        kayit = onay.kayit_getir(veritabani, kimlik)
+        assert kayit.durum is onay.Durum.BEKLIYOR
+        assert kayit.karar is None and kayit.sonuc is None
+    (guncel,) = onay.bekleyenler(veritabani)
+    assert onay.onizleme_kodu(guncel) != eski_kod
+    kayit = onay.onayla(veritabani, kimlik, gorulen_onizleme=onay.onizleme_kodu(guncel))
+    assert kayit.durum is onay.Durum.UYGULANDI
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("SELECT rowid, deger FROM kuyruk")).all() == [(7, 3)]
+
+
+def test_ayni_sql_icin_baska_talebin_kodu_onay_sayilmaz(
+    veritabani: vt.Veritabani,
+) -> None:
+    ilk = onay.istek_birak(veritabani, KISILER)
+    ikinci = onay.istek_birak(veritabani, KISILER)
+    gorulen = onay.kayit_getir(veritabani, ilk)
+    with pytest.raises(onay.OnizlemeDegisti):
+        onay.onayla(veritabani, ikinci, gorulen_onizleme=onay.onizleme_kodu(gorulen))
+    assert onay.kayit_getir(veritabani, ikinci).durum is onay.Durum.BEKLIYOR
+    assert "kisiler" not in _tablolar(veritabani)
+
+
+def test_cekirdek_gorulen_onizlemeyi_zorunlu_tutar(veritabani: vt.Veritabani) -> None:
+    kimlik = onay.istek_birak(veritabani, KISILER)
+    with pytest.raises(TypeError, match="gorulen_onizleme"):
+        onay.onayla(veritabani, kimlik)  # pyright: ignore[reportCallIssue]
+    assert onay.kayit_getir(veritabani, kimlik).durum is onay.Durum.BEKLIYOR
+    assert "kisiler" not in _tablolar(veritabani)
+
+
+def test_eski_onay_fk_denetimi_hatasiyla_karara_donusmez(
+    veritabani: vt.Veritabani,
+) -> None:
+    kimlik = _tablo_sonradan_olusur(veritabani)
+    eski_kod = onay.onizleme_kodu(onay.kayit_getir(veritabani, kimlik))
+    # SQLite bu tanımı kabul eder; foreign_key_check sırasında mismatch verir.
+    with veritabani.islem() as oturum:
+        oturum.execute(text("CREATE TABLE bagli (x INTEGER REFERENCES kuyruk(deger))"))
+    onay.bekleyenler(veritabani)
+    with pytest.raises(onay.OnizlemeDegisti):
+        onay.onayla(veritabani, kimlik, gorulen_onizleme=eski_kod)
+    kayit = onay.kayit_getir(veritabani, kimlik)
+    assert kayit.durum is onay.Durum.BEKLIYOR
+    assert kayit.karar is None and kayit.sonuc is None
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("PRAGMA table_info(kuyruk)")).one()[3] == 0
+        assert oturum.execute(text("SELECT rowid, deger FROM kuyruk")).all() == [(7, 3)]

@@ -2,6 +2,7 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
+import anyio
 import pytest
 from sqlalchemy import text
 
@@ -10,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from defteruc import ayarlar as ay  # noqa: E402
-from defteruc import baslangic, gunluk, komutlar, pencere  # noqa: E402
+from defteruc import baslangic, gunluk, komutlar, mcp_kapisi, pencere  # noqa: E402
 from defteruc.cekirdek import motor as m  # noqa: E402
 from defteruc.cekirdek import onay  # noqa: E402
 from defteruc.cekirdek import veritabani as vt  # noqa: E402
@@ -175,7 +176,9 @@ def test_reddet_uygulamaz(
 def test_uygulanamayan_onay_sebebiyle_gosterilir(
     pencere_: pencere.OnayPenceresi, veritabani: vt.Veritabani
 ) -> None:
-    onay.onayla(veritabani, onay.istek_birak(veritabani, KISILER))
+    onay.istek_birak(veritabani, KISILER)
+    pencere_.yenile()
+    pencere_.onayla_dugmesi.click()
     onay.istek_birak(veritabani, KISILER)
     pencere_.yenile()
     pencere_.onayla_dugmesi.click()
@@ -272,7 +275,9 @@ def test_sema_hatasiyla_dusen_onay_pencerede_sonuc_olarak_gorunur(
             ),
         ),
     ):
-        onay.onayla(veritabani, onay.istek_birak(veritabani, istek))
+        onay.istek_birak(veritabani, istek)
+        pencere_.yenile()
+        pencere_.onayla_dugmesi.click()
     onay.istek_birak(
         veritabani,
         m.SutunOzelligiDegistirmeIstegi("parent", (m.Sutun("id", ("INTEGER",)),)),
@@ -290,8 +295,12 @@ def test_sema_hatasiyla_dusen_onay_pencerede_sonuc_olarak_gorunur(
 # --- inceleme a9efca2, bulgu 1: bayat önizlemeyle onay uygulanmaz ------------------
 
 
+@pytest.mark.parametrize("okuyucu", ["yok", "ikinci_pencere", "mcp"])
 def test_bayat_onizlemeyle_onay_uygulanmaz_pencere_yeni_metni_gosterir(
-    pencere_: pencere.OnayPenceresi, veritabani: vt.Veritabani, ayar: ay.Ayarlar
+    pencere_: pencere.OnayPenceresi,
+    veritabani: vt.Veritabani,
+    ayar: ay.Ayarlar,
+    okuyucu: str,
 ) -> None:
     kuyruk = m.TabloOlusturmaIstegi("kuyruk", (m.Sutun("deger", ("INTEGER",)),))
     yeni = m.SutunOzelligiDegistirmeIstegi(
@@ -300,15 +309,37 @@ def test_bayat_onizlemeyle_onay_uygulanmaz_pencere_yeni_metni_gosterir(
     kimlik = onay.istek_birak(veritabani, yeni)
     pencere_.yenile()
     assert "rowid" not in pencere_.sql.toPlainText()
-    onay.onayla(veritabani, onay.istek_birak(veritabani, kuyruk))
+    olusturma = onay.istek_birak(veritabani, kuyruk)
+    gorulen = onay.kayit_getir(veritabani, olusturma)
+    onay.onayla(veritabani, olusturma, gorulen_onizleme=onay.onizleme_kodu(gorulen))
     with veritabani.islem() as oturum:
         oturum.execute(text("INSERT INTO kuyruk (rowid, deger) VALUES (7, 3)"))
+    if okuyucu == "ikinci_pencere":
+        ikinci = vt.Veritabani(veritabani.yol)
+        try:
+            diger = pencere.OnayPenceresi(ikinci, yenileme_ms=0)
+            assert "rowid" in diger.sql.toPlainText()
+            diger.close()
+        finally:
+            ikinci.kapat()
+    elif okuyucu == "mcp":
+        sunucu = mcp_kapisi.sunucu_kur(ayar)
+        argumanlar: dict[str, object] = {}
+        anyio.run(sunucu.call_tool, mcp_kapisi.ARAC_BEKLEYEN_ISTEKLER, argumanlar)
+    if okuyucu != "yok":
+        assert "rowid" in onay.kayit_getir(veritabani, kimlik).sql
+    assert "rowid" not in pencere_.sql.toPlainText()
     # pencere yenilenmeden basılıyor: ekrandaki metin bayat
     pencere_.onayla_dugmesi.click()
     assert "değişti" in pencere_.mesaj.text()
     assert 'SELECT rowid, "deger" FROM "kuyruk"' in pencere_.sql.toPlainText()
     assert pencere_.secili_kimlik() == kimlik
     assert onay.kayit_getir(veritabani, kimlik).durum is onay.Durum.BEKLIYOR
+    assert onay.kayit_getir(veritabani, kimlik).karar is None
+    assert f"talep={kimlik} " not in _log(ayar)
+    with veritabani.islem() as oturum:
+        assert oturum.execute(text("PRAGMA table_info(kuyruk)")).one()[3] == 0
+        assert oturum.execute(text("SELECT rowid, deger FROM kuyruk")).all() == [(7, 3)]
     pencere_.onayla_dugmesi.click()
     assert pencere_.mesaj.text() == (
         f"Talep {kimlik} onaylandı ve uygulandı (sutun_ozelligi_degistirme)."

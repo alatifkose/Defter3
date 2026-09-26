@@ -124,7 +124,11 @@ class OnayPenceresi(QMainWindow):
         if kimlik is None:
             return
         try:
-            kayit = onay.onayla(self._veritabani, kimlik)
+            kayit = onay.onayla(
+                self._veritabani,
+                kimlik,
+                gorulen_onizleme=onay.onizleme_kodu(self._kayitlar[kimlik]),
+            )
         except (onay.OnayHatasi, VeritabaniMesgul) as hata:
             self._bildir(str(hata))
         else:
