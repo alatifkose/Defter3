@@ -55,24 +55,27 @@ def satirlari_oku(
             baglanti = oturum.connection()
             kimlik = yapi.satir_kimligi(baglanti, tablo)
             secim = yapi.kimlik_secimi(kimlik)
-            kuyruk = f'FROM "{tablo}"{nerede} ORDER BY {secim} LIMIT ? OFFSET ?'
-            baglar = (*degerler, sinir, baslangic)
             with _yalniz_okuma(baglanti):
-                toplam = int(
-                    baglanti.exec_driver_sql(
-                        f'SELECT count(*) FROM "{tablo}"{nerede}', degerler
-                    ).scalar_one()
+                # Toplam ve sayfa aynı sorgu akışından alınır. Ayrı count(*)
+                # değişken koşulu yeniden çalıştırıp farklı bir küme seçerdi.
+                # Bütün sonuçlar sayılır; bellekte yalnız istenen sayfa tutulur.
+                alanlar = secim if kimlik.ortuk else "*"
+                sonuc = baglanti.exec_driver_sql(
+                    f'SELECT {alanlar} FROM "{tablo}"{nerede} ORDER BY {secim}',
+                    degerler,
                 )
+                sutunlar = tuple(str(k) for k in sonuc.keys())
+                sayfa: list[tuple[Deger, ...]] = []
+                toplam = 0
+                for satir in sonuc:
+                    if baslangic <= toplam < baslangic + sinir:
+                        sayfa.append(tuple(satir))
+                    toplam += 1
                 if kimlik.ortuk:
-                    # Koşul yalnız burada, bir kez değerlendirilir; satırlar bu
-                    # sabit kimlik listesiyle çekilir (değişken ifadeler ikinci
-                    # kez çalışmaz, sütun sınırındaki tablo da okunabilir).
-                    anahtarlar = tuple(
-                        tuple(s)
-                        for s in baglanti.exec_driver_sql(
-                            f"SELECT {secim} {kuyruk}", baglar
-                        ).all()
-                    )
+                    # Sütun sınırındaki tabloya rowid ekleyemeyiz. Sayfadaki
+                    # sabit kimliklerle veriyi aynı transaction'da al; filtreyi
+                    # yeniden değerlendirme.
+                    anahtarlar = tuple(sayfa)
                     yerler = ", ".join("?" for _ in anahtarlar) or "NULL"
                     sonuc = baglanti.exec_driver_sql(
                         f'SELECT * FROM "{tablo}" WHERE {secim} IN ({yerler}) '
@@ -84,9 +87,7 @@ def satirlari_oku(
                     if len(anahtarlar) != len(satirlar):  # pragma: no cover
                         raise OkumaHatasi(f"{tablo}: kimlik ve satır sayısı uyuşmadı")
                 else:
-                    sonuc = baglanti.exec_driver_sql(f"SELECT * {kuyruk}", baglar)
-                    sutunlar = tuple(str(k) for k in sonuc.keys())
-                    satirlar = tuple(tuple(s) for s in sonuc.all())
+                    satirlar = tuple(sayfa)
                     konumlar = tuple(sutunlar.index(a) for a in kimlik.sutunlar)
                     anahtarlar = tuple(tuple(s[k] for k in konumlar) for s in satirlar)
     except yapi.KimlikYok as hata:

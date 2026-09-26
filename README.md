@@ -365,21 +365,32 @@ parametre olarak verilir, metne gömülmez. Sıra birincil anahtara, yoksa
 satırlar, **koşula uyan toplam** (`eslesen_toplam`), dönen sayı (`donen`),
 başlangıç ve devamı olup olmadığı (`devami_var`); devamı `baslangic + donen`
 ile alınır. Sistem tablosu adıyla çağrı daha bağlantı açılmadan reddedilir.
-Sorgu `SELECT *`'dır; açık anahtar sütunları sonuçtaki konumlarından
-alınır. Örtük rowid kimliği aynı transaction'da, aynı koşul, sıra, sınır ve
-başlangıçla ayrı bir sorguyla okunur; rowid sırası toplam sıra olduğundan
-eşleşme kaymaz ve SQLite sütun sınırına tam ulaşmış anahtarsız tablo da
-okunabilir (dış inceleme 7dba285 bulgu 4 ve 43db970 bulgu 2; sınır testte
-bağlantıdan okunur). Kimliğin örtük mü açık mı olduğu sütun adından değil,
+**Tek yanıt, tek eşleşme kümesi** (2026-09-26). Koşulu taşıyan tek bir
+sıralı sorgu çalışır; toplam, bu sorgunun bütün sonuçları sayılarak bulunur.
+`baslangic` ve `sinir` aralığındaki sonuçlar sayfaya alınır; uygulama
+belleğinde yalnız bu sayfa tutulur. Ayrı `count(*)` sorgusu yoktur.
+Açık anahtarlı ve WITHOUT ROWID tablolarda sorgu `SELECT *`'dır;
+anahtarlar saklanan sayfanın sütun konumlarından alınır. Örtük rowid
+tablolarında ilk sorgu yalnız kimlikleri okur; sayfadaki sabit kimliklerin
+verileri aynı transaction'da `rowid IN (...)` ile alınır, özgün filtre
+yeniden çalıştırılmaz. SQLite sütun sınırına tam ulaşmış anahtarsız tablo
+da okunabilir (dış inceleme 7dba285 bulgu 4 ve 43db970 bulgu 2; sınır
+testte bağlantıdan okunur). Kimliğin örtük mü açık mı olduğu sütun adından değil,
 `yapi.Kimlik.ortuk` bayrağından bilinir: `rowid` adlı gerçek bir sütunla
 başlayan bileşik anahtar bütün bileşenleriyle döner ve filtre parametresi
 olarak geri verilebilir (43db970 bulgu 1).
-Koşul yalnız kimlik sorgusunda, bir kez değerlendirilir; veri satırları
-sayfadaki sabit kimlik listesiyle (`rowid IN (...)`) çekilir. `random()` gibi
-her değerlendirmede değişen bir ifade iki farklı küme üretemez, satır ile
-yanındaki kimlik aynı kayıttır (dış inceleme 84ced62 bulgu 1). Ayrı çalışan
-sayım sorgusu böyle bir koşulda sayfadan farklı bir toplam verebilir; bu,
-koşulun doğasındandır ve `eslesen_toplam` için bilinen sınırdır.
+`random()` gibi değişken filtreler de desteklenir: toplam, sayfa,
+kimlikler ve devam bilgisi aynı eşleşme kümesine dayanır. Bütün sonuçlar
+ilk sayfaya sığıyorsa `eslesen_toplam = donen`, `devami_var = False` olur.
+Eşleşme yoksa veya başlangıç toplamı aşıyorsa sayfa boştur; toplam yine
+o çağrıdaki gerçek eşleşme sayısıdır.
+
+**Maliyet ve kapsam:** kesin toplam için eşleşen sonuçların tamamı tüketilir.
+Açık anahtarda sayfa dışındaki satır değerleri de SQLite'tan Python'a
+aktarılır, fakat saklanmaz; çok büyük/geniş sonuçlarda önceki ayrı sayım
+yolundan daha maliyetli olabilir. SQLite'ın sıralama belleği ayrıca kendi
+yönetimindedir. Kalıcı eşleşme listesi veya oturum yoktur; ayrı çağrılardaki
+rastgele filtreler farklı kümeler seçebilir.
 
 **Satır kimliği sözleşmesi** (`yapi.satir_kimligi`; ekleme, okuma ve motorun
 yeniden kurması aynı yeri kullanır; dış inceleme 7dba285 bulgu 2). Tanımlı
@@ -423,6 +434,32 @@ sistem tablosu, `sqlite_master`, `sqlite_schema`, `load_extension`
 reddedilir; `upper()` ve sıradan alt sorgu geçer; okuma sonrası aynı
 bağlantı yeniden yazabilir ve `PRAGMA` çalışır. İkili değer ve sonsuz sayı
 "Değer taşıma"da anlatılan etiketli nesnelerle taşınır.
+
+### Teslim kaydı — 2026-09-26: satır okuma toplam/sayfa tutarlılığı
+
+Başlangıç: temiz `yeniden-insa`, yerel/uzak commit
+`b6d94a0bddfad4b0f6e825f12f30ea3e439b8ba3`.
+Çalışma dalı: `fix/okuma-toplam-tutarliligi`; birleştirme bağımsız incelemeye bırakıldı.
+
+* **Sorun ve kanıt:** ayrı sayım ve seçim sorguları değişken filtreyi yeniden
+  değerlendiriyordu. Satır başına ikinci çağrıda farklı cevap veren SQLite
+  test işleviyle hata rastlantısız üretildi: toplam 33, dönen 67.
+  Örtük rowid, açık anahtar ve WITHOUT ROWID için 18 regresyon senaryosu
+  düzeltmeden önce başarısızdı; tam sayfa, ara/son sayfa, sınırdaki ve
+  sonuç ötesindeki başlangıç, boş eşleşme kapsanır.
+* **Çözüm:** toplam ve sayfa tek sıralı sorgu akışından hesaplanır;
+  örtük kimlikte sayfanın verisi aynı transaction'da sabit kimliklerle alınır.
+  Filtre kapsamı ve salt okuma kancası korunur, kalıcı snapshot eklenmez.
+* **Doğrulama:** `python -m pytest tests/test_okuma.py tests/test_mcp_kapisi.py
+  tests/test_yapi_ve_kayit.py -q`: **103 başarılı**.
+  `.venv/Scripts/python.exe scripts/kontrol.py`: **4/4 başarılı**;
+  Ruff biçim/statik temiz, Pyright 0 hata; **506 test başarılı, 5 atlandı**.
+  Gerçek `random() > 0`, geniş/bileşik anahtar, tam sütun sınırı,
+  parametreli filtre ve sistem tablosu erişim sınırları da doğrulandı.
+* **Sınırlar:** dört test Windows simgesel bağlantı yetkisi (`WinError 1314`),
+  biri Windows'a uygulanmayan dosya yarışı nedeniyle atlandı. Büyük/geniş
+  açık anahtarlı sonuçlarda tüm değerleri okumanın ek maliyeti yukarıda
+  açıklanmıştır. Ayrı çağrıların rastgele kümeleri aynı olmak zorunda değildir.
 
 ## Veritabanı
 

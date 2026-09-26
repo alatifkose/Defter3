@@ -1,8 +1,9 @@
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from defteruc import ayarlar as ay
 from defteruc.cekirdek import kayit, motor, okuma, onay
@@ -392,3 +393,97 @@ def test_degisken_kosulda_satir_ve_kimlik_ayni_kaydi_gosterir(
     assert [s[0] for s in sayfa.satirlar] == [f"row-{k[0]}" for k in sayfa.anahtarlar]
     bos = okuma.satirlari_oku(veritabani, "records", "rowid > 1000")
     assert bos.satirlar == () and bos.anahtarlar == ()
+
+
+@pytest.mark.parametrize("kimlik_turu", ["ortuk", "acik", "without_rowid"])
+@pytest.mark.parametrize(
+    ("sinir", "baslangic", "eslesme_var"),
+    [
+        (1000, 0, True),
+        (7, 3, True),
+        (10, 30, True),
+        (10, 33, True),
+        (10, 100, True),
+        (10, 0, False),
+    ],
+)
+def test_degisken_kosulda_toplam_sayfa_ve_kimlik_tek_kumeden_gelir(
+    veritabani: vt.Veritabani,
+    kimlik_turu: str,
+    sinir: int,
+    baslangic: int,
+    eslesme_var: bool,
+) -> None:
+    _uygula(
+        veritabani,
+        motor.TabloOlusturmaIstegi(
+            "degisken",
+            (
+                motor.Sutun(
+                    "id",
+                    ("INTEGER",)
+                    if kimlik_turu == "ortuk"
+                    else ("INTEGER", "PRIMARY KEY"),
+                ),
+                motor.Sutun("etiket", ("TEXT",)),
+            ),
+            secenekler=("WITHOUT ROWID",) if kimlik_turu == "without_rowid" else (),
+        ),
+    )
+    kayit.satirlar_ekle(
+        veritabani,
+        "degisken",
+        [{"id": i, "etiket": f"satir-{i}"} for i in range(1, 101)],
+    )
+    cagrilar: dict[int, int] = {}
+
+    def degisen_secim(kimlik: int) -> int:
+        cagrilar[kimlik] = cagrilar.get(kimlik, 0) + 1
+        # Aynı satırın ikinci değerlendirmesinde farklı küme: şansa bağlı değil.
+        if cagrilar[kimlik] == 1:
+            return int(eslesme_var and kimlik % 3 == 0)
+        return int(kimlik % 3 != 0)
+
+    def islevi_kur(ham: object, *_: object) -> None:
+        assert isinstance(ham, sqlite3.Connection)
+        ham.create_function("degisen_secim", 1, degisen_secim)
+
+    event.listen(veritabani.motor, "checkout", islevi_kur)
+    try:
+        sonuc = okuma.satirlari_oku(
+            veritabani,
+            "degisken",
+            "degisen_secim(id) = ?",
+            (1,),
+            sinir=sinir,
+            baslangic=baslangic,
+        )
+    finally:
+        event.remove(veritabani.motor, "checkout", islevi_kur)
+        veritabani.motor.dispose()
+
+    eslesenler = list(range(3, 101, 3)) if eslesme_var else []
+    sayfa = eslesenler[baslangic : baslangic + sinir]
+    assert (sonuc.eslesen_toplam, sonuc.donen, sonuc.devami_var) == (
+        len(eslesenler),
+        len(sayfa),
+        baslangic + len(sayfa) < len(eslesenler),
+    )
+    assert sonuc.baslangic == baslangic
+    assert sonuc.sutunlar == ("id", "etiket")
+    assert sonuc.satirlar == tuple((i, f"satir-{i}") for i in sayfa)
+    assert sonuc.anahtar_sutunlari == (
+        ("rowid",) if kimlik_turu == "ortuk" else ("id",)
+    )
+    assert sonuc.anahtarlar == tuple((i,) for i in sayfa)
+    assert cagrilar == dict.fromkeys(range(1, 101), 1)
+
+
+def test_random_filtresinde_tum_sonuclar_sigiyorsa_devami_yok(
+    dolu: vt.Veritabani,
+) -> None:
+    sonuc = okuma.satirlari_oku(dolu, "kisiler", "random() > 0", sinir=1000)
+    # Rastgele kümenin boyutunu varsaymadan yanıtın kendi tutarlılığını denetle.
+    assert sonuc.eslesen_toplam == sonuc.donen == len(sonuc.satirlar)
+    assert not sonuc.devami_var
+    assert sonuc.anahtarlar == tuple((s[0],) for s in sonuc.satirlar)
